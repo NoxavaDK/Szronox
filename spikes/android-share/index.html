@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#213547"><link rel="manifest" href="manifest.webmanifest">
+<title>Diagnostyka udostępniania — SzroNox</title>
+<style>body{max-width:42rem;margin:2rem auto;padding:0 1rem;font:16px/1.5 system-ui;background:#f4f1e8;color:#213547}fieldset{margin:1rem 0;padding:1rem}label{display:block;margin:.5rem 0}input,textarea,button{font:inherit;width:100%;box-sizing:border-box;padding:.6rem}button{margin-top:.6rem}pre{white-space:pre-wrap;background:#fff;padding:1rem}.warn{color:#8a2b16}</style></head>
+<body><h1>Diagnostyka udostępniania</h1><p class="warn">To narzędzie diagnostyczne. Nie jest interfejsem produktu.</p>
+<div id="status">Oczekiwanie na dane.</div>
+<fieldset><legend>Ten sam formularz przechwycenia</legend><label>Tytuł<input id="title"></label><label>Tekst<textarea id="text"></textarea></label><label>Adres URL<input id="url"></label><label>Obraz<input id="images" type="file" accept="image/jpeg,image/png,image/webp" multiple></label><button id="simulate">Zapisz diagnostycznie</button></fieldset>
+<button id="login">Symuluj ustalenie konta diagnostycznego</button><pre id="output"></pre><script type="module" src="app.js"></script></body></html>
