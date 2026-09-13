@@ -1,0 +1,5 @@
+# Raw live provider output stays local. It can contain model text, live source
+# URLs and provider error strings, none of which belong in the repository.
+# Only redacted, provenance-labelled evidence may be committed, and only outside
+# this directory.
+artifacts/private/

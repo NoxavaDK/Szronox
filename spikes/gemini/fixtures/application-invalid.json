@@ -1,0 +1,22 @@
+{
+  "_synthetic": "Authored locally for T03. Deliberately violates every application guard at once.",
+  "expectValid": false,
+  "inputSnapshot": {
+    "hooks": [
+      { "id": "h1", "text": "Existing user hook", "source": "user", "position": 0 }
+    ],
+    "memeCandidateIds": ["m1"]
+  },
+  "result": {
+    "hooks": [
+      { "id": "h1", "text": "REWRITTEN without permission", "source": "ai", "position": 3 },
+      { "id": "h9", "text": "New hook wrongly attributed to the user", "source": "user", "position": 1 }
+    ],
+    "hookAdditions": ["a", "b", "c", "d", "e", "f"],
+    "memeSuggestion": { "memeId": "m404-invented", "rationale": "Invented library id." },
+    "claims": [
+      { "id": "c1", "location": { "field": "hook", "hookId": "h-unknown" }, "text": "Claim", "status": "confirmed", "sourceIds": ["s-missing"] }
+    ],
+    "sources": []
+  }
+}

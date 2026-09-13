@@ -1,0 +1,6 @@
+{
+  "_synthetic": "Authored locally for T03. NOT a captured provider response.",
+  "_purpose": "A response that must never read as success: blocked candidate with no usable content.",
+  "candidates": [{ "content": { "parts": [] }, "finishReason": "SAFETY" }],
+  "promptFeedback": { "blockReason": "SAFETY" }
+}

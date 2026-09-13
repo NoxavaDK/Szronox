@@ -1,0 +1,24 @@
+{
+  "_synthetic": "Authored locally for T03. NOT a captured provider response. Reserved .invalid domains only.",
+  "_purpose": "Two candidates where only the second carries grounding. Concatenating text and attaching candidate[0] citations would misattribute evidence.",
+  "candidates": [
+    {
+      "content": { "parts": [{ "text": "First candidate text with no grounding at all." }] },
+      "finishReason": "STOP"
+    },
+    {
+      "content": { "parts": [{ "text": "Second candidate text that is grounded." }] },
+      "finishReason": "STOP",
+      "groundingMetadata": {
+        "webSearchQueries": ["synthetic second-candidate query"],
+        "groundingChunks": [
+          { "web": { "uri": "https://example.invalid/second-source", "title": "Second synthetic source" } }
+        ],
+        "groundingSupports": [
+          { "segment": { "startIndex": 0, "endIndex": 22, "text": "Second candidate text" }, "groundingChunkIndices": [0] }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": { "promptTokenCount": 2, "candidatesTokenCount": 2, "totalTokenCount": 4 }
+}

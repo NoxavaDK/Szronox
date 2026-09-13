@@ -1,0 +1,33 @@
+{
+  "_synthetic": "Authored locally for T03. NOT a captured provider response. Reserved .invalid domain only.",
+  "_purpose": "Retained from the partial spike. It places urlContextMetadata at the RESPONSE top level, which is where the earlier parser wrongly read it. Documentation places it on the candidate, so this fixture is kept as the regression case: the parser must report it as topLevelUrlRetrieval and must not merge it into a candidate's retrieval record.",
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          { "text": "Synthetic answer supported by the synthetic source." }
+        ]
+      },
+      "finishReason": "STOP",
+      "groundingMetadata": {
+        "webSearchQueries": ["synthetic diagnostic query"],
+        "groundingChunks": [
+          { "web": { "uri": "https://example.invalid/synthetic-source", "title": "Synthetic source" } }
+        ],
+        "groundingSupports": [
+          {
+            "segment": { "startIndex": 0, "endIndex": 16, "text": "Synthetic answer" },
+            "groundingChunkIndices": [0]
+          }
+        ],
+        "searchEntryPoint": { "renderedContent": "[synthetic omitted]" }
+      }
+    }
+  ],
+  "urlContextMetadata": {
+    "urlMetadata": [
+      { "retrievedUrl": "https://example.invalid/synthetic-source", "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_SUCCESS" }
+    ]
+  },
+  "usageMetadata": { "promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2 }
+}
