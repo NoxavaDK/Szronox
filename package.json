@@ -1,0 +1,14 @@
+{
+  "name": "szronox",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@10.9.3",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspace @szronox/contracts && npm run build --workspace @szronox/web && npm run build --workspace @szronox/api && npm run build --workspace @szronox/worker",
+    "typecheck": "npm run typecheck --workspace @szronox/contracts && npm run typecheck --workspace @szronox/web && npm run typecheck --workspace @szronox/api && npm run typecheck --workspace @szronox/worker",
+    "test": "npm run test --workspace @szronox/api",
+    "start:api": "npm run start --workspace @szronox/api",
+    "start:worker": "npm run start --workspace @szronox/worker"
+  }
+}
