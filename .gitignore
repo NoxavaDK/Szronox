@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.worktrees/
+.env
+.env.*
+!.env.example
+*.local
+.DS_Store
+spikes/**/artifacts/private/
