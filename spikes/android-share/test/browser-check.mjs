@@ -15,7 +15,15 @@ socket.onmessage = event => {
   message.error ? reject(new Error(message.error.message)) : resolve(message.result);
 };
 function cdp(method, params = {}) {
-  return new Promise((resolve, reject) => { const requestId = ++id; pending.set(requestId, {resolve,reject}); socket.send(JSON.stringify({id:requestId,method,params})); });
+  return new Promise((resolve, reject) => {
+    const requestId = ++id;
+    const timeout = setTimeout(() => { pending.delete(requestId); reject(new Error(`CDP timeout: ${method}`)); }, 5000);
+    pending.set(requestId, {
+      resolve: value => { clearTimeout(timeout); resolve(value); },
+      reject: error => { clearTimeout(timeout); reject(error); }
+    });
+    socket.send(JSON.stringify({id:requestId,method,params}));
+  });
 }
 async function evaluate(expression) {
   const result = await cdp("Runtime.evaluate", { expression, awaitPromise:true, returnByValue:true });
@@ -31,12 +39,13 @@ async function waitFor(predicate, label) {
   throw new Error(`timeout: ${label}`);
 }
 
+try {
 await cdp("Page.enable");
 await cdp("Page.navigate", {url:"http://127.0.0.1:4173/"});
 await waitFor("location.href.startsWith('http://127.0.0.1:4173')", "initial navigation");
 await waitFor("document.readyState === 'complete'", "initial load");
 assert.equal(await evaluate("'serviceWorker' in navigator"), true, "Service Worker API unavailable");
-await waitFor("navigator.serviceWorker.ready.then(() => true)", "service worker ready");
+await waitFor("Promise.race([navigator.serviceWorker.ready.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 100))])", "service worker ready");
 await cdp("Page.reload");
 await waitFor("location.href.startsWith('http://127.0.0.1:4173')", "controlled navigation");
 await waitFor("document.readyState === 'complete'", "controlled reload");
@@ -72,5 +81,7 @@ const storedBlobSize = await evaluate(`(async () => {
   return draft.blobs[0].blob.size;
 })()`);
 assert.equal(storedBlobSize, 3);
-socket.close();
 console.log("PASS: Chrome registered/controlled the service worker and preserved one normalized draft, IDs, original input, and blob across reload.");
+} finally {
+  socket.close();
+}

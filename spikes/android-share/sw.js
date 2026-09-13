@@ -1,22 +1,18 @@
-const SHELL = "share-diagnostic-shell-v1";
-const ASSETS = ["./", "./index.html", "./app.js", "./share-contract.js", "./manifest.webmanifest", "./icon.svg"];
+import { openShareDb, putRecord } from "./storage.js";
+
+const SHELL = "share-diagnostic-shell-v2";
+const ASSETS = ["./", "./index.html", "./app.js", "./share-contract.js", "./storage.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => event.waitUntil(caches.open(SHELL).then(cache => cache.addAll(ASSETS))));
 self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open("szronox-share-diagnostic-v1", 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("incomingShares", { keyPath: "id" });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
 async function storeRawShare(formData) {
   const images = formData.getAll("images").filter(value => value instanceof File);
+  const id = crypto.randomUUID();
   const record = {
-    id: crypto.randomUUID(),
+    id,
+    operationId: crypto.randomUUID(),
+    attachmentIds: images.map(() => crypto.randomUUID()),
     recordType: "raw-share",
     receivedAt: new Date().toISOString(),
     title: formData.get("title") || null,
@@ -24,12 +20,8 @@ async function storeRawShare(formData) {
     url: formData.get("url") || null,
     images
   };
-  const db = await openDb();
-  await new Promise((resolve, reject) => {
-    const request = db.transaction("incomingShares", "readwrite").objectStore("incomingShares").put(record);
-    request.onsuccess = resolve;
-    request.onerror = () => reject(request.error);
-  });
+  const db = await openShareDb();
+  await putRecord(db, record);
   return record.id;
 }
 

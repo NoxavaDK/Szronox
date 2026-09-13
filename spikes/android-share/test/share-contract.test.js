@@ -48,6 +48,22 @@ test("identity binds only after quarantine while IDs remain stable", () => {
   assert.throws(() => bindIdentity(assigned, "account-B"), /INVALID_QUARANTINE_STATE/);
 });
 
+test("raw-share allocated IDs remain stable across concurrent normalization", () => {
+  const raw = {
+    id:"00000000-0000-4000-8000-000000000101",
+    operationId:"00000000-0000-4000-8000-000000000102",
+    attachmentIds:["00000000-0000-4000-8000-000000000103"],
+    receivedAt:"2026-09-13T09:00:00.000Z",
+    images:[image]
+  };
+  const first = factory(raw);
+  const second = factory(raw);
+  assert.equal(first.id, raw.id);
+  assert.equal(second.operationId, raw.operationId);
+  assert.equal(first.capture.attachments[0].id, raw.attachmentIds[0]);
+  assert.deepEqual(first, second);
+});
+
 test("diagnostic display omits blobs but retains original descriptors", () => {
   const shown = publicDraft(factory({ images:[image] }));
   assert.equal("blobs" in shown, false);

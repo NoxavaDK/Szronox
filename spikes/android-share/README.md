@@ -4,7 +4,7 @@ This is a disposable standalone diagnostic PWA, not the production Quick Add UI.
 
 ## Behavior exercised
 
-The service worker intercepts `POST /share-target`, reads multipart `title`, `text`, `url`, and repeated `images`, commits the raw payload and blobs to IndexedDB, then returns HTTP 303. The page atomically replaces that raw record with a normalized draft and opens the same diagnostic capture form for every input kind. The draft starts as `quarantined_pending_identity` with no account. The diagnostic login action binds an explicit account and moves it to `local_pending_upload`; it never uploads. Reloading the `?incoming=<capture-id>` URL replays the saved draft without regenerating IDs.
+The service worker intercepts `POST /share-target`, reads multipart `title`, `text`, `url`, and repeated `images`, allocates capture, operation, and attachment IDs, commits the raw payload and blobs to IndexedDB, then returns HTTP 303 only after transaction completion. The page overwrites that same IndexedDB key with a normalized draft and opens the same diagnostic capture form for every input kind. Keeping the key and preallocated IDs makes crash/reopen and concurrent promotion converge on the same capture. The draft starts as `quarantined_pending_identity` with no account. The diagnostic login action binds an explicit account and moves it to `local_pending_upload`; it never uploads. Reloading the `?incoming=<capture-id>` URL replays the saved draft without regenerating IDs. Any failed local write clears the prior success display and shows a Polish failure message.
 
 JPEG, PNG, and WebP are supported. Unsupported file descriptors remain in `originalInput.files` and produce `UNSUPPORTED_MEDIA_TYPE`; an otherwise empty/unsupported share also produces `NO_SUPPORTED_INPUT`. Storage failure redirects to an explicit Polish error and never claims local success. The shell is cached for offline launch and the payload lives in IndexedDB; correctness does not depend on Background Sync.
 
@@ -39,9 +39,10 @@ Prerequisites: a physical Android device (or Play-enabled emulator), current Chr
 | Check | Evidence | Status |
 | --- | --- | --- |
 | URL/text/image/mixed normalization and original descriptors | Node tests with synthetic diagnostic values | PASS (simulated) |
-| Quarantine, explicit binding, stable IDs | Node tests | PASS (simulated) |
+| Quarantine, explicit binding, stable IDs and concurrent normalization | Node tests | PASS (simulated) |
+| Commit/abort/reopen persistence semantics | Deterministic IndexedDB transaction double | PASS (simulated) |
 | Unsupported/empty classification | Node tests | PASS (simulated) |
 | IndexedDB replay and service-worker receiver | Automated browser check exists; local in-app browser blocked localhost and headless Chrome did not complete CDP localhost navigation | UNVERIFIED in this environment |
-| Installed Android registration, sender mapping, cold launch, offline share | No adb, emulator, Chrome binary, or connected device | UNVERIFIED — gate open |
+| Installed Android registration, sender mapping, cold launch, offline share | Desktop Chrome exists, but no adb, Android emulator, or connected Android device is available | UNVERIFIED — gate open |
 
 Primary references: [Chrome Web Share Target documentation](https://developer.chrome.com/docs/capabilities/web-apis/web-share-target), [web.dev receiving shared files](https://web.dev/articles/files/receive-shared-files), and [MDN `share_target` reference](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/share_target).

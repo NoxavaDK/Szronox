@@ -28,9 +28,9 @@ export function normalizeShare({ entries, now, randomUUID }) {
   const supported = [];
   const rejected = [];
 
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     const descriptor = {
-      id: newId(randomUUID),
+      id: entries.attachmentIds?.[index] || newId(randomUUID),
       name: file.name || "bez-nazwy",
       type: file.type || "application/octet-stream",
       size: Number(file.size) || 0,
@@ -43,9 +43,9 @@ export function normalizeShare({ entries, now, randomUUID }) {
   const originalInput = { title, text, url: explicitUrl, files: [...supported.map(x => x.descriptor), ...rejected] };
   const hasUsableInput = Boolean(title || text || inferredUrl || supported.length);
   return {
-    id: newId(randomUUID),
-    operationId: newId(randomUUID),
-    createdAt: now(),
+    id: entries.id || newId(randomUUID),
+    operationId: entries.operationId || newId(randomUUID),
+    createdAt: entries.receivedAt || now(),
     source: "android_share_target",
     state: "quarantined_pending_identity",
     accountId: null,
