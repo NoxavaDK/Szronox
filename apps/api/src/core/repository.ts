@@ -50,7 +50,7 @@ import type { SignedUpload, StorageAdapter } from './storage.js';
 
 const REEL_COLUMNS = `
   id, version, title, status, priority, input_note, original_input, script, editing_notes,
-  editor_id, current_export, verification, programme_state, programme_attachment,
+  script_revision, editor_id, current_export, verification, programme_state, programme_attachment,
   programme_input_hash, programme_document_version_id, kdrive_folder, editing_started_at,
   published_at, publication_urls, publication_description, publication_hashtags,
   feed_cover_done, created_by, created_at, updated_at, deleted_at
@@ -423,6 +423,13 @@ export class CoreRepository {
       for (const [field, value] of entries) {
         params.push(this.patchValue(field as (typeof PATCHABLE_FIELDS)[number], value));
         assignments.push(`${PATCH_COLUMNS[field as (typeof PATCHABLE_FIELDS)[number]]} = $${params.length}`);
+      }
+
+      // Only a script change advances scriptRevision. An unrelated metadata edit
+      // bumps `version` but must leave this counter alone, or every AI run would
+      // look stale after a priority change.
+      if (Object.hasOwn(changes, 'script') && changes.script !== before.script) {
+        assignments.push('script_revision = script_revision + 1');
       }
 
       // Entering editing from another status stamps a server timestamp; re-saving

@@ -1531,3 +1531,44 @@ test('buildCoreDependencies composes a working dependency set from environment',
     await db.close();
   }
 });
+
+// ══════════════════════ scriptRevision (pinned contract) ════════════════════
+
+test('scriptRevision advances only for script changes, not for metadata edits', async () => {
+  // The contract defines it as a "monotonic script-only change counter; unrelated
+  // metadata edits do not increment it" — `version` cannot answer that question,
+  // because it bumps on every accepted mutation.
+  const { db, repo } = await fixture();
+  try {
+    const request = capture();
+    let reel = await repo.createReel(NOXAVA, request as never);
+    assert.equal(reel.scriptRevision, 0, 'a fresh capture starts at zero');
+
+    reel = await repo.patchReel(NOXAVA, request.reelId, {
+      operationId: randomUUID(), expectedVersion: reel.version, changes: { script: 'Pierwsza wersja' },
+    });
+    assert.equal(reel.scriptRevision, 1);
+
+    // Metadata edits bump version but must leave the counter alone.
+    for (const changes of [{ priority: 'urgent' as const }, { title: 'Nowy tytuł' }, { editorId: SZRON.id }]) {
+      const before: number = reel.scriptRevision;
+      reel = await repo.patchReel(NOXAVA, request.reelId, {
+        operationId: randomUUID(), expectedVersion: reel.version, changes,
+      });
+      assert.equal(reel.scriptRevision, before, `${JSON.stringify(changes)} must not advance scriptRevision`);
+    }
+
+    reel = await repo.patchReel(NOXAVA, request.reelId, {
+      operationId: randomUUID(), expectedVersion: reel.version, changes: { script: 'Druga wersja' },
+    });
+    assert.equal(reel.scriptRevision, 2);
+
+    // Writing the SAME script text is not a script change.
+    const unchanged = await repo.patchReel(NOXAVA, request.reelId, {
+      operationId: randomUUID(), expectedVersion: reel.version, changes: { script: 'Druga wersja' },
+    });
+    assert.equal(unchanged.scriptRevision, 2, 'an identical script must not advance the counter');
+  } finally {
+    await db.close();
+  }
+});
