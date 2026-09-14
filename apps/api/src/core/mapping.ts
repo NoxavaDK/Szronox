@@ -25,6 +25,7 @@ export interface ReelRow {
   input_note: string;
   original_input: CaptureInput;
   script: string;
+  script_revision: number;
   editing_notes: string;
   editor_id: string | null;
   current_export: ExportReference | null;
@@ -133,6 +134,7 @@ export function toReel(
     inputNote: row.input_note,
     originalInput: row.original_input,
     script: row.script,
+    scriptRevision: row.script_revision,
     editingNotes: row.editing_notes,
     editorId: row.editor_id,
     hooks: hooks.map(toHook),
