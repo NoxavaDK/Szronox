@@ -1,4 +1,4 @@
-/** T00 wire contracts. Editorial prompts and AI result composition are not frozen. */
+/** T00 wire contracts. Frozen written specs govern UI; final editorial prompts remain pending. */
 export type Id = string;
 export type IsoDateTime = string;
 export type ReelStatus = 'idea' | 'to_record' | 'editing' | 'ready' | 'published';
@@ -83,6 +83,8 @@ export interface Reel {
   /** Immutable original capture, distinct from editable inputNote and generated content. */
   originalInput: CaptureInput;
   script: string;
+  /** Monotonic script-only change counter; unrelated metadata edits do not increment it. */
+  scriptRevision: number;
   editingNotes: string;
   editorId: Id | null;
   hooks: ReelHook[];
@@ -127,6 +129,8 @@ export interface OriginalSharedInput {
 /** One capture may combine text, URL and multiple supported images. */
 export interface CaptureInput {
   text?: string;
+  /** Separate Quick Add context entered alongside URL/image; immutable after capture. */
+  additionalText?: string;
   url?: string;
   images: CaptureImageDescriptor[];
   originalShare?: OriginalSharedInput;
@@ -148,6 +152,21 @@ export interface AddHookRequest extends MutationContext { text: string; position
 export interface EditHookRequest extends MutationContext { text: string }
 export type RemoveHookRequest = MutationContext;
 export interface AttachMemeRequest extends MutationContext { memeId: Id }
+export type DetachMemeRequest = MutationContext;
+/** Validated private image asset; picker creation and attachment commit atomically. */
+export interface CreateMemeRequest {
+  operationId: Id;
+  name: string;
+  imageAssetId: Id;
+  attachToReel?: { reelId: Id; expectedVersion: number };
+}
+export interface ReelListQuery {
+  /** Defaults to active. Deleted is a secondary view, never a ReelStatus. */
+  visibility?: 'active' | 'deleted';
+  status?: ReelStatus;
+  overdue?: boolean;
+  cursor?: string;
+}
 export interface ReplaceExportRequest extends MutationContext {
   export: Omit<ExportReference, 'revision'>;
 }
@@ -160,6 +179,7 @@ export type AiJobState = 'queued' | 'running' | 'succeeded' | 'failed';
 export interface AiInputSnapshot {
   reelVersion: number;
   script: string;
+  scriptRevision: number;
   hooks: Array<Pick<ReelHook, 'id' | 'text' | 'source' | 'position'>>;
   inputNote: string;
   attachments: AttachmentReference[];
@@ -223,6 +243,7 @@ export interface FactCheckResult {
   sources: SourceEvidence[];
   warnings: string[];
 }
+/** Version A starts from run.input.script; B from scriptSuggestion. Edits are local drafts. */
 export interface LanguageResult { scriptSuggestion: string; notes: string[] }
 /** Zero to three candidates; an empty result never mutates Reel programme state. */
 export interface ProgrammeResult { candidates: ProgrammeMatch[] }
@@ -261,6 +282,8 @@ export type ApplyAiRequest = MutationContext & (
   | { selection: 'programme_match'; candidateId: Id }
   | { selection: 'programme_no_match' }
   | { selection: 'fact_correction'; claimId: Id }
+  /** Whole-script replacement with the current edited version, guarded against the run snapshot. */
+  | { selection: 'language_version'; version: 'A' | 'B'; text: string }
 );
 export type ErrorCode =
   | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'VALIDATION_ERROR'
@@ -268,6 +291,7 @@ export type ErrorCode =
   | 'FEED_COVER_REQUIRED'
   | 'EDITOR_REQUIRED'
   | 'STALE_FACT_CLAIM'
+  | 'STALE_LANGUAGE_RESULT'
   | 'UPLOAD_INCOMPLETE' | 'UNSUPPORTED_INPUT' | 'PROVIDER_UNAVAILABLE'
   | 'PROVIDER_ACCESS_DENIED' | 'PROVIDER_RESOURCE_MISSING'
   | 'INVALID_AI_RESULT' | 'INSUFFICIENT_EVIDENCE' | 'INTERNAL_ERROR';

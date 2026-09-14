@@ -1,3 +1,7 @@
+# Current authority addendum
+
+The [Reel Detail + Language Check batch](frozen-reel-detail-language-spec.md) supersedes pending/undefined statements below for its eight named surfaces. The original consolidated specification is preserved below. No new renderer or agent dispatch is required.
+
 # FROZEN VISUAL SPECIFICATION — CONSOLIDATED IMPLEMENTATION AUTHORITY
 
 This document replaces any previous instruction that depends on an unavailable renderer PNG or screenshot.
