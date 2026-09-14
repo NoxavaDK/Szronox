@@ -1,14 +1,14 @@
 # T00 — shared implementation contracts
 
-Status: frozen baseline with approved capture, verification, feed-cover, Publication, programme search-results and attached-proposition amendments. Contracts/planning only; no correction agent dispatch. Final editorial prompts and other unfinished AI surfaces remain excluded.
+Status: frozen baseline with approved capture, verification, feed-cover, Publication, programme, Fact Check and Reel Detail/Language Check amendments. Contracts/planning only; no correction agent dispatch. Final editorial prompts and other unfinished AI surfaces remain excluded.
 
 ## Written visual implementation authority
 
-[Consolidated frozen visual specification](../../design/frozen-visual-spec.md) is the current visual authority, together with T00 behavioral contracts. It supersedes older instructions to use or await renderer PNGs/screenshots. Existing renders are historical references, not prerequisites; no missing-image gate remains. All visible UI is Polish; code and documentation are English.
+[Consolidated frozen visual specification](../../design/frozen-visual-spec.md) plus the [Reel Detail + Language Check delta](../../design/frozen-reel-detail-language-spec.md) form the current visual authority, together with T00 behavioral contracts. The delta takes precedence for its eight named surfaces. It supersedes older instructions to use or await renderer PNGs/screenshots. Existing renders are historical references, not prerequisites; no missing-image gate remains. All visible UI is Polish; code and documentation are English.
 
-Visually frozen: global language, Main List, Quick Add, Reel Detail, completed Opracowanie, expanded Publication, programme search results, attached proposition and completed Fact Check results. Implement at 360 px with clean 320 px reflow using the specified compact editorial hierarchy, palette, typography and accessible touch targets. The written specification governs section order, exact action labels, flat separators and plain text status labels; do not replace them with cards, filled badges or large CTAs except where expressly allowed.
+Visually frozen: global language, Main List, Quick Add, Reel Detail, completed Opracowanie, expanded Publication, programme search results, attached proposition completed Fact Check results, Language Check, Materials, metadata selectors, Meme picker, original-input/notes sections and delete/recovery. Implement at 360 px with clean 320 px reflow using the specified compact editorial hierarchy, palette, typography and accessible touch targets. The written specification governs section order, exact action labels, flat separators and plain text status labels; do not replace them with cards, filled badges or large CTAs except where expressly allowed.
 
-Still pending: Sprawdź język, Opracuj publication-draft collision UI when existing user content is present, and other explicitly unfinished surfaces. Visual availability does not settle unspecified persistence/application behavior: generated publication draft handling must respect T00 and must not silently overwrite stored description/hashtags. No new overwrite policy, editorial prompt or bulk-apply action is authorized.
+Still pending: Opracuj publication-draft collision UI when existing user content is present, and other explicitly unfinished surfaces. Visual availability does not settle unspecified persistence/application behavior: generated publication draft handling must respect T00 and must not silently overwrite stored description/hashtags. No new overwrite policy, editorial prompt or bulk-apply action is authorized.
 
 No UI implementation dispatch is authorized by this freeze. The existing explicit task/model approval process remains in force.
 
@@ -27,8 +27,8 @@ Graceful shutdown stops accepting new work and prioritizes not truncating valid 
 ### Reel invariants
 
 - Five statuses only: `idea`, `to_record`, `editing`, `ready`, `published`. Polish labels are UI mappings.
-- Two allowlisted authenticated users; equivalent product access. The verifier is the other user relative to `editorId`. Editor may be null before editing. No selectable verifier or role-management UI.
-- Verification requires a currently selected editor who is one of the allowlisted users. If no valid editor is selected, reject verification with HTTP 422 `EDITOR_REQUIRED`, `retryable: false`; Polish mapping: `Wybierz montażystę przed weryfikacją eksportu.` Never infer the editor/verifier from the acting user. Check the editor, expected peer actor and export revision against the same version-checked Reel state. The wrong actor receives FORBIDDEN. Export linking/replacement remains allowed independently of editor selection and verification; linking does not verify anything. No export still means no verification state in the UI.
+- Two allowlisted authenticated users; equivalent product access. The verifier is the other user relative to `editorId`. Editor may legitimately be null in any status. No selectable verifier or role-management UI.
+- Verification requires a currently selected editor who is one of the allowlisted users. If no valid editor is selected, reject verification with HTTP 422 `EDITOR_REQUIRED`, `retryable: false`; Polish mapping: `Wybierz montażystę, aby wskazać osobę sprawdzającą.` Never infer the editor/verifier from the acting user. Check the editor, expected peer actor and export revision against the same version-checked Reel state. The wrong actor receives FORBIDDEN. Export linking/replacement remains allowed independently of editor selection and verification; linking does not verify anything. No export still means no verification state in the UI.
 - `ready` and `published` do not require verification. Without an export there is no verification state in the UI.
 - Current export has an application-owned revision. Explicit replacement increments it even if its URL/file ID is unchanged. Verification names the actual signed-in expected verifier and exact export revision. Historical check information can remain to derive `outdated`. Metadata/body edits alone do not claim a video file changed. No automatic file-overwrite detection is promised.
 - Entering editing from another status sets a server UTC timestamp. Re-saving editing does not reset it. Priority/editor changes do not reset it. Leaving/re-entering starts a new period. Attention thresholds are 24/96/168 elapsed hours; only current editing items count.
@@ -106,14 +106,14 @@ All application routes start `/api/v1`; JSON uses camelCase, SQL uses snake_case
 | Route | Contract |
 | --- | --- |
 | GET /me | Signed-in allowlisted user and peer identity |
-| GET /reels | Status filter, optional overdue flag, cursor pagination; fixed product sorting |
+| GET /reels | visibility=active (default) or deleted, status filter, optional overdue flag, cursor pagination; fixed product sorting |
 | GET /reels/:id | Reel aggregate, hooks, attached memes, references and derived verification |
 | POST /reels | Idempotent capture; optional initialHook; no AI/kDrive dependency |
 | PATCH /reels/:id | Version-checked allowlisted scalar fields; no hook/verification/result injection |
 | POST /reels/:id/delete, /restore | Version-checked soft-delete/restore |
 | POST /reels/:id/hooks | Add user hook; optional insertion position, server validates order |
 | PATCH, DELETE /reels/:id/hooks/:hookId | Version-checked individual text edit/removal |
-| GET, POST /memes | Shared library search/create; no analytics |
+| GET, POST /memes | Name/metadata search; create with required name and validated imageAssetId, optionally atomic attachToReel; no analytics |
 | POST /reels/:id/memes; DELETE /reels/:id/memes/:memeId | Explicit attach/detach with version check; no library deletion |
 | POST /reels/:id/current-export | Explicit reference replacement; increments export revision |
 | POST /reels/:id/verification | Verify current export as actual expected verifier; status remains independent |
@@ -139,7 +139,7 @@ Original lightweight image files stay private in app storage; large production u
 
 ### Pinned capture contract — mixed input and multiple images
 
-CreateReelRequest.input is one CaptureInput object: optional text, optional URL, an images array (empty for text/URL-only capture), and optional originalShare. This replaces the earlier mutually exclusive single-image union. A usable capture has text, a URL, a supported image, or usable original shared text/title; completely unusable payloads are rejected explicitly. Do not derive a title/URL by destroying the original source fields.
+CreateReelRequest.input is one CaptureInput object: optional original text, optional separate additionalText entered alongside URL/image, optional URL, an images array (empty for text/URL-only capture), and optional originalShare. This replaces the earlier mutually exclusive single-image union. A usable capture has text, a URL, a supported image, or usable original shared text/title; completely unusable payloads are rejected explicitly. Do not derive a title/URL by destroying the original source fields.
 
 Each supported image descriptor has a stable attachmentId, fileName, mimeType and byteSize. The server validates distinct IDs and supported content limits, then atomically creates one Reel plus ALL pending image attachment records and any initial user hook. Failure rolls back the entire creation; never save only a truncated subset. No existing Reel or uploaded image is required to create this record. Each image subsequently uses the ordinary attachment initiate/complete lifecycle. Local blobs remain recoverable until individually acknowledged.
 
@@ -235,3 +235,50 @@ Programme search results and the attached-proposition flow are frozen above. Add
 ## Acceptance before broader implementation
 
 T01 must typecheck shared types. Spikes must distinguish live evidence, mocks and blocked checks. Lead review confirms no single-hook field/use-hook action, no invented meme creation, no T16 implementation, and no production editorial prompts. Live Android/provider/PDF gates stay open until real prerequisites exist.
+
+
+## Frozen batch — Reel Detail and Language Check
+
+The [verbatim batch delta](../../design/frozen-reel-detail-language-spec.md) is authoritative for exact Polish labels, visual hierarchy and the eight newly frozen surfaces. It supersedes older pending-language/undefined-section/missing-render statements, including historical handoffs. It does not dispatch implementation or freeze editorial prompts. Previously frozen unrelated surfaces remain unchanged.
+
+### Language workspace and application
+
+Full-height scrollable workspace: header/close, quiet Reel context, DO POPRAWY diagnostic notes, editable WERSJA A (Twój tekst), separator, editable WERSJA B (Propozycja po korekcie), then Sprawdź ponownie. Both versions are simultaneously visible, A above B, with normal selection/copy/paste and flat writing treatment. No tabs, scores, per-observation fixes, cards, merge/diff/track-changes or third save action.
+
+A initializes from immutable run.input.script; B from LanguageResult.scriptSuggestion. notes supplies diagnostic observations. Editing either version changes only its recoverable local draft, never the Reel or immutable run result. Użyj wersji A/B sends selection=language_version, version=A|B and the CURRENT edited text, with operationId/expectedVersion, to the existing run apply endpoint. The server accepts this selection only for a successful language_check run on the same Reel and replaces the whole script only; no hook or other field changes. The generic selection=script path must not bypass these language-specific checks.
+
+Reel.scriptRevision is a server-owned monotonic script-change counter (initial 0), copied into AiInputSnapshot. Increment whenever persisted script text changes through any path, including AI application/fact correction; unrelated metadata/hook edits and identical-text writes do not increment it. The counter detects edit-and-revert as well as different current text; it is not a script-history/version-management feature. It is excluded from scalar PATCH. Application atomically checks snapshot scriptRevision and original script against the current script, alongside normal expectedVersion validation. Changed script returns HTTP 409 STALE_LANGUAGE_RESULT, retryable=false; suggested Polish mapping: Tekst zmienił się od sprawdzenia. Sprawdź język ponownie. Do not overwrite or silently rebase. Metadata-only changes use the ordinary conflict/retry flow and do not themselves make the language snapshot stale. Same-operation replay returns the original outcome before re-evaluating post-apply freshness. A new check uses the authoritative current Reel script; it does not silently save local A/B edits.
+
+Acceptance: editable A/B remain local until explicit apply; current edited text replaces the entire script; hooks untouched; metadata-only changes, script edit/revert, concurrent writes and idempotent retry handled correctly. Final writing prompts remain pending.
+
+### Materials and metadata selectors
+
+MATERIAŁY stays inline and expandable: FOLDER kDrive → AKTUALNY EKSPORT → WERYFIKACJA only with an export. Folder creation is explicit, never capture/status driven. Unavailable/moved/deleted references are retained with unavailable/relink behavior, never auto-replaced. Existing production export reference selection is not a large-file uploader; every explicit replacement increments its application revision even for the same provider file. Preserve historical verification to derive Nieaktualne and its actual verifier identity after replacement. Current expected peer alone can verify the new revision; null editor exposes the frozen explanatory message and no verification action. Verification never gates ready/published. No cover, Publication fields, original input or file manager inside Materials.
+
+Status/priority/editor use compact mobile bottom sheets (~44 px options), desktop compact equivalents; explicit selection performs one version-checked mutation, closes on success and displays authoritative server values. Dismissal changes nothing; errors/conflicts cannot show success. Exact statuses/priority labels and avatar identities are in the delta. MONTUJE permits NOXAVA, SZRON and Brak; never infer editor or expose a verifier selector. Entering editing starts the period, same-status saves do not; priority/editor changes retain it. Thresholds remain urgent=24h, normal=96h, evergreen=168h, applied to the current period. Cover validation remains the existing atomic publication gate.
+
+Acceptance: all selector values/null editor, cancellation/conflict, edit-period entry/re-entry and priority threshold changes; no verification without export; same-file replacement becomes a new revision; expected peer enforcement; unavailable folder reference retained without replacement creation.
+
+### Shared Meme creation and assignment
+
+One shared library; metadata/name search only. Compact thumbnail/name rows, + NOWY MEM; no categories/tags/folders/analytics/counts/semantic search. Existing Meme selection attaches then closes on success. Reel.memeIds is a duplicate-free stable ordered relationship list; attach appends, first is primary by order, detach preserves remaining relative order and never deletes the shared record. Normal usage is 0–1, + kolejny supports additional attachments; no drag ordering. Opracuj still suggests at most one existing valid memeId, + Dodaj uses normal attachment; never invent or replace silently.
+
+CreateMemeRequest requires name and imageAssetId pointing to a server-validated private image upload, not an arbitrary asserted URL. In picker context attachToReel carries reelId/expectedVersion. After upload validation, create the library record and its Reel relationship atomically with operation deduplication; conflict/failure cannot report successful attachment or leave a duplicate library record on retry. Upload transport may precede this transaction; retain the draft on failure. A future standalone context may omit attachToReel. This contract does not authorize a standalone library screen. The thumbnail/asset reference is resolved by the server from the validated image asset. Do not add a library-delete action.
+
+Acceptance: both users see shared records; required name/image enforced; create-and-attach retries deduplicate and conflicts preserve drafts; ordered primary behavior, detach relationship only, no implicit suggestion acceptance.
+
+### Original input and shared editing note
+
+ŹRÓDŁA / WEJŚCIE is inline: only populated original LINK/TEKST, separate DODATKOWY TEKST, captured-image rows, and mutable NOTATKA DO WEJŚCIA. CaptureInput.additionalText preserves separately entered Quick Add context alongside URL/image; do not merge it into text, originalShare or inputNote. Omitted legacy additionalText remains absent; never guess provenance from historical text. All supported original image descriptors remain visible with honest upload state; unsupported descriptors remain preserved but cannot appear as uploaded. Preserve originalShare title/ordered fields. Later Fact Check evidence stays with Fact Check, never here.
+
+inputNote is the mutable input-context field; editingNotes is one shared multiline plain-text production note in inline UWAGI DO MONTAŻU. Both use normal version-checked scalar mutations and never rewrite originalInput. Preserve line breaks/manual bullets. No separate notes, comments, per-user records, checklists or AI-generated editing instructions.
+
+Acceptance: URL/shared text/additionalText/multiple images remain distinct across capture/read/retry; no unsupported upload claim; inputNote edits leave originalInput byte-equivalent in stored values; both users edit editingNotes with conflicts preserved.
+
+### Soft delete and recovery
+
+Active Reel overflow has only Usuń rolkę. Use the exact confirmation and Anuluj/Usuń labels from the delta. Soft delete removes active visibility without deleting shared Memes, kDrive data or indexed programme/source data. GET /reels defaults visibility=active; visibility=deleted supplies the secondary Usunięte view. Opening a deleted Reel permits Przywróć rolkę through the existing version-checked restore endpoint. Restore clears deletedAt and preserves the previously persisted status; restore is not a new entry into editing and must not restart its period. Normal editing/AI mutations cannot modify a deleted Reel.
+
+Usunięte is a quiet secondary Rolki menu entry, never a sixth status/main tab/permanent primary navigation item. Compact existing list language; no permanent delete, purge/retention, bulk trash or separate trash architecture.
+
+Acceptance: confirmed/cancelled/failed deletion, active-list exclusion, deleted-list retrieval, status-preserving restore and concurrent/idempotent delete/restore; external/shared data untouched.
