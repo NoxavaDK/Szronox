@@ -133,6 +133,20 @@ Primary references: [Chrome Web Share Target documentation](https://developer.ch
 [MDN `share_target` reference](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/share_target),
 [Chrome installability criteria](https://developer.chrome.com/docs/lighthouse/pwa/installable-manifest) (accessed 2026-09-14; that page also notes Lighthouse PWA auditing is deprecated).
 
+## C04 follow-up corrections (2026-09-14)
+
+Applied after `docs/implementation/C02-lead-review.md` (findings C02-R1/R2/R3), on top of
+`9767c90`. `storage.js` remains byte-identical to `bafffec`.
+
+| Finding | Correction | Evidence |
+| --- | --- | --- |
+| R1 root MIME | `server.js` derives the content type from the **resolved served file**, so `/` returns `text/html` instead of `application/octet-stream`. Icons and scripts unchanged | real HTTP against the actual server on a free port |
+| R2 usability contradiction | One shared `captureUsability` rule drives both normalization and mapping. Unknown metadata (e.g. `tracking_id=123`) is preserved but never makes a capture usable. A repeated recognized field whose first value is empty now yields the later useful one, with the full received sequence intact | Node tests incl. a case-by-case agreement check |
+| R3 stale receiver state | `watchReceiver` refreshes the dedicated state on `controllerchange` without re-registering; acquisition and loss of control are both reported | event-capable navigator double |
+
+`browser-check.mjs` now waits for the **displayed** ready state rather than sampling it once.
+It is still **unexecuted**: expanded assertions are test code, not test results.
+
 ## C02 corrections applied
 
 Recorded so the change history is legible; see the lead's R01 adjudication for F1/F6/F7/F8.

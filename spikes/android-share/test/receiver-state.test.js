@@ -82,3 +82,107 @@ test("receiver messages are Polish diagnostic copy", () => {
     assert.match(message, /[ąćęłńóśźż]/i, "application-facing copy is Polish");
   }
 });
+
+// ── C02-R3: receiver state stays live ────────────────────────────────────────
+
+/** A navigator double that can actually dispatch controllerchange. */
+function eventCapableNavigator({ registerFails = false, controller = null } = {}) {
+  const listeners = new Map();
+  let registerCalls = 0;
+  const container = {
+    get controller() { return container._controller; },
+    _controller: controller,
+    register: async () => { registerCalls += 1; if (registerFails) throw new Error("SecurityError"); return {}; },
+    addEventListener: (type, fn) => { listeners.set(type, [...(listeners.get(type) ?? []), fn]); },
+    removeEventListener: (type, fn) => { listeners.set(type, (listeners.get(type) ?? []).filter((f) => f !== fn)); },
+  };
+  return {
+    navigatorRef: { serviceWorker: container },
+    setController(value) { container._controller = value; for (const fn of listeners.get("controllerchange") ?? []) fn(); },
+    listenerCount: (type) => (listeners.get(type) ?? []).length,
+    get registerCalls() { return registerCalls; },
+  };
+}
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("acquiring control after first paint refreshes the visible state", async () => {
+  // The reproduced defect: first install reports registered_not_controlling, the
+  // worker then activates and claims the client, but the message stayed stale.
+  const double = eventCapableNavigator({ controller: null });
+  const seen = [];
+  const { watchReceiver } = await import("../receiver-state.js");
+  const detach = watchReceiver(double.navigatorRef, (s) => seen.push(s.state));
+  await flush();
+  assert.deepEqual(seen, ["registered_not_controlling"]);
+
+  double.setController({});
+  await flush();
+  assert.equal(seen.at(-1), "ready", "gaining control must update the state");
+  detach();
+});
+
+test("losing control is reported too, not left claiming readiness", async () => {
+  const double = eventCapableNavigator({ controller: {} });
+  const seen = [];
+  const { watchReceiver } = await import("../receiver-state.js");
+  const detach = watchReceiver(double.navigatorRef, (s) => seen.push(s));
+  await flush();
+  assert.equal(seen.at(-1).state, "ready");
+  assert.equal(seen.at(-1).shareCaptureAvailable, true);
+
+  double.setController(null);
+  await flush();
+  assert.equal(seen.at(-1).state, "registered_not_controlling");
+  assert.equal(seen.at(-1).shareCaptureAvailable, false);
+  detach();
+});
+
+test("refreshing state never re-registers the worker", async () => {
+  const double = eventCapableNavigator({ controller: null });
+  const { watchReceiver } = await import("../receiver-state.js");
+  const detach = watchReceiver(double.navigatorRef, () => {});
+  await flush();
+  double.setController({});
+  double.setController(null);
+  double.setController({});
+  await flush();
+  assert.equal(double.registerCalls, 1, "register() must run exactly once");
+  detach();
+});
+
+test("a failed registration stays failed across controller events", async () => {
+  const double = eventCapableNavigator({ registerFails: true });
+  const seen = [];
+  const { watchReceiver } = await import("../receiver-state.js");
+  const detach = watchReceiver(double.navigatorRef, (s) => seen.push(s.state));
+  await flush();
+  assert.equal(seen.at(-1), "registration_failed");
+  double.setController({});
+  await flush();
+  assert.ok(!seen.includes("ready"), "a spurious controller cannot mask a failed registration");
+  detach();
+});
+
+test("detaching stops further updates and removes the listener", async () => {
+  const double = eventCapableNavigator({ controller: null });
+  const seen = [];
+  const { watchReceiver } = await import("../receiver-state.js");
+  const detach = watchReceiver(double.navigatorRef, (s) => seen.push(s.state));
+  await flush();
+  const before = seen.length;
+  detach();
+  assert.equal(double.listenerCount("controllerchange"), 0);
+  double.setController({});
+  await flush();
+  assert.equal(seen.length, before, "no updates after detach");
+});
+
+test("an unsupported browser reports once and needs no listener", async () => {
+  const { watchReceiver } = await import("../receiver-state.js");
+  const seen = [];
+  const detach = watchReceiver({}, (s) => seen.push(s.state));
+  await flush();
+  assert.deepEqual(seen, ["unsupported"]);
+  detach();
+});

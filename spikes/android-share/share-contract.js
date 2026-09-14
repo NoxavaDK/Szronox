@@ -45,9 +45,39 @@ function readOrderedFields(entries) {
     .map((name) => ({ name, value: String(entries[name]) }));
 }
 
-/** First value for a scalar name, preserving "first wins" for repeats. */
+/**
+ * First USABLE value for a recognized scalar name.
+ *
+ * C02-R2: this previously took the first occurrence outright, so a share whose
+ * first `title` was empty and whose second carried real content normalized to
+ * nothing. The full received sequence is still preserved verbatim in
+ * `originalShare.fields`; only the normalized view skips empty duplicates.
+ */
 function firstValue(fields, name) {
-  return fields.find((field) => field.name === name)?.value ?? null;
+  const matches = fields.filter((field) => field.name === name);
+  return matches.find((field) => nonEmpty(field.value))?.value ?? matches[0]?.value ?? null;
+}
+
+/**
+ * The single usability rule, shared by normalization and mapping.
+ *
+ * C02-R2: normalization said NO_SUPPORTED_INPUT while `toCaptureInput` accepted
+ * the same draft, because the mapping counted ANY non-empty field — including
+ * pure tracking metadata such as `tracking_id=123` — as usable content. Unknown
+ * fields are preserved as evidence of the original input, but they cannot on their
+ * own make a capture usable.
+ *
+ * Usable means: meaningful title or text, a URL, or at least one supported image.
+ * "Meaningful" is restricted to the recognized share-target scalars; an unknown
+ * field is retained, never promoted.
+ */
+export function captureUsability({ title, text, url, supportedImageCount }) {
+  const reasons = [];
+  if (nonEmpty(title)) reasons.push("title");
+  if (nonEmpty(text)) reasons.push("text");
+  if (nonEmpty(url)) reasons.push("url");
+  if (supportedImageCount > 0) reasons.push("supportedImage");
+  return { usable: reasons.length > 0, reasons };
 }
 
 function readFiles(entries) {
@@ -121,7 +151,9 @@ export function normalizeShare({ entries, now, randomUUID }) {
 
   const supportedDescriptors = descriptors.filter((descriptor) => !descriptor.issue);
   const rejected = descriptors.filter((descriptor) => descriptor.issue);
-  const hasUsableInput = Boolean(title || text || inferredUrl || supportedDescriptors.length);
+  const usability = captureUsability({
+    title, text, url: inferredUrl, supportedImageCount: supportedDescriptors.length,
+  });
 
   return {
     id: entries?.id || newId(randomUUID),
@@ -139,9 +171,11 @@ export function normalizeShare({ entries, now, randomUUID }) {
       originalInput: { fields, files: descriptors },
     },
     blobs,
+    // Recorded so the mapping cannot reach a different conclusion from the same data.
+    usability,
     issues: [
       ...rejected.map((file) => ({ code: file.issue, file })),
-      ...(!hasUsableInput ? [{ code: "NO_SUPPORTED_INPUT" }] : []),
+      ...(!usability.usable ? [{ code: "NO_SUPPORTED_INPUT" }] : []),
     ],
   };
 }
@@ -178,9 +212,16 @@ export function toCaptureInput(draft) {
 
   const text = draft?.capture?.text ?? null;
   const url = draft?.capture?.url ?? null;
-  const originalTextual = fields.some((field) => nonEmpty(field.value));
-  if (!text && !url && supported.length === 0 && !originalTextual) {
-    problems.push({ code: "NO_SUPPORTED_INPUT", message: "Capture has no text, URL, supported image or usable original field." });
+  // C02-R2: one rule, evaluated from the same inputs normalization used. Unknown
+  // metadata alone can no longer make an unusable capture mappable.
+  const usability = captureUsability({
+    title: draft?.capture?.title ?? null, text, url, supportedImageCount: supported.length,
+  });
+  if (!usability.usable) {
+    problems.push({
+      code: "NO_SUPPORTED_INPUT",
+      message: "Capture has no meaningful title, text, URL or supported image. Unknown fields are preserved but are not capture content.",
+    });
   }
 
   if (problems.length > 0) {

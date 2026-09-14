@@ -52,9 +52,14 @@ await waitFor("document.readyState === 'complete'", "controlled reload");
 assert.equal(await evaluate("Boolean(navigator.serviceWorker.controller)"), true);
 
 // Receiver readiness is its own element and must report control, not just
-// registration, before a share can be captured.
-const receiverState = await evaluate("document.querySelector('#receiver-status')?.dataset.state");
-assert.equal(receiverState, "ready", `receiver not ready: ${receiverState}`);
+// registration, before a share can be captured. C02-R3: wait for the DISPLAYED
+// state rather than sampling it once -- registration resolves asynchronously and
+// control arrives later still via controllerchange, so a single read races both.
+await waitFor(
+  "document.querySelector('#receiver-status')?.dataset.state === 'ready'",
+  "receiver-status reaching the visible ready state",
+);
+assert.equal(await evaluate("document.querySelector('#receiver-status').dataset.shareCapture"), "true");
 
 // A mixed payload with a repeated field, an unknown field, an empty field, two
 // supported images and one unsupported file: everything C02 must preserve.

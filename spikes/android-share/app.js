@@ -1,6 +1,6 @@
 import { normalizeShare, bindIdentity, publicDraft, toCaptureInput } from "./share-contract.js";
 import { getRecord, openShareDb, promoteRaw, putRecord } from "./storage.js";
-import { observeReceiver } from "./receiver-state.js";
+import { watchReceiver } from "./receiver-state.js";
 
 const receiverStatus = document.querySelector("#receiver-status");
 const status = document.querySelector("#status");
@@ -75,10 +75,13 @@ document.querySelector("#login").onclick = async () => {
  * Receiver readiness owns its own element. No form operation writes here, so a
  * successful local simulate can never paint over an unavailable receiver.
  */
-observeReceiver(navigator).then((receiver) => {
+watchReceiver(navigator, (receiver) => {
+  // C02-R3: refreshed on controllerchange, so a worker that activates after first
+  // paint updates the visible claim instead of leaving it stale.
   receiverStatus.textContent = receiver.message;
   receiverStatus.dataset.state = receiver.state;
   receiverStatus.dataset.severity = receiver.severity;
+  receiverStatus.dataset.shareCapture = String(receiver.shareCaptureAvailable);
 });
 
 const params = new URL(location.href).searchParams;

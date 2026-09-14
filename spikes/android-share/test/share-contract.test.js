@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindIdentity, normalizeShare, publicDraft, toCaptureInput } from "../share-contract.js";
+import { bindIdentity, captureUsability, normalizeShare, publicDraft, toCaptureInput } from "../share-contract.js";
 
 function factory(entries) {
   let n = 0;
@@ -194,4 +194,64 @@ test("an image-only share maps without inventing text or url keys", () => {
 test("the mapping states that it sends nothing", () => {
   const mapped = toCaptureInput(factory({ text: "Opis" }));
   assert.match(mapped.limitation, /Nothing is sent|Diagnostic mapping only/);
+});
+
+// ── C02-R2: one usability rule for normalization and mapping ─────────────────
+
+test("unknown metadata alone cannot make a capture usable", () => {
+  // Reproduced by the lead: normalization said NO_SUPPORTED_INPUT while
+  // toCaptureInput accepted the same draft, because any non-empty field counted.
+  const draft = factory({ fields: [{ name: "tracking_id", value: "123" }], files: [] });
+  assert.deepEqual(draft.issues.map((i) => i.code), ["NO_SUPPORTED_INPUT"]);
+  const mapped = toCaptureInput(draft);
+  assert.equal(mapped.ok, false, "the mapping must agree with normalization");
+  assert.equal(mapped.request, null, "no partial request");
+  assert.ok(mapped.problems.some((p) => p.code === "NO_SUPPORTED_INPUT"));
+  // The unknown field is still preserved as evidence of what arrived.
+  assert.deepEqual(draft.capture.originalInput.fields, [{ name: "tracking_id", value: "123" }]);
+});
+
+test("normalization and mapping never disagree about usability", () => {
+  const cases = [
+    { label: "tracking only", entries: { fields: [{ name: "tracking_id", value: "9" }], files: [] } },
+    { label: "unknown + whitespace text", entries: { fields: [{ name: "x", value: "1" }, { name: "text", value: "   " }], files: [] } },
+    { label: "title only", entries: { fields: [{ name: "title", value: "Tytuł" }], files: [] } },
+    { label: "url only", entries: { fields: [{ name: "url", value: "https://example.com/a" }], files: [] } },
+    { label: "image only", entries: { images: [image] } },
+    { label: "empty", entries: {} },
+  ];
+  for (const { label, entries } of cases) {
+    const draft = factory(entries);
+    const normalizationSaysUsable = !draft.issues.some((i) => i.code === "NO_SUPPORTED_INPUT");
+    assert.equal(toCaptureInput(draft).ok, normalizationSaysUsable, `disagreement for: ${label}`);
+  }
+});
+
+test("a repeated recognized field whose first value is empty still yields the later useful one", () => {
+  const draft = factory({
+    fields: [{ name: "title", value: "" }, { name: "title", value: "Prawdziwy tytuł" }],
+    files: [],
+  });
+  assert.equal(draft.capture.title, "Prawdziwy tytuł");
+  // The full received sequence is untouched; only the normalized view skips the empty.
+  assert.deepEqual(draft.capture.originalInput.fields, [
+    { name: "title", value: "" },
+    { name: "title", value: "Prawdziwy tytuł" },
+  ]);
+  assert.equal(toCaptureInput(draft).ok, true);
+});
+
+test("a title-only capture keeps its title recoverable through originalShare", () => {
+  // CaptureInput has no title field; the pinned contract keeps the original
+  // shared title recoverable via originalShare.fields instead.
+  const { ok, request } = toCaptureInput(factory({ fields: [{ name: "title", value: "Tytuł" }], files: [] }));
+  assert.equal(ok, true);
+  assert.equal("text" in request.input, false);
+  assert.deepEqual(request.input.originalShare.fields, [{ name: "title", value: "Tytuł" }]);
+});
+
+test("usability reasons name which input made the capture usable", () => {
+  assert.deepEqual(captureUsability({ title: "T", text: null, url: null, supportedImageCount: 0 }).reasons, ["title"]);
+  assert.deepEqual(captureUsability({ title: null, text: null, url: null, supportedImageCount: 2 }).reasons, ["supportedImage"]);
+  assert.equal(captureUsability({ title: "  ", text: "", url: null, supportedImageCount: 0 }).usable, false);
 });

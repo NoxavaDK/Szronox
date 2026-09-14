@@ -91,3 +91,53 @@ export async function observeReceiver(navigatorRef, registerOptions = { scope: "
     controlling: Boolean(navigatorRef.serviceWorker.controller),
   });
 }
+
+/**
+ * Keep the receiver state live.
+ *
+ * C02-R3: the page observed registration and controller once. A first install
+ * legitimately reports `registered_not_controlling`, then the worker activates and
+ * `clients.claim()` grants control — but the visible message stayed stale, so the
+ * UI claimed share capture was unavailable when it had just become available. Loss
+ * or replacement of the controller was equally invisible.
+ *
+ * `controllerchange` is the event that actually marks control changing hands, so
+ * the state is recomputed from it. Registration happens exactly once: re-running
+ * `register()` on every event would be a different bug.
+ *
+ * `onState` is called with the initial state and again on every change. Returns a
+ * detach function. The navigator is injected so an event-capable double can drive
+ * acquisition and loss of control without a browser.
+ */
+export function watchReceiver(navigatorRef, onState, registerOptions) {
+  let detached = false;
+  const emit = (state) => { if (!detached) onState(state); };
+
+  if (!navigatorRef || !("serviceWorker" in navigatorRef)) {
+    emit(receiverState({ serviceWorkerSupported: false, registered: false, controlling: false }));
+    return () => { detached = true; };
+  }
+
+  const container = navigatorRef.serviceWorker;
+  let registered = false;
+
+  // Recompute from current facts only. No re-registration.
+  const refresh = () => emit(receiverState({
+    serviceWorkerSupported: true,
+    registered,
+    controlling: Boolean(container.controller),
+  }));
+
+  const onControllerChange = () => refresh();
+  container.addEventListener?.("controllerchange", onControllerChange);
+
+  observeReceiver(navigatorRef, registerOptions).then((initial) => {
+    registered = initial.state !== "registration_failed" && initial.state !== "unsupported";
+    emit(initial);
+  });
+
+  return () => {
+    detached = true;
+    container.removeEventListener?.("controllerchange", onControllerChange);
+  };
+}
