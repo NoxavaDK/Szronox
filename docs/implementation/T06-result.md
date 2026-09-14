@@ -79,3 +79,72 @@ All four are pure functions of props — no internal data fetching, no persisten
 ## Handoff
 
 Unmerged, on `agents/t06-screens` (new worktree, base `master@d9e062b`). Awaiting lead review. Real browser/device visual verification at 360/320px and any T00/AGENTS.md open gates (Android, live Gemini, browser concurrency) remain outside this task's scope and were not touched.
+
+---
+
+# T06 follow-up — updated for the frozen Reel Detail batch (2026-09-14)
+
+Base: T06 `6b52050`, with baseline `f0e8e9b` merged forward so
+`design/frozen-reel-detail-language-spec.md` is present (a merge, not a reset — Luna's
+work is preserved). Agent: user-launched Opus 5 (`claude-opus-5`), an approved
+substitution for `gpt-5.6-luna`.
+
+## Why
+
+The original interface predated the frozen batch. T08 reported the consequences
+precisely: no controlled status/priority/editor selection, no editors for `inputNote`
+or `editingNotes`, no controlled Materials/export/verification state, and no
+deleted-list/restore or conflict-recovery callbacks — so it had to work around the
+interface instead of wiring it.
+
+## Added controlled interfaces
+
+| Requirement | Interface |
+| --- | --- |
+| status / priority / MONTUJE | `MetadataSelectorsProps` — bottom-sheet selection, one explicit choice applies the mutation, dismissal changes nothing, `selectionError` keeps the authoritative value rendered |
+| NOTATKA DO WEJŚCIA | `SourcesSectionProps.inputNote` — mutable, explicitly **not** part of immutable `originalInput` |
+| UWAGI DO MONTAŻU | `EditingNotesSectionProps` — one shared plain-text field; no threads, per-user notes, checklists or toolbars |
+| MATERIAŁY, export, verification | `MaterialsSectionProps` — `FOLDER kDrive` → `AKTUALNY EKSPORT` → `WERYFIKACJA` in the frozen order, with `VerificationViewState` as a discriminated union so the no-export case renders no verification at all |
+| deleted list + restore | `DeletedReelsScreenProps`, `RestoreBannerProps`, `ReelListScreenProps.onOpenDeleted` |
+| conflict recovery | `ConflictRecoveryView` — offered per field and for the whole Reel; renders the choice and never resolves it |
+| newer Reel Detail structure | `ReelDetailScreenProps` now composes `selectors`, `overflow`, `sources`, `editingNotes`, `materials`, optional `restore` and conflict views |
+
+New components: `ui/detail-sections.tsx` (`MetadataSelectors`, `SourcesSection`,
+`EditingNotesSection`, `MaterialsSection`, `ReelOverflow`, `RestoreBanner`,
+`ConflictNotice`) and `screens/DeletedReelsScreen.tsx`, which reuses the Reel-list
+visual language rather than inventing a card layout.
+
+## Frozen copy has one definition
+
+Every pinned Polish string is exported from `COPY`/`STATUS_LABELS`/`PRIORITY_LABELS`
+rather than typed into a component. Derived verification labels interpolate the real
+identity — `awaitingVerifierLabel`, `verifiedByLabel`, `previousExportVerifiedBy` —
+because the spec's `○ Czeka na Szron` and `✓ Szron` are examples, not literals.
+
+`ui/frozen-copy.test.mjs` reads the spec **and** the source and asserts each string
+appears in both, so a test cannot drift by restating the copy a third time. It also
+asserts: thresholds are mapped per priority (24/96/168), `Usunięte` is absent from
+both the status labels and the five primary tabs while `onOpenDeleted` exists, the
+overflow menu carries no export/kDrive/priority/editor entry, the editing note stays
+one plain field, and the peer name is never hardcoded.
+
+## What this task did NOT do
+
+No network, persistence or AI-result composition. The AI row stays present and
+honestly inert. kDrive rows render an explicit unavailable state rather than
+pretending. Nothing was added to `main.tsx`, controllers, package files or shared
+contracts.
+
+## Verification
+
+```sh
+cd .worktrees/t06-screens
+node --test apps/web/src/ui/frozen-copy.test.mjs   # 8/8 pass
+npm run typecheck --workspace @szronox/web         # clean
+npm run build --workspace @szronox/web             # passes
+```
+
+**Not verified:** no browser inspection at 360 px or 320 px was performed in this
+follow-up. The components typecheck and build, and the copy conformance is asserted,
+but the visual reflow claim from the original T06 run is not re-established for the
+new sections.

@@ -1,21 +1,35 @@
 import '../ui/tokens.css';
 import type { ReelDetailScreenProps } from '../ui/screen-contracts.js';
-import { Avatar, CoverIndicator, PriorityGlyph, SectionRow } from '../ui/primitives.js';
-import { priorityLabel } from '../ui/tokens.js';
-import { BackArrowIcon, CloseIcon, OverflowIcon } from '../ui/icons.js';
+import { Avatar, CoverIndicator, SectionRow } from '../ui/primitives.js';
+import { BackArrowIcon, CloseIcon } from '../ui/icons.js';
+import {
+  ConflictNotice,
+  EditingNotesSection,
+  MaterialsSection,
+  MetadataSelectors,
+  ReelOverflow,
+  RestoreBanner,
+  SourcesSection,
+} from '../ui/detail-sections.js';
 import { PublicationSection } from './PublicationSection.js';
 import styles from './ReelDetailScreen.module.css';
 
-/** Reel Detail — frozen-visual-spec.md sec. 4. Controlled: all state and intents come from props. */
+/**
+ * Reel Detail — frozen-visual-spec.md sec. 4 plus the frozen Reel Detail batch.
+ *
+ * Controlled throughout: every value and intent arrives via props. The section
+ * order is the frozen one — metadata, hooks, script, AI row, ŹRÓDŁA / WEJŚCIE,
+ * UWAGI DO MONTAŻU, MATERIAŁY, PUBLIKACJA.
+ */
 export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
-    onBack, title, onChangeTitle, onOpenOverflowMenu,
-    metadata, onOpenFeedCover,
+    onBack, title, onChangeTitle,
+    metadata, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook,
-    script, onChangeScript,
-    sourcesSummary, onOpenSources, materialsSummary, onOpenMaterials, editingNotesSummary, onOpenEditingNotes,
+    script, onChangeScript, scriptConflict,
+    sources, editingNotes, materials,
     publicationExpanded, onTogglePublication, publication,
-    saveState,
+    saveState, conflict,
   } = props;
 
   return (
@@ -30,112 +44,74 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           value={title}
           onChange={(event) => onChangeTitle(event.target.value)}
         />
-        <button type="button" className={styles.iconButton} onClick={onOpenOverflowMenu} aria-label="Więcej opcji">
-          <OverflowIcon />
-        </button>
+        <CoverIndicator done={metadata.feedCoverDone} onClick={onOpenFeedCover} />
+        <ReelOverflow {...overflow} />
       </header>
 
-      <div className={styles.metadataCluster}>
-        <span className={styles.metadataItem}>{metadata.statusLabel}</span>
-        {metadata.priority !== 'normal' ? (
-          <span className={styles.metadataItem}>
-            <PriorityGlyph priority={metadata.priority} />
-            {priorityLabel[metadata.priority]}
-          </span>
-        ) : null}
-        {metadata.editor ? (
-          <span className={styles.metadataItem}>
-            <Avatar user={metadata.editor} size={18} />
-            {metadata.editor.name}
-          </span>
-        ) : null}
-        {metadata.programmeState === 'matched' ? (
-          <span className={`${styles.metadataItem} ${styles.metadataProgramme}`}>Program</span>
-        ) : null}
-        {metadata.memeName ? <span className={styles.metadataItem}>{metadata.memeName}</span> : null}
-        <span className={styles.metadataItem}>
-          <CoverIndicator done={metadata.feedCoverDone} onClick={onOpenFeedCover} size={16} />
-        </span>
-        {metadata.verificationState ? (
-          <span
-            className={`${styles.metadataItem} ${metadata.verificationState === 'verified' ? styles.metadataVerified : metadata.verificationState === 'outdated' ? styles.metadataOutdated : ''}`}
-          >
-            {metadata.verificationState === 'verified' ? 'Zweryfikowano' : metadata.verificationState === 'outdated' ? 'Nieaktualne' : 'Nie sprawdzone'}
-          </span>
-        ) : null}
-      </div>
+      {/* Shown only when this Reel is soft-deleted. */}
+      {restore ? <RestoreBanner {...restore} /> : null}
 
-      <div className={styles.contentBlock}>
-        <span className={styles.sectionLabel}>Hooki</span>
-        <div className={styles.hookList}>
-          {hooks
-            .slice()
-            .sort((a, b) => a.position - b.position)
-            .map((hook) => (
-              <div className={styles.hookRow} key={hook.id}>
-                <span className={styles.hookText}>{hook.text}</span>
-                {hook.source === 'user' ? <span className={styles.hookOwnTag}>Twój hook</span> : null}
-                <button
-                  type="button"
-                  className={styles.hookRemove}
-                  onClick={() => onRemoveHook(hook.id)}
-                  aria-label="Usuń hook"
-                >
-                  <CloseIcon size={13} />
-                </button>
-              </div>
-            ))}
-        </div>
-      </div>
+      {/* Controlled STATUS / PRIORYTET / MONTUJE (frozen batch sec. 3). */}
+      <MetadataSelectors {...selectors} />
 
-      <div className={styles.contentBlock}>
-        <span className={styles.sectionLabel}>Scenariusz</span>
+      {metadata.programmeState !== 'unchecked' ? (
+        <p className={styles.metadataProgramme}>
+          {metadata.programmeState === 'matched' ? 'Program: powiązane' : 'Program: brak powiązania'}
+        </p>
+      ) : null}
+      {metadata.memeName ? <p className={styles.metadataItem}>Mem: {metadata.memeName}</p> : null}
+
+      <section className={styles.contentBlock}>
+        <h2 className={styles.sectionLabel}>Hooki</h2>
+        <ul className={styles.hookList}>
+          {hooks.map((hook) => (
+            <li key={hook.id} className={styles.hookRow}>
+              <span className={styles.hookText}>{hook.text}</span>
+              {hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}
+              <button
+                type="button"
+                className={styles.hookRemove}
+                onClick={() => onRemoveHook(hook.id)}
+                aria-label="Usuń hook"
+              >
+                <CloseIcon />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className={styles.contentBlock}>
+        <h2 className={styles.sectionLabel}>Skrypt</h2>
         <textarea
           className={styles.scriptField}
-          aria-label="Scenariusz"
+          aria-label="Skrypt"
           value={script}
+          rows={8}
           onChange={(event) => onChangeScript(event.target.value)}
         />
-      </div>
+        {scriptConflict ? <ConflictNotice conflict={scriptConflict} /> : null}
+      </section>
 
-      <div className={styles.aiRow} role="group" aria-label="Akcje AI (niedostępne w tym etapie)">
-        <button type="button" className={styles.aiButton} disabled>
-          Fakty
-        </button>
-        <button type="button" className={styles.aiButton} disabled>
-          Aa Język
-        </button>
-        <button type="button" className={styles.aiButton} disabled>
-          ✦ Opracuj
-        </button>
+      {/* Capability-disabled for this milestone: present, honestly inert. */}
+      <div className={styles.aiRow} aria-label="Akcje AI">
+        <button type="button" className={styles.aiButton} disabled>Fakty</button>
+        <button type="button" className={styles.aiButton} disabled>Aa Język</button>
+        <button type="button" className={styles.aiButton} disabled>✦ Opracuj</button>
       </div>
 
       <div className={styles.secondarySections}>
-        <SectionRow label="Źródła / wejście" summary={sourcesSummary} onClick={onOpenSources} />
-        <SectionRow label="Materiały" summary={materialsSummary} onClick={onOpenMaterials} />
-        <SectionRow label="Uwagi do montażu" summary={editingNotesSummary} onClick={onOpenEditingNotes} />
-        <SectionRow label="Publikacja" onClick={onTogglePublication} />
+        <SourcesSection {...sources} />
+        <EditingNotesSection {...editingNotes} />
+        <MaterialsSection {...materials} />
+        <SectionRow label="PUBLIKACJA" onClick={onTogglePublication} />
+        {publicationExpanded ? <PublicationSection {...publication} /> : null}
       </div>
 
-      {publicationExpanded ? <PublicationSection {...publication} /> : null}
-
-      <SaveStateLine state={saveState} />
+      {conflict ? <ConflictNotice conflict={conflict} /> : null}
+      {saveState === 'saving' ? <p className={styles.saveState} role="status">Zapisywanie…</p> : null}
+      {saveState === 'offline' ? <p className={styles.saveState} role="status">Brak połączenia — zapisano lokalnie</p> : null}
+      {saveState === 'error' ? <p className={styles.saveState} role="alert">Nie udało się zapisać</p> : null}
     </div>
-  );
-}
-
-function SaveStateLine({ state }: { state: ReelDetailScreenProps['saveState'] }) {
-  const text =
-    state === 'saving' ? 'Zapisywanie' :
-    state === 'saved' ? 'Zapisano' :
-    state === 'offline' ? 'Brak sieci · zmiany zapisane lokalnie' :
-    state === 'conflict' ? 'Konflikt zapisu · sprawdź zmiany' :
-    state === 'error' ? 'Nie udało się zapisać' :
-    '';
-  const tone = state === 'offline' || state === 'conflict' ? 'offline' : undefined;
-  return (
-    <p className={styles.saveState} data-tone={tone} aria-live="polite">
-      {text}
-    </p>
   );
 }

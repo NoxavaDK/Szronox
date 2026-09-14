@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import '../../ui/tokens.css';
-import type { CaptureKind, LoadState, SaveState } from '../../ui/screen-contracts.js';
-import type { Priority } from '@szronox/contracts';
+import type { CaptureKind, EditorView, LoadState, MetadataSelector, SaveState } from '../../ui/screen-contracts.js';
+import { COPY } from '../../ui/screen-contracts.js';
+import type { Priority, ReelStatus } from '@szronox/contracts';
 import { ReelListScreen } from '../ReelListScreen.js';
 import { QuickAddScreen } from '../QuickAddScreen.js';
 import { ReelDetailScreen } from '../ReelDetailScreen.js';
 import {
   fixtureCurrentUser,
+  fixtureOtherUser,
   fixtureDetailMetadata,
   fixtureHooks,
   fixtureListItems,
@@ -64,6 +66,7 @@ function ListPreview() {
       items={fixtureListItems}
       onOpenReel={(id) => console.info('open reel', id)}
       onAddNew={() => console.info('add new')}
+      onOpenDeleted={() => console.info('open deleted')}
     />
   );
 }
@@ -119,42 +122,130 @@ function DetailPreview() {
   const [description, setDescription] = useState('Krótki opis publikacji.');
   const [hashtags, setHashtags] = useState('#polityka #transport');
 
+  // Controlled metadata (frozen batch sec. 3).
+  const [openSelector, setOpenSelector] = useState<MetadataSelector | null>(null);
+  const [status, setStatus] = useState<ReelStatus>('editing');
+  const [priority, setPriority] = useState<Priority>('urgent');
+  const [editor, setEditor] = useState<EditorView | null>(fixtureCurrentUser);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+
+  // Sections.
+  const [sourcesExpanded, setSourcesExpanded] = useState(true);
+  const [inputNote, setInputNote] = useState('Ważny fragment od 0:42.');
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [editingNotes, setEditingNotes] = useState('Napisy od 0:03.');
+  const [materialsExpanded, setMaterialsExpanded] = useState(false);
+
+  // Overflow / delete.
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const editorOptions = [fixtureCurrentUser, fixtureOtherUser];
+
   return (
     <ReelDetailScreen
       onBack={() => console.info('back')}
       title={title}
       onChangeTitle={setTitle}
-      onOpenOverflowMenu={() => console.info('overflow')}
-      metadata={fixtureDetailMetadata}
+      metadata={{ ...fixtureDetailMetadata, status, priority, editor, feedCoverDone }}
+      selectors={{
+        open: openSelector,
+        onOpen: setOpenSelector,
+        onDismiss: () => setOpenSelector(null),
+        status,
+        onSelectStatus: (next) => {
+          // Demonstrates the frozen publish gate without inventing a mutation.
+          if (next === 'published' && !feedCoverDone) {
+            setSelectionError(COPY.feedCoverRequired);
+            return;
+          }
+          setSelectionError(null);
+          setStatus(next);
+          setOpenSelector(null);
+        },
+        priority,
+        onSelectPriority: (next) => { setPriority(next); setOpenSelector(null); },
+        editor,
+        editorOptions,
+        onSelectEditor: (id) => {
+          setEditor(id === null ? null : editorOptions.find((option) => option.id === id) ?? null);
+          setOpenSelector(null);
+        },
+        selectionError,
+        saveState: 'idle',
+      }}
+      overflow={{
+        open: overflowOpen,
+        onOpen: () => setOverflowOpen(true),
+        onDismiss: () => setOverflowOpen(false),
+        onRequestDelete: () => { setOverflowOpen(false); setConfirmingDelete(true); },
+        confirmingDelete,
+        onCancelDelete: () => setConfirmingDelete(false),
+        onConfirmDelete: () => { setConfirmingDelete(false); console.info('soft delete'); },
+        deleteState: 'idle',
+      }}
       onOpenFeedCover={() => console.info('open feed cover')}
       hooks={hooks}
       onRemoveHook={(id) => setHooks((current) => current.filter((hook) => hook.id !== id))}
       script={script}
       onChangeScript={setScript}
       aiRowEnabled={false}
-      sourcesSummary="2"
-      onOpenSources={() => console.info('open sources')}
-      materialsSummary={undefined}
-      onOpenMaterials={() => console.info('open materials')}
-      editingNotesSummary={undefined}
-      onOpenEditingNotes={() => console.info('open editing notes')}
+      sources={{
+        expanded: sourcesExpanded,
+        onToggle: () => setSourcesExpanded((value) => !value),
+        originalUrl: 'https://example.com/artykul',
+        onOpenSource: () => console.info('open source'),
+        originalText: null,
+        additionalText: 'Kontekst dopisany przy przechwyceniu.',
+        attachments: [
+          { id: 'a-1', fileName: 'zrzut.png', thumbnailUrl: null, unsupported: false },
+          { id: 'a-2', fileName: 'film.mp4', thumbnailUrl: null, unsupported: true },
+        ],
+        onOpenAttachment: (id) => console.info('open attachment', id),
+        inputNote,
+        onChangeInputNote: setInputNote,
+        inputNoteSaveState: 'idle',
+      }}
+      editingNotes={{
+        expanded: notesExpanded,
+        onToggle: () => setNotesExpanded((value) => !value),
+        value: editingNotes,
+        onChange: setEditingNotes,
+        saveState: 'idle',
+      }}
+      materials={{
+        expanded: materialsExpanded,
+        onToggle: () => setMaterialsExpanded((value) => !value),
+        kdriveFolder: { name: null, unavailable: false },
+        onCreateKdriveFolder: () => console.info('create folder'),
+        onOpenKdriveFolder: () => console.info('open folder'),
+        onRelinkKdriveFolder: () => console.info('relink folder'),
+        kdriveEnabled: false,
+        currentExport: { label: 'montaz-v2.mp4', revision: 2 },
+        onOpenExport: () => console.info('open export'),
+        onReplaceExport: () => console.info('replace export'),
+        // Editor is NOXAVA here, so the derived verifier is the peer.
+        verification: { kind: 'awaiting_peer', peerName: fixtureOtherUser.name },
+        onMarkVerified: () => console.info('mark verified'),
+        saveState: 'idle',
+      }}
       publicationExpanded={publicationExpanded}
-      onTogglePublication={() => setPublicationExpanded((current) => !current)}
+      onTogglePublication={() => setPublicationExpanded((value) => !value)}
       publication={{
         feedCoverDone,
         hasFeedCoverAsset: false,
-        onToggleFeedCoverDone: () => setFeedCoverDone((current) => !current),
-        onAddOrChangeFeedCoverAsset: () => console.info('add/change cover asset'),
+        onToggleFeedCoverDone: () => setFeedCoverDone((value) => !value),
+        onAddOrChangeFeedCoverAsset: () => console.info('cover asset'),
         onOpenFeedCoverAsset: () => console.info('open cover asset'),
         description,
         onChangeDescription: setDescription,
         hashtags,
         onChangeHashtags: setHashtags,
-        onCopyDescription: () => console.info('copy description'),
+        onCopyDescription: () => console.info('copy'),
         publishedAt: null,
         publicationLinks: fixturePublicationLinks,
-        onAddPublicationLink: () => console.info('add publication link'),
-        onOpenPublicationLink: (id) => console.info('open publication link', id),
+        onAddPublicationLink: () => console.info('add link'),
+        onOpenPublicationLink: (id) => console.info('open link', id),
       }}
       saveState="idle"
     />
