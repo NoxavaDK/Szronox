@@ -71,15 +71,22 @@ POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateCon
 `src/endpoint.mjs` now pins that contract in one place, with provenance, and records the
 request fields actually sent. The Interactions shape is quarantined (see G4).
 
-On the structured-output field, one honest nuance is recorded rather than glossed. The
-review notes that `responseSchema` is an OpenAPI subset and the probe put JSON Schema
-`additionalProperties` in it. Checking the documentation directly, `additionalProperties`
-**is** listed among `responseSchema`'s supported properties, so the earlier request was not
-self-evidently invalid. The harness now sends JSON Schema documents in `responseJsonSchema`
-— the field the reference lists for that purpose — and, more importantly, **records the
-field it used on every result**, so a 400 can be diagnosed instead of guessed at. The
-substantive correction is not which field is "right"; it is that a rejected request may
-never be read as a missing provider capability.
+On the structured-output field, the harness sends JSON Schema documents in
+`responseJsonSchema` and **records the field it used on every result**.
+
+> **Corrected by C04 (2026-09-14).** This section originally claimed that
+> `additionalProperties` *is* listed among `responseSchema`'s supported properties,
+> and that the earlier request was therefore not self-evidently invalid. **That
+> claim is withdrawn.** It came from a search-result summary rather than a read of
+> the reference's Schema subsection. The lead inspected `#Schema` and reports its
+> JSON representation omits `additionalProperties`, which appears on that page
+> under the JSON Schema alternative and function `parametersJsonSchema`. Re-fetching
+> the subsection directly returned a truncated page, so this spike cannot
+> substantiate the original assertion and no longer repeats it.
+>
+> The substantive rule is unchanged and was never in dispute: a rejected request is
+> never evidence of a missing capability. Neither side has observed a live
+> invalid-request rejection, and a generic 400 proves no capability limitation.
 
 The combined search + schema case is documented as a Gemini 3 series preview. That
 expectation is now attached to the probe as `modelExpectation`, and the tested model is

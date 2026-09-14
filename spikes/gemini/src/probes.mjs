@@ -25,10 +25,11 @@ import { deflateSync } from "node:zlib";
 import { ENDPOINT_CONTRACT, withResponseSchema } from "./endpoint.mjs";
 import { parseModelJson, validateAgainstSchema } from "./schema.mjs";
 import {
+  candidateHasRetrievedExcerpt,
   candidateSourceCount,
-  hasRetrievedExcerpt,
   unusableSummary,
   usableCandidate,
+  validateSupports,
 } from "./evidence.mjs";
 
 const QUADRANTS = [
@@ -365,10 +366,19 @@ export function buildProbes() {
         // G1: everything below is read from ONE candidate. The previous version
         // summed sources across candidates while reading queries from the first,
         // so an ungrounded candidate could borrow a sibling's citations.
+        //
+        // C03-R1: supports are validated as relationships, not counted. A support
+        // naming a nonexistent part or a dangling chunk index is not evidence.
         const queries = candidate.searchQueries.length;
         const sources = candidateSourceCount(candidate);
-        const supports = candidate.supports.length;
-        const detail = { candidateIndex: candidate.candidateIndex, queries, sources, supports };
+        const supports = validateSupports(candidate);
+        const detail = {
+          candidateIndex: candidate.candidateIndex,
+          queries,
+          sources,
+          validSupports: supports.validCount,
+          invalidSupports: supports.invalid,
+        };
 
         if (queries === 0 && sources === 0) {
           return fail("No search execution metadata and no sources on the answering candidate; the answer is ungrounded.", detail);
@@ -377,13 +387,21 @@ export function buildProbes() {
         if (queries === 0) {
           return unverified("Sources are present but no executed query is reported on this candidate, so search execution is unproven.", detail);
         }
-        if (supports === 0) {
-          return unverified("Queries and sources are present but nothing maps output spans to them.", detail);
+        if (supports.validCount === 0) {
+          return supports.invalidCount > 0
+            ? fail(
+                "Every claim-to-source mapping on this candidate is invalid: references dangle or spans do not resolve. "
+                + "Sources that nothing validly cites do not establish grounding.",
+                detail,
+              )
+            : unverified("Queries and sources are present but nothing maps output spans to them.", detail);
         }
-        return pass("Search executed and source references were attached on the answering candidate.", {
+        return pass("Search executed and validated source mappings were attached on the answering candidate.", {
           ...detail,
-          retrievedExcerptsPresent: hasRetrievedExcerpt(extracted),
-          limitation: hasRetrievedExcerpt(extracted)
+          // Candidate-scoped: the previous helper could report a sibling
+          // candidate's excerpt inside this candidate's result.
+          retrievedExcerptsPresent: candidateHasRetrievedExcerpt(candidate),
+          limitation: candidateHasRetrievedExcerpt(candidate)
             ? "Excerpt text present."
             : "Sources are tool_metadata_only: URLs and titles, with no retrieved excerpt to quote.",
         });
@@ -448,26 +466,31 @@ export function buildProbes() {
 
         // G1: the model's own citedUrls are model_output. They are never evidence
         // that grounding ran. Only provider metadata on THIS candidate counts.
+        // C03-R1: mappings are validated, not counted.
         const queries = candidate.searchQueries.length;
         const sources = candidateSourceCount(candidate);
-        const supports = candidate.supports.length;
+        const supports = validateSupports(candidate);
         const detail = {
           model: model ?? null,
           candidateIndex: candidate.candidateIndex,
-          queries, sources, supports,
+          queries, sources,
+          validSupports: supports.validCount,
+          invalidSupports: supports.invalid,
           modelClaimedUrls: Array.isArray(result.value.citedUrls) ? result.value.citedUrls.length : 0,
           modelClaimedUrlsAreNotEvidence: true,
+          retrievedExcerptsPresent: candidateHasRetrievedExcerpt(candidate),
         };
 
-        if (sources === 0 || queries === 0 || supports === 0) {
+        if (sources === 0 || queries === 0 || supports.validCount === 0) {
           return fail(
             "JSON validated, but the combination is unproven: the answering candidate lacks executed queries, "
-            + "source references or span mappings. Model-supplied citedUrls do not substitute for provider metadata.",
+            + "source references or a valid span-to-source mapping. Model-supplied citedUrls do not substitute "
+            + "for provider metadata, and a dangling or unresolvable mapping is not a mapping.",
             detail,
           );
         }
         return result.fullyValidated
-          ? pass("Search grounding and the response schema applied together, with citations retained on the same candidate.", detail)
+          ? pass("Search grounding and the response schema applied together, with validated citations retained on the same candidate.", detail)
           : unverified("Grounding evidence is present, but the schema uses keywords this validator cannot check.", {
               ...detail, unsupportedChecks: result.unsupportedChecks,
             });

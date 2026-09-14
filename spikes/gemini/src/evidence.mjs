@@ -113,23 +113,49 @@ function readSupports(grounding) {
   });
 }
 
+/**
+ * The documented `UrlRetrievalStatus` enum, exactly.
+ *
+ * C04/C03-R2: the previous version recognised statuses by prefix and suffix
+ * pattern, which is not enum validation. `BOGUS_SUCCESS` matched `/_SUCCESS$/`
+ * and passed accessible retrieval; `URL_RETRIEVAL_STATUS_NEW_UNKNOWN` matched the
+ * prefix, was not SUCCESS and not UNSPECIFIED, and so passed as a *reported
+ * failure*. Both were false evidence.
+ *
+ * Membership is now exact. An unrecognised value is preserved verbatim and leaves
+ * the capability unverified, so a future enum addition degrades to "unknown"
+ * rather than to a spurious pass.
+ *
+ * Values and ordinals confirmed 2026-09-14 against the generativelanguage
+ * protobuf reference: UNSPECIFIED(0), SUCCESS(1), ERROR(2), PAYWALL(3), UNSAFE(4).
+ * https://ai.google.dev/api/generate-content#UrlRetrievalStatus
+ */
+export const URL_RETRIEVAL_SUCCESS = "URL_RETRIEVAL_STATUS_SUCCESS";
+export const URL_RETRIEVAL_UNSPECIFIED = "URL_RETRIEVAL_STATUS_UNSPECIFIED";
+export const URL_RETRIEVAL_FAILURES = new Set([
+  "URL_RETRIEVAL_STATUS_ERROR",
+  "URL_RETRIEVAL_STATUS_PAYWALL",
+  "URL_RETRIEVAL_STATUS_UNSAFE",
+]);
+
 function readUrlRetrieval(metadata) {
   const entries = metadata?.urlMetadata ?? metadata?.url_metadata ?? [];
   return (Array.isArray(entries) ? entries : []).map((entry) => {
     const status = entry?.urlRetrievalStatus ?? entry?.url_retrieval_status ?? null;
-    // Only an explicit SUCCESS is a retrieval. An unknown or unspecified status
-    // is neither success nor a demonstrated failure (G1).
-    const known = typeof status === "string" && /^URL_RETRIEVAL_STATUS_/.test(status);
-    const success = typeof status === "string" && /_SUCCESS$/.test(status);
-    const unspecified = typeof status === "string" && /_UNSPECIFIED$/.test(status);
+    const success = status === URL_RETRIEVAL_SUCCESS;
+    const failed = typeof status === "string" && URL_RETRIEVAL_FAILURES.has(status);
+    // UNSPECIFIED is a documented value but reports nothing either way.
+    const recognised = success || failed || status === URL_RETRIEVAL_UNSPECIFIED;
     return {
       origin: "tool_metadata",
       url: entry?.retrievedUrl ?? entry?.retrieved_url ?? null,
+      // Preserved exactly as received, recognised or not.
       status,
-      statusRecognised: known,
+      statusRecognised: recognised,
       retrieved: success,
-      // A failure must be positively reported, not inferred from "not success".
-      retrievalFailed: known && !success && !unspecified,
+      // A failure must be one of the documented failure values, never inferred
+      // from "not success".
+      retrievalFailed: failed,
     };
   });
 }
@@ -184,7 +210,86 @@ export function resolveSegmentText(candidate, segment) {
   if (startIndex < 0 || endIndex > bytes.length || startIndex > endIndex) {
     return { ok: false, reason: "offset_out_of_range", partByteLength: bytes.length, startIndex, endIndex };
   }
-  return { ok: true, text: bytes.subarray(startIndex, endIndex).toString("utf8"), partIndex: part.partIndex };
+
+  const slice = bytes.subarray(startIndex, endIndex);
+  const text = slice.toString("utf8");
+
+  // C04/C03-R3: a numerically valid range can still split a multibyte character.
+  // `Buffer.toString` silently substitutes U+FFFD, so `ą` with bytes [1,2) used to
+  // return ok:true and a replacement character — corrupted success, exactly what
+  // the typed-failure contract exists to prevent.
+  //
+  // The check is a re-encode round trip rather than scanning the output for
+  // U+FFFD: a part whose source text genuinely contains a literal replacement
+  // character re-encodes identically and is correctly accepted.
+  if (!Buffer.from(text, "utf8").equals(slice)) {
+    return {
+      ok: false,
+      reason: "invalid_utf8_boundary",
+      detail: "byte range splits a multibyte character",
+      partIndex: part.partIndex, startIndex, endIndex,
+    };
+  }
+  return { ok: true, text, partIndex: part.partIndex };
+}
+
+/**
+ * Validate a candidate's grounding supports as actual evidence relationships.
+ *
+ * C04/C03-R1: the probes previously counted `supports.length`. A support naming
+ * `partIndex: 99` and `groundingChunkIndices: [999]` therefore proved grounding
+ * even though neither the cited part nor the referenced source existed. Array
+ * length is not a relationship.
+ *
+ * A support counts only when all of the following hold, all scoped to THIS
+ * candidate:
+ *   - it carries a segment,
+ *   - every chunk index it names refers to a source that exists here,
+ *   - its coordinates resolve (valid part, in-range, whole characters),
+ *   - the resolved span is non-empty.
+ *
+ * Invalid supports are returned with a reason rather than dropped, so a verdict
+ * can report why evidence was refused.
+ */
+export function validateSupports(candidate) {
+  const sources = candidate?.sources ?? [];
+  const known = new Set(sources.map((source) => source.chunkIndex));
+  const valid = [];
+  const invalid = [];
+
+  for (const [position, support] of (candidate?.supports ?? []).entries()) {
+    const indices = support?.groundingChunkIndices ?? [];
+    if (!support?.segment) {
+      invalid.push({ position, reason: "missing_segment" });
+      continue;
+    }
+    if (indices.length === 0) {
+      invalid.push({ position, reason: "no_source_reference" });
+      continue;
+    }
+    const dangling = indices.filter((index) => !known.has(index));
+    if (dangling.length > 0) {
+      invalid.push({ position, reason: "dangling_source_reference", danglingIndices: dangling });
+      continue;
+    }
+    const resolved = resolveSegmentText(candidate, support.segment);
+    if (!resolved.ok) {
+      invalid.push({ position, reason: `unresolvable_segment:${resolved.reason}` });
+      continue;
+    }
+    if (resolved.text.length === 0) {
+      invalid.push({ position, reason: "empty_span" });
+      continue;
+    }
+    valid.push({ position, groundingChunkIndices: indices, resolvedText: resolved.text, partIndex: resolved.partIndex });
+  }
+
+  return { valid, invalid, validCount: valid.length, invalidCount: invalid.length };
+}
+
+/** Sources on ONE candidate that actually carry retrieved text. */
+export function candidateHasRetrievedExcerpt(candidate) {
+  return (candidate?.sources ?? []).some((source) => source.evidenceKind === "retrieved_excerpt");
 }
 
 /**

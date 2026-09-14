@@ -397,3 +397,195 @@ test("G6.3 a meaningful error code is not masked by a generic error name", () =>
   const unknown = classifyTransportError(new Error("something new"));
   assert.equal(unknown.retryable, false, "an unnamed failure must stay terminal rather than loop");
 });
+
+// ═════════════════════ C04 — lead review of C03 at bf910f2 ═══════════════════
+//
+// Each case below was reproduced by the lead against bf910f2 and must not
+// regress. Sources: docs/implementation/C03-lead-review.md R1-R3.
+
+import { URL_RETRIEVAL_FAILURES, candidateHasRetrievedExcerpt, validateSupports } from "../src/evidence.mjs";
+
+const grounded = (supports, chunks = [{ web: { uri: "https://example.invalid/a", title: "A" } }]) => ({
+  candidates: [{
+    content: { parts: [{ text: "Answer." }] },
+    finishReason: "STOP",
+    groundingMetadata: { webSearchQueries: ["q"], groundingChunks: chunks, groundingSupports: supports },
+  }],
+});
+
+test("C04-R1 a support naming a nonexistent part and a dangling chunk index is not grounding", () => {
+  // Reproduced by the lead: one query, one source, one support -> PASS on both
+  // probes, although neither the cited part nor the referenced source existed.
+  const bad = [{ segment: { partIndex: 99, startIndex: 0, endIndex: 5 }, groundingChunkIndices: [999] }];
+  const search = verdict("search_grounding", grounded(bad));
+  assert.equal(search.verdict, "fail");
+  assert.equal(search.validSupports, 0);
+  assert.equal(search.invalidSupports[0].reason, "dangling_source_reference");
+
+  const combinedBody = JSON.stringify({ answer: "x", citedUrls: [] });
+  const combined = verdict("structured_output_with_search", {
+    candidates: [{
+      content: { parts: [{ text: combinedBody }] },
+      finishReason: "STOP",
+      groundingMetadata: {
+        webSearchQueries: ["q"],
+        groundingChunks: [{ web: { uri: "https://example.invalid/a", title: "A" } }],
+        groundingSupports: bad,
+      },
+    }],
+  });
+  assert.equal(combined.verdict, "fail");
+  assert.equal(combined.validSupports, 0);
+});
+
+test("C04-R1b a valid mapping to an existing source does pass", () => {
+  const good = [{ segment: { partIndex: 0, startIndex: 0, endIndex: 6 }, groundingChunkIndices: [0] }];
+  const outcome = verdict("search_grounding", grounded(good));
+  assert.equal(outcome.verdict, "pass");
+  assert.equal(outcome.validSupports, 1);
+});
+
+test("C04-R1c every invalid mapping shape is named rather than silently dropped", () => {
+  const candidate = extractEvidence(grounded([
+    { groundingChunkIndices: [0] },                                                   // no segment
+    { segment: { partIndex: 0, startIndex: 0, endIndex: 6 }, groundingChunkIndices: [] }, // no reference
+    { segment: { partIndex: 0, startIndex: 0, endIndex: 6 }, groundingChunkIndices: [7] }, // dangling
+    { segment: { partIndex: 0, startIndex: 2, endIndex: 2 }, groundingChunkIndices: [0] }, // empty span
+    { segment: { partIndex: 0, startIndex: 0, endIndex: 999 }, groundingChunkIndices: [0] }, // out of range
+  ])).candidates[0];
+  const outcome = validateSupports(candidate);
+  assert.equal(outcome.validCount, 0);
+  assert.deepEqual(outcome.invalid.map((entry) => entry.reason), [
+    "missing_segment",
+    "no_source_reference",
+    "dangling_source_reference",
+    "empty_span",
+    "unresolvable_segment:offset_out_of_range",
+  ]);
+});
+
+test("C04-R1d retrieved-excerpt reporting stays on the selected candidate", () => {
+  // The old helper scanned every candidate, so a sibling's excerpt could be
+  // reported inside the selected candidate's result.
+  const extracted = extractEvidence({
+    candidates: [
+      { content: { parts: [{ text: "Selected." }] }, finishReason: "STOP",
+        groundingMetadata: { groundingChunks: [{ web: { uri: "https://example.invalid/a", title: "A" } }] } },
+      { content: { parts: [{ text: "Sibling." }] }, finishReason: "STOP",
+        groundingMetadata: { groundingChunks: [{ web: { uri: "https://example.invalid/b", title: "B", text: "Fetched body." } }] } },
+    ],
+  });
+  assert.equal(candidateHasRetrievedExcerpt(extracted.candidates[0]), false, "selected candidate has no excerpt");
+  assert.equal(candidateHasRetrievedExcerpt(extracted.candidates[1]), true);
+});
+
+test("C04-R2 URL status recognition is exact enum membership, not pattern matching", () => {
+  // BOGUS_SUCCESS matched /_SUCCESS$/ and passed accessible retrieval.
+  const accessible = (status) => verdict("url_context_accessible", {
+    candidates: [{ content: { parts: [{ text: "h" }] }, finishReason: "STOP",
+      urlContextMetadata: { urlMetadata: [{ retrievedUrl: "https://example.com/", urlRetrievalStatus: status }] } }],
+  });
+  assert.equal(accessible("BOGUS_SUCCESS").verdict, "unverified");
+  assert.equal(accessible("URL_RETRIEVAL_STATUS_NEW_UNKNOWN").verdict, "unverified");
+  assert.equal(accessible("URL_RETRIEVAL_STATUS_SUCCESS").verdict, "pass");
+});
+
+test("C04-R2b only documented failure values are a reported retrieval failure", () => {
+  const unavailable = (status) => verdict("url_context_unavailable", {
+    candidates: [{ content: { parts: [{ text: "h" }] }, finishReason: "STOP",
+      urlContextMetadata: { urlMetadata: [{ retrievedUrl: "https://t03-diagnostic.invalid/page", urlRetrievalStatus: status }] } }],
+  });
+  // ERROR, PAYWALL and UNSAFE are the documented failures.
+  for (const status of URL_RETRIEVAL_FAILURES) {
+    assert.equal(unavailable(status).verdict, "pass", `${status} is a documented failure`);
+  }
+  // UNSPECIFIED is documented but reports nothing; an invented value even less so.
+  assert.equal(unavailable("URL_RETRIEVAL_STATUS_UNSPECIFIED").verdict, "unverified");
+  assert.equal(unavailable("URL_RETRIEVAL_STATUS_NEW_UNKNOWN").verdict, "unverified");
+});
+
+test("C04-R2c an unrecognised status is preserved verbatim", () => {
+  const extracted = extractEvidence({
+    candidates: [{ content: { parts: [{ text: "h" }] }, finishReason: "STOP",
+      urlContextMetadata: { urlMetadata: [{ retrievedUrl: "https://example.com/", urlRetrievalStatus: "BOGUS_SUCCESS" }] } }],
+  });
+  const [entry] = extracted.candidates[0].urlRetrieval;
+  assert.equal(entry.status, "BOGUS_SUCCESS", "the received string is not normalised away");
+  assert.equal(entry.statusRecognised, false);
+  assert.equal(entry.retrieved, false);
+  assert.equal(entry.retrievalFailed, false);
+});
+
+test("C04-R3 a byte range that splits a multibyte character is a typed failure", () => {
+  // Reproduced by the lead: text "ą", bytes [1,2) returned ok:true with U+FFFD.
+  const candidate = extractEvidence({
+    candidates: [{ content: { parts: [{ text: "ą" }] }, finishReason: "STOP" }],
+  }).candidates[0];
+  const outcome = resolveSegmentText(candidate, { partIndex: 0, startIndex: 1, endIndex: 2 });
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.reason, "invalid_utf8_boundary");
+  assert.equal(outcome.text, undefined, "no corrupted text is returned alongside the failure");
+});
+
+test("C04-R3b a literal replacement character in the source is still resolvable", () => {
+  // The check must be a re-encode round trip, not a scan for U+FFFD in the
+  // output, or genuine content would be rejected.
+  const candidate = extractEvidence({
+    candidates: [{ content: { parts: [{ text: "a�b" }] }, finishReason: "STOP" }],
+  }).candidates[0];
+  const outcome = resolveSegmentText(candidate, { partIndex: 0, startIndex: 1, endIndex: 4 });
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.text, "�");
+});
+
+test("C04-R3c a split boundary disqualifies the mapping in the grounding verdict", () => {
+  // R3 wired into R1: a correct helper unused by verdicts would fix nothing.
+  const outcome = verdict("search_grounding", {
+    candidates: [{
+      content: { parts: [{ text: "ąę" }] },
+      finishReason: "STOP",
+      groundingMetadata: {
+        webSearchQueries: ["q"],
+        groundingChunks: [{ web: { uri: "https://example.invalid/a", title: "A" } }],
+        groundingSupports: [{ segment: { partIndex: 0, startIndex: 1, endIndex: 3 }, groundingChunkIndices: [0] }],
+      },
+    }],
+  });
+  assert.equal(outcome.verdict, "fail");
+  assert.equal(outcome.invalidSupports[0].reason, "unresolvable_segment:invalid_utf8_boundary");
+});
+
+test("C04-R3d valid multipart and Unicode coordinates still resolve", () => {
+  const candidate = extractEvidence({
+    candidates: [{
+      content: { parts: [{ text: "Pierwsza część odpowiedzi. " }, { text: "Zażółć gęślą jaźń dla źdźbła." }] },
+      finishReason: "STOP",
+    }],
+  }).candidates[0];
+  const outcome = resolveSegmentText(candidate, { partIndex: 1, startIndex: 11, endIndex: 19 });
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.text, "gęślą");
+});
+
+test("C04-R5 a schema-sending probe records its structured-output field", async () => {
+  const { runLive } = await import("../src/diagnostic.mjs");
+  const realFetch = globalThis.fetch;
+  const realKey = process.env.GEMINI_API_KEY;
+  try {
+    process.env.GEMINI_API_KEY = "fake-diagnostic-key-000000";
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "hello" }] }, finishReason: "STOP" }],
+    }) });
+    const results = await runLive();
+    const schemaProbe = results.find((r) => r.probe === "structured_output_alone");
+    const plainProbe = results.find((r) => r.probe === "url_context_accessible");
+    assert.equal(schemaProbe.structuredOutputField, "responseJsonSchema");
+    assert.equal(schemaProbe.apiVersion, "v1beta");
+    // Narrowed honestly: probes that send no schema record null rather than
+    // implying a field was used.
+    assert.equal(plainProbe.structuredOutputField, null);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = realKey;
+  }
+});

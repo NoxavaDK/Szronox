@@ -34,12 +34,21 @@ export const DEFAULT_MODEL = "gemini-2.5-flash";
  * `responseJsonSchema`. The previous version sent a JSON Schema document in
  * `responseSchema`.
  *
- * Honest nuance, recorded rather than glossed: the documented supported-property
- * list for `responseSchema` DOES include `additionalProperties`, so the previous
- * request was not self-evidently invalid. The correction that actually matters is
- * not which field is "right" — it is that the harness must never infer a provider
- * capability limit from a rejected request (G1/G3). Field choice is now explicit
- * and recorded on every result so a 400 can be diagnosed instead of guessed at.
+ * Correction (C04, after lead review of C03): an earlier version of this comment
+ * asserted that the documented supported-property list for `responseSchema`
+ * includes `additionalProperties`. **That assertion is withdrawn.** It came from a
+ * search-result summary, not from reading the reference's Schema subsection. The
+ * lead inspected `#Schema` and reports that its JSON representation omits
+ * `additionalProperties`, which appears on that page under the JSON Schema
+ * alternative and function `parametersJsonSchema` instead. Attempting to re-verify
+ * the subsection directly returned a truncated page, so this spike cannot
+ * substantiate the original claim and does not repeat it.
+ *
+ * What stands, and is what actually matters: the harness must never infer a
+ * provider capability limit from a rejected request (G1/G3). Neither side has
+ * observed a live invalid-request rejection, and a generic 400 proves nothing
+ * about capability. Field choice is explicit and recorded on every result so a 400
+ * can be diagnosed rather than guessed at.
  *
  * Sources, accessed 2026-09-14:
  *   https://ai.google.dev/api/generate-content

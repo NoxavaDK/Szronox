@@ -26,7 +26,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { DEFAULT_MODEL, ENDPOINT_CONTRACT } from "./endpoint.mjs";
+import { DEFAULT_MODEL, ENDPOINT_CONTRACT, STRUCTURED_OUTPUT_FIELD } from "./endpoint.mjs";
 import { extractEvidence, resolveSegmentText } from "./evidence.mjs";
 import { buildProbes } from "./probes.mjs";
 import { describeError, generateContent, redact } from "./transport.mjs";
@@ -173,6 +173,11 @@ async function runLive() {
   for (const probe of buildProbes()) {
     // Every result is redacted as a whole before it joins the list, so no field
     // added later can reach output unsanitised (G2).
+    // C04/C03-R5: the C03 report claimed every result records its
+    // structured-output field, but the base recorded endpoint and model only.
+    // The field and API version are now emitted for the probes that actually
+    // send a schema, and omitted for those that do not, so the artifact matches
+    // the documentation instead of overstating it.
     const base = {
       probe: probe.id,
       capability: probe.capability,
@@ -180,6 +185,8 @@ async function runLive() {
       evidenceLevel: "live_provider",
       model,
       endpoint: ENDPOINT_CONTRACT.endpoint,
+      apiVersion: ENDPOINT_CONTRACT.apiVersion,
+      structuredOutputField: probe.schema ? STRUCTURED_OUTPUT_FIELD : null,
     };
     try {
       const { body, attempts } = await generateContent({ apiKey, model, request: probe.request });
