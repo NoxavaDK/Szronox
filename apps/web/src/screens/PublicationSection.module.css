@@ -1,0 +1,107 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-5);
+  padding-top: var(--sz-space-3);
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-2);
+}
+
+.label {
+  font-size: var(--sz-text-section-label-size);
+  line-height: var(--sz-text-section-label-line);
+  font-weight: var(--sz-text-section-label-weight);
+  letter-spacing: var(--sz-text-section-label-tracking);
+  text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+}
+
+.coverRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-3);
+}
+
+.coverToggle {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--sz-touch-target);
+  cursor: pointer;
+  font-family: var(--sz-font-family);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.coverActions {
+  display: flex;
+  gap: var(--sz-space-3);
+  margin-left: auto;
+}
+
+.textField {
+  border: none;
+  border-bottom: 1px solid var(--sz-color-divider);
+  background: none;
+  font-family: var(--sz-font-family);
+  font-size: var(--sz-text-body-size);
+  line-height: var(--sz-text-body-line);
+  color: var(--sz-color-text-primary);
+  padding: var(--sz-space-2) 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 64px;
+  field-sizing: content;
+}
+
+.textField:focus {
+  outline: none;
+  border-bottom-color: var(--sz-color-cobalt);
+}
+
+.postPublication {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-2);
+}
+
+.publishedAt {
+  font-size: 13px;
+  color: var(--sz-color-text-secondary);
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sz-space-2);
+  min-height: var(--sz-touch-target);
+  border-top: 1px solid var(--sz-color-divider);
+  font-size: 14px;
+  color: var(--sz-color-cobalt);
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.linkUrl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}

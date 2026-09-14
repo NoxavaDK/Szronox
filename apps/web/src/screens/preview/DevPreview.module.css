@@ -1,0 +1,43 @@
+.harness {
+  min-height: 100%;
+  background: #d8d8d4;
+  font-family: var(--sz-font-family);
+  padding: var(--sz-space-4);
+  box-sizing: border-box;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sz-space-3);
+  margin-bottom: var(--sz-space-4);
+  align-items: center;
+}
+
+.controls select,
+.controls button {
+  font-family: var(--sz-font-family);
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: var(--sz-radius-sm);
+  border: 1px solid var(--sz-color-divider);
+  background: var(--sz-color-surface);
+}
+
+.frame {
+  margin: 0 auto;
+  background: var(--sz-color-surface);
+  border: 1px solid #b9b9b4;
+  outline: 1px dashed #9a9a94;
+  outline-offset: 4px;
+  min-height: 640px;
+  overflow: auto;
+  transition: width 0.15s ease;
+}
+
+.frameLabel {
+  text-align: center;
+  font-size: 12px;
+  color: #55554f;
+  margin-bottom: 6px;
+}

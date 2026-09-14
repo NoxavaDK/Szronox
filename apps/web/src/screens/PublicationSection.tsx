@@ -1,0 +1,81 @@
+import '../ui/tokens.css';
+import type { PublicationSectionProps } from '../ui/screen-contracts.js';
+import { CoverIndicator, TextAction } from '../ui/primitives.js';
+import { ExternalLinkIcon } from '../ui/icons.js';
+import styles from './PublicationSection.module.css';
+
+/**
+ * Expanded inline Reel Detail section (frozen-visual-spec.md sec. 6) — never a
+ * separate large screen. Rendered by ReelDetailScreen when its PUBLIKACJA row
+ * is toggled open, and exported standalone for isolated development/testing.
+ */
+export function PublicationSection(props: PublicationSectionProps) {
+  const {
+    feedCoverDone, hasFeedCoverAsset, onToggleFeedCoverDone, onAddOrChangeFeedCoverAsset, onOpenFeedCoverAsset,
+    description, onChangeDescription,
+    hashtags, onChangeHashtags,
+    onCopyDescription,
+    publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
+  } = props;
+
+  return (
+    <div className={styles.section}>
+      <div className={styles.block}>
+        <span className={styles.label}>Okładka do feedu</span>
+        <div className={styles.coverRow}>
+          <button type="button" className={styles.coverToggle} onClick={onToggleFeedCoverDone}>
+            <CoverIndicator done={feedCoverDone} size={22} />
+            <span>{feedCoverDone ? 'Gotowa' : 'Nie gotowa'}</span>
+          </button>
+          <div className={styles.coverActions}>
+            <TextAction onClick={onAddOrChangeFeedCoverAsset}>
+              {hasFeedCoverAsset ? 'Zmień' : '+ Dodaj'}
+            </TextAction>
+            {hasFeedCoverAsset ? <TextAction onClick={onOpenFeedCoverAsset}>Otwórz</TextAction> : null}
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.block}>
+        <span className={styles.label}>Opis</span>
+        <textarea
+          className={styles.textField}
+          aria-label="Opis publikacji"
+          value={description}
+          onChange={(event) => onChangeDescription(event.target.value)}
+        />
+      </div>
+
+      <div className={styles.block}>
+        <span className={styles.label}>Hashtagi</span>
+        <textarea
+          className={styles.textField}
+          aria-label="Hashtagi"
+          value={hashtags}
+          onChange={(event) => onChangeHashtags(event.target.value)}
+        />
+      </div>
+
+      <TextAction onClick={onCopyDescription}>Kopiuj opis</TextAction>
+
+      <div className={styles.block}>
+        <span className={styles.label}>Po publikacji</span>
+        <div className={styles.postPublication}>
+          {publishedAt ? <span className={styles.publishedAt}>{publishedAt}</span> : null}
+          {publicationLinks.map((link) => (
+            <button
+              key={link.id}
+              type="button"
+              className={styles.link}
+              onClick={() => onOpenPublicationLink(link.id)}
+            >
+              <span className={styles.linkUrl}>{link.url}</span>
+              <ExternalLinkIcon />
+            </button>
+          ))}
+          <TextAction onClick={onAddPublicationLink}>+ Dodaj link</TextAction>
+        </div>
+      </div>
+    </div>
+  );
+}
