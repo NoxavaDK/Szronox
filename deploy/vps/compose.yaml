@@ -1,0 +1,30 @@
+name: szronox
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile
+    image: szronox:${SZRONOX_RELEASE:?Set SZRONOX_RELEASE to the release identifier}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:3010:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

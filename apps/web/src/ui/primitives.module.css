@@ -1,0 +1,265 @@
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+  font-weight: 650;
+  flex-shrink: 0;
+  overflow: hidden;
+  line-height: 1;
+}
+
+.avatarImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.textAction {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: var(--sz-space-2) var(--sz-space-1);
+  min-height: var(--sz-touch-target);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sz-space-1);
+  font-family: var(--sz-font-family);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sz-color-cobalt);
+  cursor: pointer;
+}
+
+.textAction:disabled {
+  color: var(--sz-color-text-secondary);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.textAction[data-tone='quiet'] {
+  color: var(--sz-color-text-secondary);
+}
+
+.textAction[data-tone='danger'] {
+  color: var(--sz-color-urgent);
+}
+
+.textAction:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 2px;
+  border-radius: var(--sz-radius-sm);
+}
+
+.button {
+  appearance: none;
+  border: none;
+  border-radius: var(--sz-radius-md);
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+  font-family: var(--sz-font-family);
+  font-size: 16px;
+  font-weight: 650;
+  min-height: 48px;
+  padding: 0 var(--sz-space-5);
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.button[data-full-width='true'] {
+  width: 100%;
+  display: block;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--sz-color-text-primary);
+  outline-offset: 2px;
+}
+
+.priorityGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.prioritySelector {
+  display: flex;
+  gap: var(--sz-space-2);
+}
+
+.prioritySelectorOption {
+  appearance: none;
+  border: 1px solid var(--sz-color-divider);
+  background: var(--sz-color-surface);
+  border-radius: var(--sz-radius-md);
+  min-height: var(--sz-touch-target);
+  padding: 0 var(--sz-space-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sz-font-family);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
+  flex: 1;
+  justify-content: center;
+}
+
+.prioritySelectorOption[aria-pressed='true'] {
+  border-color: currentColor;
+  background: var(--sz-color-background);
+}
+
+.prioritySelectorOption:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 1px;
+}
+
+.sectionRow {
+  appearance: none;
+  border: none;
+  background: none;
+  width: 100%;
+  min-height: var(--sz-touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sz-space-3);
+  padding: var(--sz-space-3) 0;
+  border-top: 1px solid var(--sz-color-divider);
+  font-family: var(--sz-font-family);
+  cursor: pointer;
+  text-align: left;
+  color: var(--sz-color-text-primary);
+}
+
+.sectionRowLabel {
+  font-size: var(--sz-text-section-label-size);
+  line-height: var(--sz-text-section-label-line);
+  font-weight: var(--sz-text-section-label-weight);
+  letter-spacing: var(--sz-text-section-label-tracking);
+  text-transform: uppercase;
+  color: var(--sz-color-text-primary);
+}
+
+.sectionRowRight {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-2);
+  color: var(--sz-color-text-secondary);
+  font-size: 13px;
+}
+
+.sectionRow:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: -2px;
+}
+
+.floatingAddButton {
+  position: fixed;
+  right: var(--sz-space-4);
+  bottom: var(--sz-space-4);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(23, 23, 23, 0.22);
+}
+
+.floatingAddButton:focus-visible {
+  outline: 2px solid var(--sz-color-text-primary);
+  outline-offset: 2px;
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sz-space-2);
+  padding: var(--sz-space-4) 0;
+  font-family: var(--sz-font-family);
+  color: var(--sz-color-text-secondary);
+  font-size: 14px;
+}
+
+.bannerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-2);
+}
+
+.banner[data-tone='error'] .bannerRow,
+.banner[data-tone='conflict'] .bannerRow {
+  color: var(--sz-color-urgent);
+}
+
+.banner[data-tone='offline'] .bannerRow {
+  color: var(--sz-color-warning);
+}
+
+.attentionStrip {
+  appearance: none;
+  border: none;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sz-space-2) 0;
+  font-family: var(--sz-font-family);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sz-color-warning);
+  cursor: pointer;
+}
+
+.compactTabs {
+  display: flex;
+  gap: var(--sz-space-4);
+  border-bottom: 1px solid var(--sz-color-divider);
+}
+
+.compactTab {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: var(--sz-space-2) 0;
+  min-height: var(--sz-touch-target);
+  font-family: var(--sz-font-family);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.compactTab[aria-selected='true'] {
+  color: var(--sz-color-text-primary);
+  border-bottom-color: var(--sz-color-cobalt);
+}
+
+.compactTab:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 2px;
+}

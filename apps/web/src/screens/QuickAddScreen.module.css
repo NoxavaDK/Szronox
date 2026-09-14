@@ -1,0 +1,188 @@
+.screen {
+  min-height: 100%;
+  background: var(--sz-color-background);
+  font-family: var(--sz-font-family);
+  color: var(--sz-color-text-primary);
+  padding: var(--sz-space-4);
+  max-width: var(--sz-content-max-width);
+  margin: 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-5);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-3);
+}
+
+.backButton {
+  appearance: none;
+  border: none;
+  background: none;
+  width: var(--sz-touch-target);
+  height: var(--sz-touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: calc(var(--sz-space-2) * -1);
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
+}
+
+.backButton:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 2px;
+}
+
+.title {
+  font-size: var(--sz-text-screen-title-size);
+  line-height: var(--sz-text-screen-title-line);
+  font-weight: var(--sz-text-screen-title-weight);
+  margin: 0;
+}
+
+.detectedChip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sz-space-2) var(--sz-space-3);
+  border: 1px solid var(--sz-color-divider);
+  border-radius: var(--sz-radius-md);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-2);
+}
+
+.urlField,
+.textField {
+  border: none;
+  border-bottom: 1px solid var(--sz-color-divider);
+  background: none;
+  font-family: var(--sz-font-family);
+  font-size: var(--sz-text-body-size);
+  line-height: var(--sz-text-body-line);
+  color: var(--sz-color-text-primary);
+  padding: var(--sz-space-2) 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.urlField:focus,
+.textField:focus {
+  outline: none;
+  border-bottom-color: var(--sz-color-cobalt);
+}
+
+.textField {
+  border-bottom: none;
+  resize: vertical;
+  min-height: 96px;
+  field-sizing: content;
+}
+
+.imageList {
+  display: flex;
+  gap: var(--sz-space-3);
+  flex-wrap: wrap;
+}
+
+.imageTile {
+  width: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.imageThumb {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--sz-radius-sm);
+  background: var(--sz-color-surface);
+  border: 1px solid var(--sz-color-divider);
+  object-fit: cover;
+  display: block;
+}
+
+.imageThumbPlaceholder {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--sz-radius-sm);
+  background: var(--sz-color-surface);
+  border: 1px solid var(--sz-color-divider);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sz-color-text-secondary);
+}
+
+.imageMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.imageFileName {
+  font-size: 11px;
+  color: var(--sz-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.imageRemove {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--sz-color-text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+
+.optionalActions {
+  display: flex;
+  gap: var(--sz-space-4);
+}
+
+.sectionLabel {
+  font-size: var(--sz-text-section-label-size);
+  line-height: var(--sz-text-section-label-line);
+  font-weight: var(--sz-text-section-label-weight);
+  letter-spacing: var(--sz-text-section-label-tracking);
+  text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sz-space-2);
+  margin-top: auto;
+}
+
+.autosave {
+  font-size: 13px;
+  color: var(--sz-color-text-secondary);
+  text-align: center;
+}
+
+.autosave[data-tone='offline'] {
+  color: var(--sz-color-warning);
+}
+
+.autosave[data-tone='error'] {
+  color: var(--sz-color-urgent);
+}

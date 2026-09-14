@@ -1,0 +1,11 @@
+:root { color: #171717; background: #f7f5f0; font-family: Inter, system-ui, sans-serif; }
+button, input, textarea { font: inherit; }
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+.auth-form { width: min(100%, 340px); display: grid; gap: 18px; }
+.auth-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+.auth-form input { min-height: 44px; border: 1px solid #aaa49a; background: transparent; padding: 0 12px; }
+.auth-form button { min-height: 46px; border: 0; background: #2155d9; color: white; font-weight: 700; }
+.auth-form p { color: #b42318; white-space: pre-wrap; }
+.app-notice { position: fixed; z-index: 30; left: 12px; right: 12px; bottom: 76px; max-width: 520px; margin: auto; display: flex; gap: 12px; justify-content: space-between; background: #171717; color: white; padding: 12px 14px; white-space: pre-wrap; font-size: 13px; }
+.app-notice button { border: 0; background: none; color: white; font-size: 20px; }
+.sign-out { position: fixed; top: 18px; right: 56px; border: 0; background: transparent; color: #625f59; font-size: 12px; }

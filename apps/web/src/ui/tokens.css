@@ -1,0 +1,67 @@
+/*
+ * SzroNox visual tokens — design/frozen-visual-spec.md section 1.
+ * Compact editorial production tool: high density, thin separators, almost no
+ * shadow, no large rounded cards. 360px reference width, must reflow at 320px.
+ */
+:root {
+  --sz-color-background: #f7f7f5;
+  --sz-color-surface: #ffffff;
+  --sz-color-text-primary: #171717;
+  --sz-color-text-secondary: #636360;
+  --sz-color-cobalt: #315bd8;
+  --sz-color-divider: #e4e4e1;
+  --sz-color-urgent: #b42332;
+  --sz-color-evergreen: #216b58;
+  --sz-color-programme: #2e633d;
+  --sz-color-warning: #8a570c;
+  --sz-color-success: #2f6b50;
+
+  /* Text sits on top of a semantic colour; surfaces stay neutral. */
+  --sz-color-on-cobalt: #ffffff;
+
+  --sz-font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --sz-text-screen-title-size: 22px;
+  --sz-text-screen-title-line: 28px;
+  --sz-text-screen-title-weight: 650;
+
+  --sz-text-reel-title-size: 16px;
+  --sz-text-reel-title-line: 21px;
+  --sz-text-reel-title-weight: 600;
+
+  --sz-text-hook-size: 17px;
+  --sz-text-hook-line: 24px;
+  --sz-text-hook-weight: 600;
+
+  --sz-text-body-size: 16px;
+  --sz-text-body-line: 23px;
+  --sz-text-body-weight: 400;
+
+  --sz-text-metadata-size: 12.5px;
+  --sz-text-metadata-line: 16px;
+  --sz-text-metadata-weight: 500;
+
+  --sz-text-section-label-size: 11.5px;
+  --sz-text-section-label-line: 14px;
+  --sz-text-section-label-weight: 650;
+  --sz-text-section-label-tracking: 0.04em;
+
+  --sz-space-1: 4px;
+  --sz-space-2: 8px;
+  --sz-space-3: 12px;
+  --sz-space-4: 16px;
+  --sz-space-5: 20px;
+  --sz-space-6: 24px;
+
+  --sz-radius-sm: 6px;
+  --sz-radius-md: 10px;
+
+  --sz-touch-target: 44px;
+
+  --sz-row-height-min: 56px;
+  --sz-row-height-max: 64px;
+
+  --sz-content-max-width: 480px;
+  --sz-reference-width: 360px;
+  --sz-reflow-width: 320px;
+}
