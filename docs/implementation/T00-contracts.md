@@ -1,6 +1,16 @@
 # T00 — shared implementation contracts
 
-Status: pinned 2026-09-14 with approved capture, verification, feed-cover and Publication clarifications. Contracts/planning only; no correction agent dispatch. Editorial prompts and AI screen composition explicitly excluded.
+Status: frozen baseline with approved capture, verification, feed-cover, Publication, programme search-results and attached-proposition amendments. Contracts/planning only; no correction agent dispatch. Final editorial prompts and other unfinished AI surfaces remain excluded.
+
+## Written visual implementation authority
+
+[Consolidated frozen visual specification](../../design/frozen-visual-spec.md) is the current visual authority, together with T00 behavioral contracts. It supersedes older instructions to use or await renderer PNGs/screenshots. Existing renders are historical references, not prerequisites; no missing-image gate remains. All visible UI is Polish; code and documentation are English.
+
+Visually frozen: global language, Main List, Quick Add, Reel Detail, completed Opracowanie, expanded Publication, programme search results, attached proposition and completed Fact Check results. Implement at 360 px with clean 320 px reflow using the specified compact editorial hierarchy, palette, typography and accessible touch targets. The written specification governs section order, exact action labels, flat separators and plain text status labels; do not replace them with cards, filled badges or large CTAs except where expressly allowed.
+
+Still pending: Sprawdź język, Opracuj publication-draft collision UI when existing user content is present, and other explicitly unfinished surfaces. Visual availability does not settle unspecified persistence/application behavior: generated publication draft handling must respect T00 and must not silently overwrite stored description/hashtags. No new overwrite policy, editorial prompt or bulk-apply action is authorized.
+
+No UI implementation dispatch is authorized by this freeze. The existing explicit task/model approval process remains in force.
 
 ## Baseline and ownership
 
@@ -9,6 +19,12 @@ React + Vite frontend, Fastify same-origin API, PostgreSQL/Supabase, Supabase Au
 Folders: `apps/web`, `apps/api`, `apps/worker`, `packages/contracts`, `spikes/android-share`, `spikes/gemini`, `spikes/kdrive`. Scaffold owns package/build files. No feature agent silently edits entry points, dependencies, migrations or contracts.
 
 ## Domain invariants
+
+### Accepted API shutdown decision
+
+Graceful shutdown stops accepting new work and prioritizes not truncating valid in-flight responses. Allow active requests to finish within a bounded deadline; close idle keep-alive connections safely where supported. Do not abort an active response merely to obtain exit code 0. If connections prevent clean shutdown past the deadline, forced termination/non-clean exit is acceptable and must be observable. The accepted C01 keep-alive behavior is not an integration blocker; do not broaden C01 in this batch.
+
+### Reel invariants
 
 - Five statuses only: `idea`, `to_record`, `editing`, `ready`, `published`. Polish labels are UI mappings.
 - Two allowlisted authenticated users; equivalent product access. The verifier is the other user relative to `editorId`. Editor may be null before editing. No selectable verifier or role-management UI.
@@ -31,7 +47,7 @@ Every Reel requires a separate feed cover image, labeled `Okładka do feedu`. Th
 - A missing cover does not block `editing` (`Montaż`) or `ready` (`Gotowe`). Before a transition from another status to `published` (`Opublikowane`), the effective updated Reel must have `feedCoverDone === true`.
 - Enforce that transition on the server in the same version-checked transaction as the mutation, using the persisted state plus the validated patch. A single patch may mark the cover complete and publish. Reject publication with false without partial writes or silent state changes. Return HTTP 422, code `FEED_COVER_REQUIRED`, `retryable: false`; web maps this to `Przed zmianą statusu na „Opublikowane” oznacz „Okładka do feedu” jako ukończoną.` Existing conflict/idempotency rules apply; concurrent updates must not bypass the gate.
 - Completion updates use the existing scalar PATCH and concurrency contract. Do not create a dedicated cover endpoint or a new workflow state. This is a transition prerequisite, not an automatic status-change mechanism.
-- Missing cover remains visibly incomplete in Detail. Do not add permanent cover metadata to every list row/status. Compact list exposure may be operationally relevant in `Montaż` and `Gotowe`; exact list treatment awaits the visual specification.
+- Missing cover remains visibly incomplete in Detail. Do not add permanent cover metadata to every list row/status. Compact list exposure may be operationally relevant in `Montaż` and `Gotowe`; use the list density and optional operational exposure rules in the consolidated written visual specification.
 - Out of scope: automatic cover generation, templates, graphic editor, platform-specific variants and cover analytics.
 
 Future implementation acceptance: false default/backfill and list/detail serialization; checkbox without a file; compact always-available Detail state and expanded Publication control; editing/ready allowed while incomplete; incomplete publication rejected with the Polish message and unchanged data; complete publication (including an atomic combined patch) allowed subject to other existing validations; version conflict/retry behavior preserved. No implementation or visual design is authorized by this contract amendment.
@@ -101,12 +117,13 @@ All application routes start `/api/v1`; JSON uses camelCase, SQL uses snake_case
 | POST /reels/:id/memes; DELETE /reels/:id/memes/:memeId | Explicit attach/detach with version check; no library deletion |
 | POST /reels/:id/current-export | Explicit reference replacement; increments export revision |
 | POST /reels/:id/verification | Verify current export as actual expected verifier; status remains independent |
+| DELETE /reels/:id/programme-association | Explicit version-checked, idempotent Odłącz; clears association and returns unchecked; never starts search |
 | POST /reels/:id/attachments/initiate, /:attachmentId/complete | Bounded private upload lifecycle, completion validated server-side |
 | POST /reels/:id/kdrive-folder | Explicit create/link command; no folder during capture |
 | GET /reels/:id/kdrive-folder | Resolve reference; distinguish missing/access/transient errors |
 | POST /reels/:id/ai-runs | Version-checked enqueue from server snapshot; returns 202 run ID |
 | GET /ai-runs/:id | State, snapshot identity, result, warnings and applied hook IDs |
-| POST /ai-runs/:id/apply | Explicit selective field/programme application against current version; excludes hooks and automatic meme assignment |
+| POST /ai-runs/:id/apply | Explicit selective field/programme application and claim-scoped fact correction; no generated-hook acceptance or automatic meme assignment |
 
 JSON error envelope: `{ error: { code, message, retryable, currentVersion?, details? } }`. Message is diagnostic English, never displayed raw; web maps machine codes to Polish. Do not return secrets or provider payloads in error text.
 
@@ -147,15 +164,73 @@ Actions: `develop`, `generate_hooks`, `fact_check`, `language_check`, `find_prog
 - Programme: only indexed document fragments count as evidence. Citation IDs and exact pages resolve server-side. No web lookup in this operation. User acceptance sets the match/no-match state; provider errors do not.
 - Structured outputs validate shape, limits and foreign references, not truth. Untrusted pages/files cannot grant write privileges or override system rules.
 
+## Frozen Sprawdź fakty core behavior
+
+Sprawdź fakty analyzes the current script and ALL active hooks from the run's immutable snapshot. Split factual content into individual claims with exact source locations; distinguish opinion, irony, rhetoric and non-factual commentary rather than forcing them into factual verdicts. The existing coverage field describes processing coverage only, never a global “script correct” judgment. No confidence percentages or probability scores in the result contract/UI.
+
+Every factual claim has exactly one semantic status: confirmed (`Potwierdzone`), uncertain (`Niepewne`), contradicted (`Sprzeczne ze źródłami`). Uncertain means insufficient reliable evidence. Absence of evidence cannot establish contradiction. Scrutinize dates, numbers, names, positions/functions, quotations, causal claims, attribution and absolutes such as first/only/everyone/never/biggest. Unsupported absolutes normally remain uncertain.
+
+Confirmed requires retained supporting evidence from actual grounding/search/provider results, associated with this claim. FactClaim.evidence contains server-resolvable retainedEvidenceRef and providerReference linked to sourceIds; preserve inspectable source title/URL/retrieval metadata and the actual grounding support/material available. A model-authored URL, model assertion, bare source existence or fabricated quotation cannot establish confirmation. Validate provider references and claim/source mappings before retaining evidence; if support is insufficient, downgrade to uncertain. Contradiction requires actual contradictory evidence, not lookup failure. Retained evidence remains private and inspectable by authorized users; it is not a request to expose raw provider responses in the UI.
+
+Each claim retains location=script or a specific hookId, original reelVersion/inputHash, the sourceTextHash of its checked script/hook, and an exact half-open source span with original text. Application-owned offsets use UTF-16 code units; do not confuse them with provider citation byte offsets. Preserve the complete source in the immutable run snapshot. Validate that the recorded substring matches the snapshot; do not accept provider-invented offsets blindly.
+
+Only uncertain/contradicted claims may offer a correction. `Użyj korekty` is a real edit: POST /ai-runs/:id/apply with selection=fact_correction and claimId plus operationId/expectedVersion. The server resolves the retained correction and source from that run, rather than trusting a client-supplied replacement or span. For script claims, correction is replacement text for that exact fragment. For hook claims, correction is the corrected complete text of that particular hook; preserve its ID, source/provenance and position, do not create another hook, and do not modify other hooks or script. Preserve unrelated content within a hook correction too; a claim correction is not authorization for broader rewriting.
+
+Apply atomically against the live Reel version and affected source. Keep an application marker on the claim in the same transaction; retries cannot apply the correction twice. Successful application may display `Zastosowano` locally; this is separate from the three factual statuses and does not assert the corrected claim is verified. No other Reel fields change. The generic whole-script apply path must not be used to bypass fact-correction span checks.
+
+Freshness has two levels: the run's input hash/coverage can become outdated while an unaffected item remains usable. Do not gate all claims solely on AiRun.isStale or the original Reel version. Check this item's source identity and exact checked text at application time. A deleted/edited source hook is stale for its correction. An unrelated hook change does not invalidate a script item or another unchanged hook. For script claims, unchanged unambiguously mapped spans may remain usable after unrelated edits; if offsets move, only a deterministic mapping from recorded edits may relocate them. Never use fuzzy matching or blind replace-all, especially for repeated text. If unchanged origin/span cannot be proven, reject without edits using HTTP 409 STALE_FACT_CLAIM, retryable=false, and expose stale/new-check state. Example Polish mapping: `Ten fragment zmienił się od sprawdzenia. Sprawdź fakty ponownie.` Normal expectedVersion conflicts still return EDIT_CONFLICT and preserve drafts.
+
+After applying a script correction, update deterministic locations for unaffected spans and invalidate overlapping/context-affected claims; a whole-hook edit invalidates other claims against that changed hook. Do not infer continued factual validity from matching words where relevant context changed. The workspace may indicate content changes and offer a rerun; it must not silently recheck or overwrite content. Rechecking always snapshots current script and all active hooks.
+
+Future acceptance: all active hooks/script covered; non-factual language distinguished; exact three statuses with no scores/global correctness claim; unsupported/absolute claims not auto-confirmed and missing evidence not contradicted; confirmed evidence retained/openable with valid provenance; exact script-fragment and specific-hook correction only; duplicate-text, Unicode, stale source, deleted hook, unrelated source edits, overlapping corrections, concurrency and idempotent retry cases; applied state distinct from factual status. The completed Fact Check workspace is now visually frozen in section 9 of the consolidated specification. No implementation dispatch is authorized without separate approval.
+
 ## Correction 3 — UI gate
 
-T16 is BLOCKED pending frozen Opracuj, fact-check, language and programme mockups/specifications. Diagnostic fixtures are not UI authority. No AI-result composition, speculative controls, hook prominence design or meme acceptance layout may be invented. Existing approved low-level primitives may be reused later.
+T16 has not been authorized for dispatch. The surfaces explicitly covered in the consolidated written visual specification are visually frozen, including completed Opracowanie and Fact Check. Sprawdź język and publication-draft collision UI remain visually blocked. Diagnostic fixtures are not visual authority; neither missing PNGs nor historical screenshot-reference sentences create a new prerequisite.
+
+## Frozen Sprawdź postulat search results
+
+Visual authority is section 7 of the consolidated written visual specification. No renderer asset is required. Use flat editorial candidate sections, plain uppercase strength labels, identical compact `Przypnij` actions and the quieter `Nie ma dobrego dopasowania` action. No full-width candidate CTA, filled badges, percentages or raw source URLs. The old first-render dependency is superseded; no further render is requested.
+
+Search ONLY the indexed Green programme. Return zero to three candidates in ranked order; enforce the maximum server-side. Each candidate includes strong/indirect match strength, programme category, proposal/title, exact indexed fragment, source metadata, short AI relevance explanation and Przypnij. Do not expose similarity percentages or confidence scores.
+
+ProgrammeCitation is authoritative evidence: documentVersionId, proposalId where available, nonempty chunkIds, category, proposal/title, exact excerpt, sourceTitle, chapter, nullable subchapter, PDF page metadata and available printed-page labels. Resolve those fields from the selected indexed version. The AI may rank known candidates, classify strong/indirect and explain relevance; it may not supply invented wording, evidence fragments, IDs or source metadata. No web/model-memory evidence. Unsupported identifiers or evidence mismatches are errors, not no-match results.
+
+ProgrammeResult contains only a candidates array, not an outcome that sets Reel state. Candidate IDs are stable server-owned identifiers scoped to the run. Existing POST /ai-runs/:id/apply accepts `selection: programme_match` plus ONE candidateId, replacing the earlier matchIndexes array. Resolve that candidate and its citation server-side from the run; never accept client-supplied citation text as authoritative. The usual authentication, expectedVersion and idempotency rules apply.
+
+Only an explicit successful Przypnij attaches one primary ProgrammeAttachment and sets programmeState=matched (`✓ Jest`, programme icon plus check). Persist the full citation snapshot, strength, candidate/run identity and attachment actor/time. This replaces the plural Reel.programmeMatches field with programmeAttachment|null. Reel.programmeDocumentVersionId mirrors the current attachment version when matched; programmeInputHash identifies the reviewed input context. No script, hook, priority or publication field changes. A failed/conflicting attachment leaves prior state and citation intact.
+
+When there is no current attachment, the explicit bottom action `Nie ma dobrego dopasowania` rejects the retrieved candidates from that run, sets programmeState=no_match (`✕ Nie znaleziono dobrego dopasowania`) and leaves no current primary attachment. Record the run/input context of this user decision through the mutation record; this is not a global claim about the full programme. During replacement search, rejecting new candidates preserves the existing attachment and matched state; only a new Przypnij or explicit Odłącz may change that association. The programme_no_match mutation must not clear an existing attachment (reject incompatible use with VALIDATION_ERROR, or EDIT_CONFLICT for a stale expectedVersion). An empty candidate array does not automatically set no_match. Technical failure preserves previous state and attachment and exposes retry/error state.
+
+Exactly three Reel semantic states remain: unchecked (`? Nie sprawdzono`), matched (`✓ Jest`), no_match (`✕ Nie znaleziono dobrego dopasowania`). Search completion, Opracuj suggestions, ranking or technical failures cannot themselves set matched or no_match. Default is unchecked. Non-matched states have programmeAttachment=null and programmeDocumentVersionId=null; the run retains its own searched version.
+
+An attached citation remains tied to the exact indexed version selected. Store the evidence snapshot and stable identifiers; a new index/version must not rewrite it. Keep referenced versions resolvable or preserve their immutable source snapshot. If original evidence cannot be resolved on attachment, return an explicit error rather than substituting newer text.
+
+After attachment, tapping the programme indicator opens the attached proposition rather than automatically rerunning search. Its frozen surface and actions are specified below.
+
+Future acceptance: at most three evidence-backed candidates; source fields resolve exactly to indexed evidence; no web or invented references; one explicit Przypnij stores one version-bound citation and sets matched only after success; unrelated content fields unchanged; explicit user rejection differs from global absence; empty/error results preserve state; concurrent/idempotent mutation rules hold; re-indexing cannot rewrite attachments; consolidated written visual specification respected; no similarity/confidence display. No feature dispatch is authorized.
+
+## Frozen attached Program Zielonych proposition
+
+Opening the existing attachment displays the persisted ProgrammeAttachment without enqueuing AI or programme retrieval. Reuse the visual language and evidence structure of a single Sprawdź postulat candidate. No additional render is required.
+
+Show match strength near the top (for example `MOCNE DOPASOWANIE`), programme category, proposal/title, exact indexed fragment, authoritative source metadata with a source-open action, then `DLACZEGO PASUJE` and the stored AI relevance explanation. Source-open resolves the pinned documentVersionId and page metadata to that version's source, never a newer replacement or model-generated URL. Source-access failure exposes an error without removing/rewriting the attachment.
+
+At the bottom use compact editorial text actions `Zmień postulat` and `Odłącz`. Odłącz is visually quieter. Neither is a large CTA.
+
+Zmień postulat explicitly creates a fresh find_programme run from a server snapshot of the Reel's current relevant content, including current script/hooks/input references, with a new operationId. Do not replay the old run or use the attachment's original content snapshot as the new input. Retries of this new operation remain idempotent. Opening, closing, cancelling, failing or rejecting candidates in this search leaves the existing attachment and matched state unchanged.
+
+Only explicit Przypnij on a new candidate atomically replaces the current primary attachment after the normal version/conflict/evidence checks succeed. Never detach first. Concurrent edits or failed replacement preserve the current authoritative association and expose conflict/error; a search finishing later cannot overwrite a newer attach/detach decision. Replacement updates only programme association fields, not script, hooks, priority or Publication fields.
+
+Odłącz uses DELETE /reels/:id/programme-association with DetachProgrammeRequest (operationId, expectedVersion). Successful atomic detach sets programmeAttachment=null, programmeState=unchecked (`? Nie sprawdzono`), programmeInputHash=null and programmeDocumentVersionId=null. Keep shared indexed programme/source records and prior run evidence intact; remove only the Reel association. Do not automatically start search. Failure/conflict leaves current state intact, with no false success. Ordinary idempotency replay rules apply.
+
+Future acceptance: attached indicator opens without AI/search; view shows the pinned citation/explanation and specified hierarchy/actions; source opens the correct version; change-search uses current content and preserves the old attachment on cancel/error/rejection; replacement occurs atomically only on explicit Przypnij; detach sets unchecked without searching; conflicts/retries preserve authoritative state and unrelated fields. No implicit detach through search-results no-match. Implementation requires separate approval.
 
 ## Correction 4 — prompt gate
 
 No final writing prompt, Style Profile, few-shot corpus or output wording is approved. T03 tests only provider capabilities with explicitly diagnostic prompts and synthetic/neutral examples. T12 may later implement generic lifecycle; T13/T14/T15 may later prepare typed contracts and fixtures, not freeze editorial prompts. These later tasks are not currently dispatched. A prompt/model identifier in a contract is a provenance field, not editorial approval.
 
-The `Sprawdź postulat` product flow is still being finalized. This pin preserves only already-frozen programme contracts; it adds no UI, action semantics, proposal-acceptance behavior or new workflow for that flow. Additive hook generation also remains exactly as approved above.
+Programme search results and the attached-proposition flow are frozen above. Additive hook generation remains exactly as approved. These amendments do not freeze final writing/style prompts or authorize implementation dispatch.
 
 ## Acceptance before broader implementation
 
