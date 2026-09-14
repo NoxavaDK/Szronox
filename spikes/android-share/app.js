@@ -1,8 +1,11 @@
-import { normalizeShare, bindIdentity, publicDraft } from "./share-contract.js";
+import { normalizeShare, bindIdentity, publicDraft, toCaptureInput } from "./share-contract.js";
 import { getRecord, openShareDb, promoteRaw, putRecord } from "./storage.js";
+import { observeReceiver } from "./receiver-state.js";
 
+const receiverStatus = document.querySelector("#receiver-status");
 const status = document.querySelector("#status");
 const output = document.querySelector("#output");
+const mapping = document.querySelector("#mapping");
 let current = null;
 
 async function get(id) {
@@ -20,12 +23,22 @@ async function save(draft) {
 function show(draft) {
   current = draft;
   output.textContent = JSON.stringify(publicDraft(draft), null, 2);
-  status.textContent = draft.state === "quarantined_pending_identity" ? "Dane zapisano lokalnie w kwarantannie do czasu ustalenia konta." : "Dane przypisano do diagnostycznego konta; wysyłanie nie jest częścią testu.";
+  status.textContent = draft.state === "quarantined_pending_identity"
+    ? "Dane zapisano lokalnie w kwarantannie do czasu ustalenia konta."
+    : "Dane przypisano do diagnostycznego konta; wysyłanie nie jest częścią testu.";
+
+  // Show the pinned-contract mapping alongside the draft, so a reader can see
+  // exactly what would be sent and what was refused. Nothing is transmitted.
+  const mapped = toCaptureInput(draft);
+  mapping.textContent = mapped.ok
+    ? `Mapowanie na CreateReelRequest (diagnostyczne, nic nie jest wysyłane):\n${JSON.stringify(mapped.request, null, 2)}`
+    : `Mapowanie odrzucone — nic nie zostałoby wysłane:\n${JSON.stringify(mapped.problems, null, 2)}`;
 }
 
 function showStorageFailure() {
   current = null;
   output.textContent = "";
+  mapping.textContent = "";
   status.textContent = "Nie zapisano danych lokalnie. Zwolnij miejsce i spróbuj ponownie.";
 }
 
@@ -35,17 +48,20 @@ function normalize(entries) {
 
 document.querySelector("#simulate").onclick = async () => {
   try {
+    // The local simulation stays independent of the receiver: it exercises
+    // normalization and mapping even when share capture is unavailable.
     const draft = normalize({
       title: document.querySelector("#title").value,
       text: document.querySelector("#text").value,
       url: document.querySelector("#url").value,
-      images: [...document.querySelector("#images").files]
+      images: [...document.querySelector("#images").files],
     });
     await save(draft);
     history.replaceState(null, "", `?incoming=${encodeURIComponent(draft.id)}`);
     show(draft);
   } catch { showStorageFailure(); }
 };
+
 document.querySelector("#login").onclick = async () => {
   if (!current) return;
   try {
@@ -55,12 +71,25 @@ document.querySelector("#login").onclick = async () => {
   } catch { showStorageFailure(); }
 };
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { scope: "./", type: "module" }).catch(() => status.textContent = "Nie udało się uruchomić obsługi offline.");
+/**
+ * Receiver readiness owns its own element. No form operation writes here, so a
+ * successful local simulate can never paint over an unavailable receiver.
+ */
+observeReceiver(navigator).then((receiver) => {
+  receiverStatus.textContent = receiver.message;
+  receiverStatus.dataset.state = receiver.state;
+  receiverStatus.dataset.severity = receiver.severity;
+});
+
 const params = new URL(location.href).searchParams;
-if (params.get("captureError")) status.textContent = "Nie zapisano danych lokalnie. Udostępnij ponownie po zwolnieniu miejsca.";
-if (params.get("incoming")) get(params.get("incoming")).then(async record => {
-  if (!record) { status.textContent = "Nie znaleziono przechwyconych danych."; return; }
-  if (record.recordType === "capture-draft") { show(record); return; }
-  const draft = normalize(record);
-  show(await replaceRaw(record.id, draft));
-}).catch(showStorageFailure);
+if (params.get("captureError")) {
+  status.textContent = "Nie zapisano danych lokalnie. Udostępnij ponownie po zwolnieniu miejsca.";
+}
+if (params.get("incoming")) {
+  get(params.get("incoming")).then(async record => {
+    if (!record) { status.textContent = "Nie znaleziono przechwyconych danych."; return; }
+    if (record.recordType === "capture-draft") { show(record); return; }
+    const draft = normalize(record);
+    show(await replaceRaw(record.id, draft));
+  }).catch(showStorageFailure);
+}

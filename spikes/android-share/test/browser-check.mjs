@@ -51,20 +51,51 @@ await waitFor("location.href.startsWith('http://127.0.0.1:4173')", "controlled n
 await waitFor("document.readyState === 'complete'", "controlled reload");
 assert.equal(await evaluate("Boolean(navigator.serviceWorker.controller)"), true);
 
+// Receiver readiness is its own element and must report control, not just
+// registration, before a share can be captured.
+const receiverState = await evaluate("document.querySelector('#receiver-status')?.dataset.state");
+assert.equal(receiverState, "ready", `receiver not ready: ${receiverState}`);
+
+// A mixed payload with a repeated field, an unknown field, an empty field, two
+// supported images and one unsupported file: everything C02 must preserve.
 const redirectedUrl = await evaluate(`(async () => {
   const data = new FormData();
-  data.set("title", "Próba przeglądarkowa");
-  data.set("text", "Treść https://example.test/ścieżka");
-  data.set("images", new File([new Uint8Array([1,2,3])], "obraz.png", {type:"image/png", lastModified:123}));
+  data.append("title", "Próba przeglądarkowa");
+  data.append("text", "Treść https://example.test/ścieżka");
+  data.append("title", "Drugi tytuł");
+  data.append("nieznane", "");
+  data.append("images", new File([new Uint8Array([1,2,3])], "obraz.png", {type:"image/png", lastModified:123}));
+  data.append("images", new File([new Uint8Array([9])], "film.mp4", {type:"video/mp4"}));
+  data.append("images", new File([new Uint8Array([4,5])], "drugi.jpg", {type:"image/jpeg"}));
   return (await fetch("share-target", {method:"POST", body:data})).url;
 })()`);
 assert.match(redirectedUrl, /index\.html\?incoming=/);
 await cdp("Page.navigate", {url:redirectedUrl});
 await waitFor("document.querySelector('#output')?.textContent.includes('quarantined_pending_identity')", "raw-to-draft promotion");
 const before = JSON.parse(await evaluate("document.querySelector('#output').textContent"));
-assert.equal(before.capture.originalInput.title, "Próba przeglądarkowa");
-assert.equal(before.capture.originalInput.files[0].name, "obraz.png");
-assert.equal(before.capture.attachments[0].id, before.capture.originalInput.files[0].id);
+
+// Exact scalars, in order, including the repeat and the empty unknown field.
+assert.deepEqual(before.capture.originalInput.fields, [
+  { name: "title", value: "Próba przeglądarkowa" },
+  { name: "text", value: "Treść https://example.test/ścieżka" },
+  { name: "title", value: "Drugi tytuł" },
+  { name: "nieznane", value: "" },
+], "ordered scalar fields were not preserved exactly");
+assert.equal(before.capture.title, "Próba przeglądarkowa", "normalization takes the first value");
+
+// Every received file described in order; only the supported ones accepted.
+assert.deepEqual(before.capture.originalInput.files.map(f => f.fileName), ["obraz.png", "film.mp4", "drugi.jpg"]);
+assert.equal(before.capture.originalInput.files[1].issue, "UNSUPPORTED_INPUT");
+assert.equal(before.capture.attachments.length, 2, "both supported images must survive");
+assert.equal(before.capture.attachments[0].attachmentId, before.capture.originalInput.files[0].attachmentId);
+assert.equal(new Set(before.capture.attachments.map(a => a.attachmentId)).size, 2, "image IDs must be distinct");
+
+// The mapping onto the pinned contract is rendered beside the draft.
+const mappingText = await evaluate("document.querySelector('#mapping').textContent");
+assert.match(mappingText, /CreateReelRequest/);
+const mapped = JSON.parse(mappingText.slice(mappingText.indexOf("{")));
+assert.equal(mapped.input.images.length, 2, "mapping must carry both supported images");
+assert.equal(mapped.input.originalShare.files.length, 3, "mapping must describe every received file");
 
 await cdp("Page.reload");
 await waitFor("document.querySelector('#output')?.textContent.includes('quarantined_pending_identity')", "durable reload");
@@ -78,10 +109,13 @@ const storedBlobSize = await evaluate(`(async () => {
   const db = await new Promise((resolve,reject) => { request.onsuccess=()=>resolve(request.result); request.onerror=()=>reject(request.error); });
   const get = db.transaction("incomingShares").objectStore("incomingShares").get(${JSON.stringify(before.id)});
   const draft = await new Promise((resolve,reject) => { get.onsuccess=()=>resolve(get.result); get.onerror=()=>reject(get.error); });
-  return draft.blobs[0].blob.size;
+  return draft.blobs.map(b => b.blob.size);
 })()`);
-assert.equal(storedBlobSize, 3);
-console.log("PASS: Chrome registered/controlled the service worker and preserved one normalized draft, IDs, original input, and blob across reload.");
+assert.deepEqual(storedBlobSize, [3, 2], "both supported blobs must persist");
+console.log("PASS: Chrome controlled the service worker and preserved one normalized draft,");
+console.log("      stable IDs, exact ordered original fields, every file descriptor and both");
+console.log("      supported blobs across reload. Desktop evidence only; concurrent promotion");
+console.log("      and Android share-sheet behaviour remain UNVERIFIED.");
 } finally {
   socket.close();
 }
