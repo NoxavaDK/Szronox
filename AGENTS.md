@@ -3,12 +3,17 @@
 - Discussion, documentation, code and identifiers are English. All application UI copy is Polish.
 - The product architecture and UX are frozen except for explicitly approved corrections below. Preserve the visual language in `design/visual-language-v2`.
 - The root agent is technical lead: owns shared contracts, invariants, architecture, review and integration. Delegate routine implementation to bounded coding agents.
-- Currently authorized: T00, T01, T02, T03; T04 when an agent slot is available. Do not start other implementation tasks without further authorization.
+- Current authorization: lead independent T03 review and T00 contract pinning only. All implementation/correction agents remain stopped; no start or resume until the user approves the exact eight-part delegation proposal. Prior T01/T02 resume permission does not authorize correction batches. T03's prior Sol agent stays stopped. T04 and later implementation remain unauthorized.
+- Before any other start/resume/model substitution, present task ID, exact task, exact model, suitability, difficulty, dependencies, editable files and acceptance criteria; wait for explicit user approval. Never infer delegation approval from approval of architecture or available quota. Do not spawn nested agents.
 - Read `docs/implementation/T00-contracts.md` and `docs/implementation/tasks.md` before work. Work only in your assigned worktree and file allowlist.
 - Do not edit shared contracts, another agent's files, root dependencies or lockfiles unless assigned. Propose contract changes to the lead.
 - Hooks are persistent `ReelHook` records, not a singular Reel.hook field. Requested AI hook generation appends alternatives; it never replaces existing hooks. No per-hook `Użyj` action. No hook analytics or complex versioning.
+- One Reel capture may combine multiple supported images and URL/text, preserving exact original shared fields without silent truncation. Verification requires a valid selected editor; export linking remains independent. Read the current root T00 and wire types, not older worktree snapshots.
 - Opracuj may suggest at most one existing library meme. Unknown IDs are invalid. Never attach/replace memes automatically.
+- Every Reel requires a separate feed cover (`Okładka do feedu`): SQL feed_cover_done defaults false, JSON feedCoverDone. Missing cover blocks transition to published only, not editing/ready. Compact Detail state and completion control in PUBLIKACJA; final visuals pending. No asset reference required for completion, no cover-management module. See the authoritative root T00 amendment.
+- Cover metadata uses a consistent small outline image/landscape pictogram with neutral/check state, not an OKŁ abbreviation; final artwork remains with the visual spec. Publication description and hashtags stay separate editable fields. Primary `Kopiuj opis` combines them with exactly two newlines only when both are present; copy has no persistence side effect and must handle clipboard failure truthfully. See T00.
 - T16 AI-result composition is BLOCKED awaiting frozen mockups/specifications. Do not invent it from fixtures.
+- `Sprawdź postulat` UI/behavior is not authorized beyond already-frozen programme contracts. Do not extend that product flow while it is being finalized.
 - Final writing prompts, Style Profile and editorial wording are NOT frozen. Diagnostic prompts and fixtures must be clearly labeled provisional. Do not turn them into production editorial prompts.
 - No application features beyond scope: no analytics, calendar, autopublishing, large-file uploader, admin UI or new workflow states.
 - Never print secrets. Live provider tests require configured test credentials; absent access is an explicit unverified gate, not a passing result.

@@ -66,6 +66,8 @@ export interface Reel {
   status: ReelStatus;
   priority: Priority;
   inputNote: string;
+  /** Immutable original capture, distinct from editable inputNote and generated content. */
+  originalInput: CaptureInput;
   script: string;
   editingNotes: string;
   editorId: Id | null;
@@ -83,15 +85,38 @@ export interface Reel {
   editingStartedAt: IsoDateTime | null;
   publishedAt: IsoDateTime | null;
   publicationUrls: string[];
+  /** Separate editable publication fields; SQL defaults each to ''. */
+  publicationDescription: string;
+  publicationHashtags: string;
+  /** Required production deliverable; SQL feed_cover_done NOT NULL DEFAULT false. */
+  feedCoverDone: boolean;
   createdBy: Id;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   deletedAt: IsoDateTime | null;
 }
-export type CaptureInput =
-  | { kind: 'text'; text: string }
-  | { kind: 'url'; url: string; text?: string }
-  | { kind: 'image'; attachmentId: Id; fileName: string; mimeType: string; byteSize: number; text?: string };
+export interface CaptureImageDescriptor {
+  attachmentId: Id;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+}
+export interface OriginalSharedInput {
+  /** Exact scalar fields in received order, including repeated names and empty values. */
+  fields: Array<{ name: string; value: string }>;
+  /** All received file descriptors in order, including explicitly unsupported files. */
+  files: Array<CaptureImageDescriptor & {
+    lastModified?: number;
+    issue?: 'UNSUPPORTED_INPUT';
+  }>;
+}
+/** One capture may combine text, URL and multiple supported images. */
+export interface CaptureInput {
+  text?: string;
+  url?: string;
+  images: CaptureImageDescriptor[];
+  originalShare?: OriginalSharedInput;
+}
 export interface CreateReelRequest {
   operationId: Id;
   reelId: Id;
@@ -102,7 +127,8 @@ export interface CreateReelRequest {
 export interface ReelPatchRequest extends MutationContext {
   changes: Partial<Pick<Reel,
     'title' | 'status' | 'priority' | 'inputNote' | 'script' | 'editingNotes' |
-    'editorId' | 'publishedAt' | 'publicationUrls'>>;
+    'editorId' | 'publishedAt' | 'publicationUrls' | 'publicationDescription' |
+    'publicationHashtags' | 'feedCoverDone'>>;
 }
 export interface AddHookRequest extends MutationContext { text: string; position?: number }
 export interface EditHookRequest extends MutationContext { text: string }
@@ -111,6 +137,7 @@ export interface AttachMemeRequest extends MutationContext { memeId: Id }
 export interface ReplaceExportRequest extends MutationContext {
   export: Omit<ExportReference, 'revision'>;
 }
+/** Requires a valid selected editor; the actor must be the other allowlisted user. */
 export interface VerifyExportRequest extends MutationContext { exportRevision: number }
 export type AiAction = 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme';
 export type AiJobState = 'queued' | 'running' | 'succeeded' | 'failed';
@@ -202,6 +229,8 @@ export type ApplyAiRequest = MutationContext & (
 export type ErrorCode =
   | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'VALIDATION_ERROR'
   | 'EDIT_CONFLICT' | 'IDEMPOTENCY_CONFLICT' | 'EXPORT_CHANGED'
+  | 'FEED_COVER_REQUIRED'
+  | 'EDITOR_REQUIRED'
   | 'UPLOAD_INCOMPLETE' | 'UNSUPPORTED_INPUT' | 'PROVIDER_UNAVAILABLE'
   | 'PROVIDER_ACCESS_DENIED' | 'PROVIDER_RESOURCE_MISSING'
   | 'INVALID_AI_RESULT' | 'INSUFFICIENT_EVIDENCE' | 'INTERNAL_ERROR';
