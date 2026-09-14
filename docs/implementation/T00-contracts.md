@@ -14,7 +14,7 @@ No UI implementation dispatch is authorized by this freeze. The existing explici
 
 ## Baseline and ownership
 
-React + Vite frontend, Fastify same-origin API, PostgreSQL/Supabase, Supabase Auth and private lightweight Storage. Production media belongs to kDrive. PostgreSQL-backed durable AI jobs run in a worker from the same application codebase. TypeScript throughout. `packages/contracts/src/index.ts` is the canonical wire-type baseline; the lead owns changes.
+React + Vite PWA, Fastify same-origin API, real PostgreSQL on the VPS, application-owned two-user authentication and private lightweight filesystem storage. Production media belongs to kDrive through a separate integration. API and worker use the same application release; future PostgreSQL-backed durable AI jobs remain separately gated. TypeScript throughout. `packages/contracts/src/index.ts` is the canonical wire-type baseline; the lead owns changes. The approved [VPS-00 infrastructure amendment](VPS-00-contracts.md) governs session, storage, migration and environment seams. Supabase is no longer a platform requirement; product invariants below remain unchanged.
 
 Folders: `apps/web`, `apps/api`, `apps/worker`, `packages/contracts`, `spikes/android-share`, `spikes/gemini`, `spikes/kdrive`. Scaffold owns package/build files. No feature agent silently edits entry points, dependencies, migrations or contracts.
 
@@ -97,7 +97,7 @@ All authenticated mutations include a UUID `operationId`; updates to an existing
 
 Persist operation ID + actor + route + payload hash and result atomically with the domain change. Same operation/same payload returns the original result, including after subsequent edits; same ID/different payload is `IDEMPOTENCY_CONFLICT`. Result application, hooks and attachments follow this rule. The worker's authorized additive hooks use a separate run application marker, never a stale full-Reel replacement.
 
-Server timestamps and actor IDs are authoritative. JWTs require signature/issuer/audience/expiry validation and membership in the two-user allowlist. No anonymous/third-user API access; no privileged keys in web builds. Application tables remain in a nonexposed schema.
+Server timestamps and actor IDs are authoritative. Opaque server sessions require a valid unexpired, unrevoked session and membership in the two-user allowlist. The VPS-00 amendment supersedes the former Supabase/JWT requirement. No anonymous/third-user domain API access; no privileged keys or session bearer secrets in web builds/browser storage. Application tables remain in a nonexposed schema. Authentication endpoints have only the explicit exceptions documented in VPS-00.
 
 ## Route surface
 

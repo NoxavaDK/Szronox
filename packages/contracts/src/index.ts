@@ -5,6 +5,16 @@ export type ReelStatus = 'idea' | 'to_record' | 'editing' | 'ready' | 'published
 export type Priority = 'urgent' | 'normal' | 'evergreen';
 export interface MutationContext { operationId: Id; expectedVersion: number }
 export interface User { id: Id; name: 'NOXAVA' | 'SZRON'; avatarUrl: string | null }
+/** VPS-00: credentials are sent only to the same-origin login endpoint. */
+export interface LoginRequest { name: User['name']; password: string }
+/** Metadata only: the opaque session secret is exclusively in an HttpOnly cookie. */
+export interface AuthSessionResponse {
+  user: User;
+  peer: User;
+  expiresAt: IsoDateTime;
+  /** Held in memory; send as X-CSRF-Token for authenticated unsafe requests. */
+  csrfToken: string;
+}
 export interface ReelHook {
   id: Id;
   reelId: Id;
@@ -48,6 +58,33 @@ export interface AttachmentReference {
   storageKey?: string;
   state: 'pending' | 'ready' | 'failed';
 }
+/** Provider-neutral shape retained from T05's corrected upload transport. */
+export interface UploadTransport {
+  uploadUrl: string;
+  method: 'PUT' | 'POST';
+  headers: Record<string, string>;
+  /** Unix seconds, unlike ISO expiresAt in AuthSessionResponse. */
+  expiresAt: number;
+}
+export interface InitiateAttachmentRequest {
+  operationId: Id;
+  attachmentId: Id;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  purpose?: AttachmentReference['purpose'];
+}
+export interface InitiateAttachmentResponse {
+  attachment: AttachmentReference;
+  /** Opaque identifier, never a filesystem path or read authorization. */
+  storageKey: string;
+  upload: UploadTransport;
+}
+export interface CompleteAttachmentRequest { operationId: Id }
+/** Completion returns AttachmentReference; byte-transfer success is not completion. */
+export type CompleteAttachmentResponse = AttachmentReference;
+/** Refresh transport only; does not mutate the attachment or its operation history. */
+export interface RenewAttachmentUploadResponse { upload: UploadTransport }
 /** Authoritative evidence resolved from the indexed programme, never authored by AI. */
 export interface ProgrammeCitation {
   documentVersionId: Id;
@@ -287,6 +324,7 @@ export type ApplyAiRequest = MutationContext & (
 );
 export type ErrorCode =
   | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'VALIDATION_ERROR'
+  | 'RATE_LIMITED'
   | 'EDIT_CONFLICT' | 'IDEMPOTENCY_CONFLICT' | 'EXPORT_CHANGED'
   | 'FEED_COVER_REQUIRED'
   | 'EDITOR_REQUIRED'

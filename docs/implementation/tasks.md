@@ -1,6 +1,6 @@
 # Authorized delegation
 
-Current authorization: accepted C01–C03 outputs are integrated. Prepare the next non-AI implementation proposal only; no task/model is dispatched until explicitly approved. No repeat correction review unless integration exposes a concrete regression. Root T00 and the consolidated written visual specification are authoritative.
+Current authorization: VPS-00–03 approved with amendments; see [dispatch contract](VPS-batch-dispatch.md). VPS-01 manual Opus only, VPS-02 Sol/high, VPS-03 Luna. Separate worktrees and exact ownership are pinned before launch. No VPS mutation or VPS-04 dispatch. Historical entries below describe earlier authorization, not the current batch.
 
 | Task | Status | Ownership | Acceptance |
 | --- | --- | --- | --- |
@@ -32,3 +32,15 @@ Visual authority update: `design/frozen-visual-spec.md` is preserved verbatim fr
 Next proposed work: T05 persistence/authentication and T06 non-AI screen shells in parallel; T04 isolated kDrive feasibility independently; T08 drafts/synchronization and app wiring after T05/T06 interfaces are available. See next-non-ai-batch.md for exact task/model/ownership/acceptance proposals. Nothing dispatched.
 
 Reel Detail/Language Check batch: design/frozen-reel-detail-language-spec.md now governs all eight newly frozen surfaces. T00 pins language scriptRevision/apply freshness, additionalText provenance, Meme create/attach, Materials/selector behavior, shared notes and deleted-view recovery. No dispatch.
+
+## T08 explicit dispatch
+
+User authorized T08 on gpt-5.6-sol after reporting other tasks complete. Agent /root/t08_sync is working in .worktrees/t08-sync (agents/t08-sync), prepared from f0e8e9b with T05 ea81fae and T06 6b52050 dependency merges. Root remains unchanged by those dependency merges. T08 retains the existing file allowlist and acceptance criteria. T05/T06 predate the latest batch; missing API composition, provider adapters and updated screen interfaces remain explicit integration dependencies, not permission to silently expand agent ownership. No other agent dispatched.
+
+T04 user report: 064dcf9, 6/6 live probes and 30/30 local tests; duplicate-name error and stable IDs across rename/move observed. 403/429/5xx and upload host remain unverified live. Report recorded without rerunning or inferring broader provider coverage.
+
+## VPS milestone — 2026-09-14
+
+VPS-00: root gpt-6-astra, current root worktree, infrastructure contracts/shared transport types/central dependencies only. Explicit user approval: "go for T0", then "go now" overriding the original Opus-baseline prerequisite for this task alone. No agents or VPS changes authorized. Result and exact verification: [VPS-00-result.md](VPS-00-result.md).
+
+VPS-01 auth, VPS-02 storage and VPS-03 environment are proposed parallel tasks, not dispatched; gpt-5.6-sol/high was proposed for each. VPS-04 integration, VPS-05 dev deployment, VPS-06 real-PG gates and VPS-07 browser acceptance require later proposals. Opus integration must be reconciled before feature dispatch. No automatic task/model substitution or next-task start.
