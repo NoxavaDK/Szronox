@@ -88,3 +88,38 @@ test("synthetic fixtures reference only reserved example domains", async () => {
     );
   }
 });
+
+// ── Exit semantics (C03): unverified is not success ───────────────────────────
+
+test("exit codes distinguish pass, fail and unverified", async () => {
+  const { EXIT, exitCodeFor } = await import("../src/diagnostic.mjs");
+  assert.equal(exitCodeFor({ pass: 3, fail: 0, unverified: 0 }), EXIT.pass);
+  assert.equal(exitCodeFor({ pass: 2, fail: 1, unverified: 4 }), EXIT.fail, "a failure outranks anything else");
+  // The correction: a run with no failures but open capabilities must not exit 0,
+  // because README described zero as "all probes passed".
+  assert.equal(exitCodeFor({ pass: 2, fail: 0, unverified: 1 }), EXIT.unverified);
+  assert.notEqual(EXIT.unverified, EXIT.pass);
+});
+
+test("a live run whose calls all fail reports unverified, never pass", async () => {
+  const { runLive, exitCodeFor, summarise } = await import("../src/diagnostic.mjs");
+  const realFetch = globalThis.fetch;
+  const realKey = process.env.GEMINI_API_KEY;
+  try {
+    process.env.GEMINI_API_KEY = "fake-diagnostic-key-000000";
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ error: { message: "denied", status: "PERMISSION_DENIED" } }),
+    });
+    const results = await runLive();
+    const counts = summarise(results);
+    assert.equal(counts.pass, 0, "an authentication failure proves no capability");
+    assert.equal(counts.fail, 0, "nor is it a capability failure");
+    assert.equal(counts.unverified, results.length);
+    assert.equal(exitCodeFor(counts), 3);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = realKey;
+  }
+});

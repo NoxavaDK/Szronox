@@ -13,6 +13,7 @@ unauthenticated request returns 403 as expected), so the blocker is credentials 
 | [`docs/acceptance-matrix.md`](docs/acceptance-matrix.md) | Per-capability verdicts, failure-mode results, how to close the live gates |
 | [`docs/findings.md`](docs/findings.md) | Documentation review with access dates, sources and T00 implications |
 | [`docs/sol-partial-review.md`](docs/sol-partial-review.md) | What the earlier partial work contained, what was kept and what was corrected |
+| [`docs/C03-corrections.md`](docs/C03-corrections.md) | **Current.** Corrections applied for independent-review findings G1–G6, with what each verdict used to claim |
 
 ## What this spike can and cannot tell you
 
@@ -30,48 +31,55 @@ Node.js 20+. No install step, no dependencies.
 
 ```sh
 cd spikes/gemini
-npm run check       # syntax check + 85 unit tests
+npm run check       # syntax check + 116 unit tests
 npm run synthetic   # parse fixtures; every result labelled synthetic_fixture
 npm run live        # requires a configured key; exits 2 (BLOCKED) without one
 ```
 
 `npm run live` reads `GEMINI_API_KEY` or `GOOGLE_API_KEY` from the environment. Configure
 it in your shell session or a local env file — **never inline it into a command**, which
-would place the secret in shell history. Exit codes: `0` all probes passed, `1` at least
-one probe failed, `2` live mode was blocked before any request.
+would place the secret in shell history. Exit codes: `0` every probe passed, `1` at least one
+probe failed, `2` live mode was blocked before any request, `3` no failures but at least one
+capability is UNVERIFIED, `4` usage error. C03 correction: a run with unverified results no
+longer exits `0`.
 
 Redirect live output to `artifacts/private/` (gitignored). It may contain external page
 content and provider error text.
 
-## Two documented response surfaces
+## One endpoint, pinned
 
-This is the most important finding for whoever writes the adapter, and it contradicts the
-earlier draft of this file.
+> **Corrected by C03 (2026-09-14).** An earlier version of this section was headed "Two
+> documented response surfaces" and treated the difference between the Interactions guides
+> and the generateContent reference as uncertainty about what *this* endpoint returns. That
+> was wrong: they are two different endpoints. The earlier wording is preserved in the git
+> history and the reasoning is recorded in [`docs/C03-corrections.md`](docs/C03-corrections.md) §G3.
 
-As read on **2026-09-13**, the capability guides and the API reference document *different
-shapes*, and `generateContent` is **not** marked deprecated:
+This harness calls exactly one endpoint:
 
-| Concern | `generateContent` reference | Capability guides |
-| --- | --- | --- |
-| Output container | `candidates[]` with `finishReason`, `content` | `steps[]`: `google_search_call`, `google_search_result`, `url_context_result`, `model_output` |
-| Citations | `groundingMetadata.groundingChunks` / `groundingSupports` | inline `url_citation` annotations with `start_index`/`end_index` |
-| Search tool | — | `google_search` ("Older models use `google_search_retrieval`") |
-| JSON output | `responseMimeType` + `responseSchema` | `response_format: { type, mime_type, schema }` |
+```
+POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+```
 
-The earlier draft asserted camel-case `googleSearch` and `responseJsonSchema` as
-"documented for generateContent". Neither is confirmed on that reference page.
-`responseJsonSchema` has been replaced with `responseSchema` here.
+`src/endpoint.mjs` pins that contract — request fields, response shape and provenance — in
+one place. Responses are `candidates[]` with `content.parts`, `groundingMetadata` and
+candidate-scoped `urlContextMetadata`.
 
-Which shape the target model and endpoint actually return is **unresolved without a live
-call**. The parser therefore handles both and reports which it saw, as
-`shape: generate_content_candidates | interactions_steps | unrecognised`, so the first
-live run settles it immediately instead of failing obscurely.
+The Interactions endpoint (`/interactions`) returns a `steps[]` shape with inline
+`url_citation` annotations. This harness does not call it. A `steps[]` payload is
+**quarantined**: recorded as `shape: "quarantined_unsupported_shape"`, yielding no
+candidates and contributing no evidence. The historical fixture is kept for provenance, not
+as accepted evidence.
 
-Sources, all read 2026-09-13:
+JSON Schema documents are sent in `generationConfig.responseJsonSchema`, and the field used
+is recorded on every result. `responseSchema` (an OpenAPI 3.0 subset) is documented in
+`endpoint.mjs` for contrast but is not used here. A rejected request is never read as a
+missing provider capability — the request may be wrong on our side.
+
+Sources, read 2026-09-14:
 [generateContent reference](https://ai.google.dev/api/generate-content) ·
+[Generate Content structured output](https://ai.google.dev/gemini-api/docs/generate-content/structured-output) ·
 [URL context](https://ai.google.dev/gemini-api/docs/url-context) ·
-[Grounding with Google Search](https://ai.google.dev/gemini-api/docs/google-search) ·
-[Structured output](https://ai.google.dev/gemini-api/docs/structured-output)
+[Grounding with Google Search](https://ai.google.dev/gemini-api/docs/google-search)
 
 ## Probes
 
@@ -79,21 +87,19 @@ Each probe owns its verdict, and a verdict is never "we received a response".
 
 | Probe | Passes only when |
 | --- | --- |
-| `multimodal_transport` | A candidate comes back and is not blocked. Claims transport acceptance and explicitly nothing about understanding. |
-| `multimodal_comprehension` | The model names all four quadrant colours of a generated PNG **in the correct order**. A one-pixel image cannot separate "accepted bytes" from "read the picture", so it is not used. |
-| `url_context_accessible` | The provider reports a `*_SUCCESS` retrieval status. No metadata ⇒ `unverified`, never pass — fluent prose is not retrieval. |
-| `url_context_unavailable` | The provider reports a non-success status, or errors. A reported success for a `.invalid` host is a **fail**. |
-| `search_grounding` | Executed queries **and** source references are present. Reports separately whether any source carries a quotable excerpt. |
-| `structured_output_alone` | The text parses as JSON **and** satisfies the requested schema, re-validated locally. |
-| `structured_output_with_search` | Both are accepted together and citations survive. Documented as **Preview, Gemini 3 series only** ("Preview: This feature is available only to Gemini 3 series models"), so the default diagnostic model `gemini-2.5-flash` is expected to reject it. A rejection is recorded as a compatibility answer for that model, not a diagnostic failure. |
+| `multimodal_transport` | A candidate comes back. Claims byte acceptance and nothing else — a blocked candidate still demonstrates it. |
+| `multimodal_comprehension` | The model returns a checkable `{topLeft,topRight,bottomLeft,bottomRight}` answer matching the generated image. Prose mentioning the colours is `unverified`, not a pass. |
+| `url_context_accessible` | Provider metadata **on the answering candidate** reports a `*_SUCCESS` status **for the URL the probe requested**. Top-level or other-URL metadata does not count. |
+| `url_context_unavailable` | The provider **positively reports** a retrieval failure for the requested URL. An unspecified or unrecognised status is `unverified`. |
+| `search_grounding` | Executed queries, source references **and** span mappings are present on the one answering candidate. Evidence is never borrowed from a sibling. |
+| `structured_output_alone` | A usable candidate's text parses **and** satisfies every checked constraint. Unsupported schema keywords downgrade it to `unverified`. |
+| `structured_output_with_search` | JSON validates **and** the same candidate carries provider queries, sources and supports. Model-written `citedUrls` are never evidence. |
 
-Combining Google Search with structured output is documented as a **Gemini 3 preview**
-feature; earlier models — including the `gemini-2.5-flash` default — reject it. So a `fail`
-here against the default model is expected and says nothing about Gemini generally. The
-documented two-step fallback (ground first, structure second) remains available and must
-not drop citations between the steps. There is also an unverified report that grounding
-metadata can return empty when structured output is enabled, which is why this probe checks
-`citationsRetained` rather than accepting valid JSON as success.
+**No error ever produces a PASS, and no error produces a capability conclusion.**
+Authentication, quota, transport and rejected-request failures all resolve to `unverified`
+with `capabilityConclusion: "none"`. A blocked or truncated candidate is never judged
+semantically. Both rules are C03 corrections; see
+[`docs/C03-corrections.md`](docs/C03-corrections.md) §G1 and §G5.
 
 ## Evidence boundaries
 

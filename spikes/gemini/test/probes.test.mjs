@@ -45,37 +45,41 @@ test("transport probe passes on any candidate but claims only transport", () => 
   assert.match(outcome.limitation, /not evidence of image understanding/i);
 });
 
-test("transport probe fails on a blocked or absent candidate", () => {
+test("transport probe fails only when no candidate comes back at all", () => {
   assert.equal(verdictFor("multimodal_transport", { candidates: [] }).verdict, "fail");
-  assert.equal(
-    verdictFor("multimodal_transport", { candidates: [{ content: { parts: [] }, finishReason: "SAFETY" }] }).verdict,
-    "fail",
-  );
+  // C03/G5: a blocked candidate still proves the bytes were accepted, which is
+  // the only claim this probe makes. Usability is a separate question, asserted
+  // by the semantic probes.
+  const blocked = verdictFor("multimodal_transport", { candidates: [{ content: { parts: [] }, finishReason: "SAFETY" }] });
+  assert.equal(blocked.verdict, "pass");
+  assert.equal(blocked.candidateState, "blocked");
 });
 
-test("comprehension probe passes only when all four colours appear in quadrant order", () => {
+test("comprehension probe passes on a correct checkable answer", () => {
   const outcome = verdictFor(
     "multimodal_comprehension",
-    textResponse("Top-left is red, top-right is green, bottom-left is blue and bottom-right is white."),
+    textResponse('{"topLeft":"red","topRight":"green","bottomLeft":"blue","bottomRight":"white"}'),
   );
   assert.equal(outcome.verdict, "pass");
 });
 
-test("comprehension probe fails when a colour is missing", () => {
-  const outcome = verdictFor("multimodal_comprehension", textResponse("It is red, green and blue."));
+test("comprehension probe fails a well-formed answer with wrong colours", () => {
+  const outcome = verdictFor(
+    "multimodal_comprehension",
+    textResponse('{"topLeft":"white","topRight":"green","bottomLeft":"blue","bottomRight":"red"}'),
+  );
   assert.equal(outcome.verdict, "fail");
-  assert.match(JSON.stringify(outcome.missing), /white/);
+  assert.equal(outcome.wrong.length, 2);
 });
 
-test("comprehension probe fails when the colours are named in the wrong order", () => {
-  // All four words present, arrangement wrong: vocabulary, not comprehension.
-  const outcome = verdictFor("multimodal_comprehension", textResponse("white, blue, green, red"));
-  assert.equal(outcome.verdict, "fail");
-  assert.match(outcome.summary, /not in the requested quadrant order/);
-});
-
-test("comprehension probe fails on empty text", () => {
-  assert.equal(verdictFor("multimodal_comprehension", textResponse("")).verdict, "fail");
+test("comprehension probe is unverified when the answer is not in the checkable shape", () => {
+  // C03/G5: substring matching passed prose that merely mentioned the colours,
+  // including a sentence denying the model could see the image. Format
+  // non-compliance cannot be separated from comprehension, so it is unverified
+  // rather than a comprehension failure.
+  for (const text of ["Top-left is red, top-right green, bottom-left blue, bottom-right white.", ""]) {
+    assert.equal(verdictFor("multimodal_comprehension", textResponse(text)).verdict, "unverified");
+  }
 });
 
 test("URL probe is unverified when the model narrates a page with no retrieval metadata", () => {
@@ -85,7 +89,7 @@ test("URL probe is unverified when the model narrates a page with no retrieval m
     textResponse("I read the page and its heading is Example Domain."),
   );
   assert.equal(outcome.verdict, "unverified");
-  assert.equal(outcome.modelTextPresent, true);
+  assert.equal(outcome.requestedUrl, "https://example.com/");
 });
 
 test("URL probe passes only on a provider-reported success status", () => {
@@ -122,12 +126,14 @@ test("unavailable-URL probe passes on a reported failure and fails on a false su
   assert.equal(bogus.verdict, "fail");
 });
 
-test("unavailable-URL probe accepts an explicit provider error as the answer", () => {
+test("unavailable-URL probe never treats a call-level error as the answer", () => {
+  // C03/G1: a provider error says nothing about URL retrieval behaviour. This
+  // previously returned PASS, so an auth 403 "proved" correct handling.
   const outcome = verdictFor("url_context_unavailable", null, {
     error: { category: "request_or_content", retryable: false },
   });
-  assert.equal(outcome.verdict, "pass");
-  assert.equal(outcome.retryable, false);
+  assert.equal(outcome.verdict, "unverified");
+  assert.equal(outcome.capabilityConclusion, "none");
 });
 
 test("unavailable-URL probe is unverified when nothing at all is reported", () => {
@@ -186,33 +192,37 @@ test("structured-output probe passes on a conforming response", () => {
   assert.equal(outcome.value.classification, "liquid");
 });
 
-test("combined probe reports a provider rejection as a compatibility answer", () => {
+test("combined probe does not turn a provider rejection into a compatibility answer", () => {
+  // C03/G1: the request itself may be wrong, so a 400 is not evidence that the
+  // combination is unsupported.
   const outcome = verdictFor("structured_output_with_search", null, {
     error: { category: "request_or_content", code: "INVALID_ARGUMENT", retryable: false },
   });
-  assert.equal(outcome.verdict, "fail");
-  assert.match(outcome.interpretation, /does not support this combination/);
+  assert.equal(outcome.verdict, "unverified");
+  assert.equal(outcome.capabilityConclusion, "none");
 });
 
-test("combined probe records whether citations survived the structuring step", () => {
+test("combined probe passes only with provider grounding on the answering candidate", () => {
   const withCitations = verdictFor("structured_output_with_search", textResponse(
     '{"answer":"Node 22","citedUrls":["https://example.invalid/a"]}',
     {
       groundingMetadata: {
         webSearchQueries: ["node lts"],
         groundingChunks: [{ web: { uri: "https://example.invalid/a", title: "A" } }],
+        groundingSupports: [{ segment: { partIndex: 0, startIndex: 0, endIndex: 5 }, groundingChunkIndices: [0] }],
       },
     },
   ));
   assert.equal(withCitations.verdict, "pass");
-  assert.equal(withCitations.citationsRetained, true);
+  assert.equal(withCitations.sources, 1);
 
-  // JSON valid, grounding silently emptied: the failure mode worth catching.
+  // C03/G1: valid JSON with no provider grounding used to PASS with
+  // citationsRetained=false. Model-written citedUrls are model_output.
   const withoutCitations = verdictFor(
     "structured_output_with_search",
-    textResponse('{"answer":"Node 22","citedUrls":[]}'),
+    textResponse('{"answer":"Node 22","citedUrls":["https://example.invalid/a"]}'),
   );
-  assert.equal(withoutCitations.verdict, "pass");
-  assert.equal(withoutCitations.citationsRetained, false);
+  assert.equal(withoutCitations.verdict, "fail");
   assert.equal(withoutCitations.sources, 0);
+  assert.equal(withoutCitations.modelClaimedUrlsAreNotEvidence, true);
 });

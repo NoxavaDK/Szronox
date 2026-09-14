@@ -19,20 +19,38 @@ connectivity. Every provider capability below is therefore **UNVERIFIED**.
 
 ---
 
+## Status after C03 (2026-09-14)
+
+> Updated for the independent review findings G1–G6. See
+> [`C03-corrections.md`](C03-corrections.md). **No live call has been made**, so every
+> provider capability is still UNVERIFIED — but several rows that previously *could* have
+> reported a false PASS no longer can.
+
 ## Capability verdicts
 
 | # | Capability | Verdict | Evidence | Basis |
 | --- | --- | --- | --- | --- |
-| 1a | Multimodal image input — transport acceptance | UNVERIFIED | — | Probe `multimodal_transport` ready; never executed against the provider |
-| 1b | Multimodal image understanding | UNVERIFIED | — | Probe `multimodal_comprehension` ready. Deliberately separate from 1a: a one-pixel PNG cannot evidence understanding |
-| 2a | URL context — retrievable page | UNVERIFIED | documentation | Candidate-level `url_context_metadata` with a retrieval status is documented; not observed |
-| 2b | URL context — unavailable/restricted URL | UNVERIFIED | documentation | Documented restrictions recorded (§6 of findings); behaviour not observed |
-| 3 | Google Search grounding — execution metadata and source mapping | UNVERIFIED | documentation | `webSearchQueries`, `groundingChunks`, `groundingSupports` documented; not observed |
-| 4a | Structured output alone | UNVERIFIED | documentation | Field spelling is ambiguous across current docs — see findings §5. Only a live call resolves it |
-| 4b | Structured output combined with Google Search | UNVERIFIED, expected model-dependent | documentation | Documented as a **Gemini 3 preview** feature; earlier models reject the combination |
-| 5 | Failure modes — classification and retry bounds | **PASS** | synthetic | Fully covered by injected-response tests; needs no credential |
-| 6 | Evidence boundaries — model text vs metadata vs excerpt | **PASS** (local), UNVERIFIED (live) | synthetic + documentation | Parser enforces the separation; documentation establishes that excerpts are not returned at all |
-| 7 | Application-shaped validation — hooks, bounded additions, meme IDs | **PASS** | synthetic | Local T00 contract enforcement. Not evidence that Gemini respects any of it |
+| 1a | Multimodal image input — transport acceptance | UNVERIFIED | — | Probe ready. Passes on any returned candidate, including a blocked one: byte acceptance is its only claim |
+| 1b | Multimodal image understanding | UNVERIFIED | — | Probe now requires a checkable quadrant answer. Prose naming the colours is `unverified`, not a pass (G5) |
+| 2a | URL context — retrievable page | UNVERIFIED | documentation | Requires candidate-scoped `*_SUCCESS` for the **requested** URL. Top-level or other-URL metadata cannot pass it (G1) |
+| 2b | URL context — unavailable/restricted URL | UNVERIFIED | documentation | Requires a **positively reported** failure. Unspecified/unrecognised statuses and call-level errors are `unverified` (G1) |
+| 3 | Google Search grounding — execution metadata and source mapping | UNVERIFIED | documentation | Requires queries, sources and supports on the one answering candidate; evidence is never borrowed across candidates (G1) |
+| 4a | Structured output alone | UNVERIFIED | documentation | JSON Schema sent in `responseJsonSchema`; field recorded per result. Unsupported schema keywords downgrade a pass to `unverified` (G3) |
+| 4b | Structured output combined with Google Search | UNVERIFIED | documentation | Requires valid JSON **and** provider grounding on the same candidate. Model-written `citedUrls` never count (G1). Documented as a Gemini 3 preview; recorded as `modelExpectation`, not asserted |
+| 5 | Failure modes — classification and retry bounds | **PASS** | synthetic | Injected-response tests; no credential required. Now includes body-read failures and 408 (G6) |
+| 6 | Evidence boundaries — model text vs metadata vs excerpt | **PASS** (local), UNVERIFIED (live) | synthetic + documentation | Citation coordinates resolve per part in UTF-8 bytes (G4); Interactions shape quarantined |
+| 7 | Application-shaped validation — hooks, bounded additions, meme IDs | **PASS** | synthetic | Local T00 contract enforcement. Partial by design: not a complete T00 validator, and not evidence Gemini respects any of it |
+| 8 | Complete output redaction | **PASS** | synthetic | Success path, malformed-body diagnostics and top-level errors all redacted; regression tests use a synthetic sentinel (G2) |
+| 9 | Endpoint/request contract explicit | **PASS** | documentation | One pinned endpoint in `src/endpoint.mjs`, with provenance and the request fields actually sent (G3) |
+
+### Verdict rules now enforced
+
+- **No error produces a PASS or a capability conclusion.** Authentication, quota, transport
+  and rejected-request failures resolve to `unverified` with `capabilityConclusion: "none"`.
+- **No blocked or truncated candidate is judged semantically.** `MAX_TOKENS` is a
+  truncation, not an answer; a `promptFeedback.blockReason` blocks every semantic probe.
+- **Evidence is candidate-local and URL-matched.**
+- **Model-produced text is never provider evidence**, including `citedUrls` it writes.
 
 ## Failure modes (row 5, detail)
 
@@ -54,9 +72,14 @@ these verdicts are real rather than deferred.
 | Blocked / incomplete generation | `incompleteCandidates`, `promptFeedback.blockReason` | n/a | PASS |
 | Credential leakage into error text | redacted, header keys omitted | n/a | PASS |
 
-Retry bound: **3 attempts**, exponential backoff, retried only for errors
-explicitly marked retryable. Asserted directly — the unbounded case fails the
-suite.
+Retry bound: **3 attempts**, exponential backoff, retried only for errors explicitly marked
+retryable. Asserted directly — the unbounded case fails the suite.
+
+C03 additions to this table: a **body-read** failure (`response.text()` rejecting) is now a
+retryable `transport_timeout`/`transport_network` with `phase: "body_read"` rather than a
+terminal malformed body; **HTTP 408** is `provider_transient`, not `request_or_content`; an
+**empty 200 body** is its own `EMPTY_SUCCESS_BODY`; and a meaningful `error.code` is no
+longer masked by a generic `error.name` (G6).
 
 ## What a green run here does and does not mean
 
@@ -108,8 +131,9 @@ GEMINI_API_KEY=... npm run live > artifacts/private/live-$(date -u +%Y%m%dT%H%M%
 ```
 
 Supply the key through the environment, not as a literal in a shared command.
-Exit code 2 means blocked (no credential); 1 means at least one probe returned a
-`fail` verdict. Then update rows 1–4 with the observed result, note the model and
+Exit codes: `0` every probe passed, `1` at least one failed, `2` blocked before any request,
+`3` no failures but at least one capability unverified, `4` usage error. A run that reaches
+no failures but leaves capabilities open exits `3`, not `0`. Then update rows 1–4 with the observed result, note the model and
 endpoint used, and file a redacted summary in `artifacts/`.
 
 Re-run 4a with the alternative field spelling before concluding anything about

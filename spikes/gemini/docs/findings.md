@@ -5,6 +5,13 @@ call was possible (no credential configured), so everything below is
 **documentation-only** evidence unless a live run later confirms it. Community
 forum reports are labelled as such and are not treated as primary.
 
+
+> **Superseded in part by C03 (2026-09-14).** This document recorded the documentation review
+> made at `cb41abd`. The independent lead review found §§2, 4 and 5 unreliable, and those
+> conclusions have been corrected. The corrections are in
+> [`C03-corrections.md`](C03-corrections.md) §G3; the sections below are retained as the
+> historical record, each annotated inline. Do not read §2, §4 or §5 as current.
+
 ---
 
 ## 1. The partial spike's central parsing bug is real
@@ -27,6 +34,13 @@ encoded the same wrong shape, so no test could have caught it. It is kept as the
 regression case; the parser now reports it as `topLevelUrlRetrieval`.
 
 ## 2. `generateContent` is now labelled Legacy
+
+> **CORRECTED (C03/G3).** This section treated two *endpoints* as two response shapes of
+> one endpoint, and concluded the parser should handle both. It should not. The harness
+> calls `models/{model}:generateContent` only; the `steps[]` shape belongs to
+> `/interactions` and is now quarantined, contributing no evidence. See
+> [`C03-corrections.md`](C03-corrections.md) §G3–G4 and `src/endpoint.mjs`.
+
 
 Current documentation splits into two surfaces:
 
@@ -72,6 +86,13 @@ the retrieved body.
 
 ## 4. Search + structured output is model-gated, and the default model fails it
 
+> **CORRECTED (C03/G3).** The documented Gemini 3 preview expectation stands and is now
+> attached to the probe as `modelExpectation`. What was wrong was the inference rule: the
+> harness treated *any* failure of the combined probe as proof the combination is
+> unsupported. No failure supports that — not a timeout, not an auth refusal, and not an
+> HTTP 400, since the request may be malformed on our side. See §G1 and §G3.
+
+
 > "Gemini 3 lets you combine Structured Outputs with built-in tools, including
 > Grounding with Google Search, URL Context, Code Execution, File Search, and
 > Function Calling." — structured-output docs, flagged as a **preview** feature
@@ -98,6 +119,15 @@ workaround and remains available. It costs a second call and must not drop
 citations between steps.
 
 ## 5. Structured-output field naming is genuinely ambiguous
+
+> **CORRECTED (C03/G3).** "Ambiguous" overstated it: different endpoints and SDKs simply
+> document different fields. The harness now sends JSON Schema in `responseJsonSchema` and
+> records the field used on every result. One correction to the review's framing, checked
+> directly on 2026-09-14: `additionalProperties` **is** listed among `responseSchema`'s
+> supported OpenAPI-subset properties, so the original request was not self-evidently
+> invalid. The substantive rule is unchanged — a rejected request is never evidence of a
+> missing capability.
+
 
 Across current pages the REST examples show `generationConfig.responseFormat`
 with nested `{ text: { mimeType, schema } }`, while SDK examples use

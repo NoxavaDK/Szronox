@@ -1,0 +1,67 @@
+{
+  "_synthetic": "Declared expectations for each parser fixture. C03 correction: synthetic parser rows used to be hardcoded PASS after extraction, so the runner could not detect a parser regression. Expectations live here so the historical provider-shaped fixtures stay byte-for-byte preserved.",
+
+  "blocked-response.json": {
+    "describes": "A SAFETY-blocked candidate with no content must be unusable, and the prompt-level block must be visible.",
+    "shape": "generate_content_candidates",
+    "candidateCount": 1,
+    "promptBlockReason": "SAFETY",
+    "quarantined": false,
+    "candidates": { "0": { "usableState": "blocked", "partCount": 0, "sourceCount": 0 } }
+  },
+
+  "interactions-steps.json": {
+    "describes": "A steps[] payload belongs to the Interactions endpoint. It is quarantined, contributes no candidates and no evidence.",
+    "shape": "quarantined_unsupported_shape",
+    "candidateCount": 0,
+    "quarantined": true
+  },
+
+  "multi-candidate-classic.json": {
+    "describes": "Two candidates where only the second is grounded. Evidence must stay with its own candidate.",
+    "shape": "generate_content_candidates",
+    "candidateCount": 2,
+    "quarantined": false,
+    "candidates": {
+      "0": { "usableState": "complete", "sourceCount": 0, "supportCount": 0, "searchQueryCount": 0 },
+      "1": { "usableState": "complete", "sourceCount": 1, "supportCount": 1, "searchQueryCount": 1 }
+    }
+  },
+
+  "multipart-unicode-citation.json": {
+    "describes": "G4: a citation segment resolves against its own part using UTF-8 byte offsets, not against flattened text.",
+    "shape": "generate_content_candidates",
+    "candidateCount": 1,
+    "quarantined": false,
+    "candidates": {
+      "0": {
+        "usableState": "complete",
+        "partCount": 2,
+        "sourceCount": 1,
+        "supportCount": 1,
+        "searchQueryCount": 1,
+        "resolvedSegments": ["gęślą"]
+      }
+    }
+  },
+
+  "synthetic-provider-response.json": {
+    "describes": "Retained from the partial spike: urlContextMetadata sits at the RESPONSE top level, where the original parser wrongly read it. It must be reported separately and never merged into the candidate.",
+    "shape": "generate_content_candidates",
+    "candidateCount": 1,
+    "topLevelRetrievalCount": 1,
+    "quarantined": false,
+    "candidates": {
+      "0": { "usableState": "complete", "sourceCount": 1, "supportCount": 1, "searchQueryCount": 1, "urlRetrievalCount": 0 }
+    }
+  },
+
+  "url-context-candidate-scoped.json": {
+    "describes": "Candidate-scoped retrieval metadata with one success and one error status.",
+    "shape": "generate_content_candidates",
+    "candidateCount": 1,
+    "topLevelRetrievalCount": 0,
+    "quarantined": false,
+    "candidates": { "0": { "usableState": "complete", "urlRetrievalCount": 2, "sourceCount": 0 } }
+  }
+}

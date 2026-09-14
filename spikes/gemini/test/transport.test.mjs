@@ -116,11 +116,17 @@ test("treats HTTP 200 with an unparseable body as a failure, not an empty succes
   );
 });
 
-test("treats HTTP 200 with an empty body as a failure", async () => {
+test("treats HTTP 200 with an empty body as its own distinct failure", async () => {
   const fetchImpl = fakeFetch([{ status: 200, body: "" }]);
   await assert.rejects(
     generateContent({ apiKey: SECRET, model: "m", request: {}, fetchImpl, retry: { maxAttempts: 1 } }),
-    (error) => error.code === "MALFORMED_SUCCESS_BODY",
+    (error) => {
+      // Separated from unparseable JSON so an artifact says which one happened.
+      assert.equal(error.code, "EMPTY_SUCCESS_BODY");
+      assert.equal(error.category, "malformed_success");
+      assert.equal(error.retryable, false);
+      return true;
+    },
   );
 });
 

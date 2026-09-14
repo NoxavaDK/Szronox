@@ -1,222 +1,276 @@
 /**
- * Turn a provider response into evidence with its provenance attached.
+ * Turn a generateContent response into evidence with its provenance attached.
  *
- * The whole point of this module is refusing to let four different things blur
- * together:
+ * Four things must never blur together:
  *
  *   model_output      - text the model wrote. Never evidence of anything.
  *   tool_metadata     - a URL or title the provider's tooling reported.
  *   retrieved_excerpt - text the provider says it actually fetched.
  *   synthetic_fixture - authored locally; evidence of parsing, nothing else.
  *
- * A model writing "according to example.com, X" is `model_output`. A grounding
- * chunk naming example.com is `tool_metadata`. Only the third is an excerpt,
- * and Gemini's grounding chunks generally do *not* contain one — which is a
- * finding the adapter has to live with, not a gap to paper over. The T00
- * contract already draws this line: `SourceEvidence.evidenceKind` is
- * `'retrieved_excerpt' | 'tool_metadata_only'`.
+ * C03 corrections applied here (independent review T03-independent-review.md):
  *
- * Two response shapes are handled because the primary documentation currently
- * describes both, on different pages, and no live call was available to settle
- * which one the target endpoint returns (see README, "Two documented response
- * surfaces"). The shape actually seen is reported as `shape`, so a reader can
- * tell which contract a result came from rather than assuming.
+ *  G4a  Citation coordinates are no longer taken from flattened text. Parts are
+ *       kept indexed and a Segment is resolved against its own part using BYTE
+ *       offsets, per the Segment reference (partIndex + byte offsets within a
+ *       part). The previous version joined parts with "\n" and then applied the
+ *       provider's untouched offsets to that synthetic string, silently shifting
+ *       every citation in a multi-part or non-ASCII response.
+ *  G4b  The Interactions/steps branch is QUARANTINED. This harness calls exactly
+ *       one endpoint, models/{model}:generateContent. The steps shape belongs to
+ *       a different endpoint, is not parsed as evidence, and is never counted.
+ *  G5   Candidate usability is explicit. A blocked or truncated candidate is not
+ *       a usable answer even when it happens to carry parseable content.
+ *
+ * Endpoint/response provenance: ai.google.dev/api/generate-content, accessed
+ * 2026-09-14. See src/endpoint.mjs for the pinned request/response contract.
  */
 
-/** Per-candidate, so a citation can never be attached to another candidate's text. */
-function readClassicCandidate(candidate, index) {
-  const parts = candidate?.content?.parts ?? [];
-  const text = parts.map((part) => part?.text).filter((value) => typeof value === "string").join("\n");
-  const grounding = candidate?.groundingMetadata ?? null;
+/**
+ * finishReason -> usability. `STOP` is the only reason that yields a complete
+ * answer. `MAX_TOKENS` is a truncation: bytes arrived, the answer did not.
+ * Everything else is a block.
+ *
+ * The previous `incompleteCandidates` treated MAX_TOKENS as acceptable, which is
+ * how a truncated response reached a semantic verdict (G5).
+ */
+const BLOCKED_REASONS = new Set([
+  "SAFETY", "RECITATION", "PROHIBITED_CONTENT", "SPII", "BLOCKLIST", "OTHER",
+  "IMAGE_SAFETY", "IMAGE_RECITATION", "IMAGE_PROHIBITED_CONTENT", "IMAGE_OTHER",
+]);
 
-  const sources = (grounding?.groundingChunks ?? []).flatMap((chunk, chunkIndex) => {
+function usabilityOf(finishReason, hasText) {
+  if (finishReason === null || finishReason === undefined) {
+    return hasText
+      ? { usable: true, state: "complete", reason: "no finishReason reported; text present" }
+      : { usable: false, state: "empty", reason: "no finishReason and no text" };
+  }
+  if (finishReason === "STOP") {
+    return hasText
+      ? { usable: true, state: "complete", reason: "STOP" }
+      : { usable: false, state: "empty", reason: "STOP with no text content" };
+  }
+  if (finishReason === "MAX_TOKENS") {
+    return { usable: false, state: "truncated", reason: "MAX_TOKENS: output was cut off mid-answer" };
+  }
+  if (BLOCKED_REASONS.has(finishReason)) {
+    return { usable: false, state: "blocked", reason: `blocked: ${finishReason}` };
+  }
+  return { usable: false, state: "unknown_finish_reason", reason: `unrecognised finishReason: ${finishReason}` };
+}
+
+/** Keep parts indexed and measured. Byte length is what Segment offsets index. */
+function readParts(candidate) {
+  const raw = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  return raw
+    .map((part, partIndex) => ({ partIndex, text: typeof part?.text === "string" ? part.text : null }))
+    .filter((part) => part.text !== null)
+    .map((part) => ({ ...part, byteLength: Buffer.byteLength(part.text, "utf8") }));
+}
+
+function readSources(grounding) {
+  return (grounding?.groundingChunks ?? []).flatMap((chunk, chunkIndex) => {
     const web = chunk?.web ?? chunk?.retrievedContext;
     if (!web) return [];
+    const excerpt = typeof web.text === "string" && web.text.length > 0 ? web.text : null;
     return [{
       chunkIndex,
       origin: "tool_metadata",
       uri: web.uri ?? null,
       title: web.title ?? null,
-      // Grounding URIs are provider redirect links, not publisher URLs. An
-      // adapter that stores this as SourceEvidence.url stores a redirect.
-      uriIsProviderRedirect:
-        typeof web.uri === "string" && web.uri.includes("vertexaisearch.cloud.google.com"),
-      // Grounding chunks carry a reference, not the fetched body. Saying so
-      // explicitly is what stops a URL being read as a quotation.
-      evidenceKind: typeof web.text === "string" && web.text.length > 0
-        ? "retrieved_excerpt"
-        : "tool_metadata_only",
-      excerpt: typeof web.text === "string" && web.text.length > 0 ? web.text : null,
+      // Grounding URIs are provider redirect links, not publisher URLs.
+      uriIsProviderRedirect: typeof web.uri === "string" && web.uri.includes("vertexaisearch.cloud.google.com"),
+      // A reference is not a quotation. Saying so explicitly is what stops a
+      // bare URL being read as supporting text.
+      evidenceKind: excerpt ? "retrieved_excerpt" : "tool_metadata_only",
+      excerpt,
     }];
   });
+}
 
-  const supports = (grounding?.groundingSupports ?? []).map((support) => ({
-    origin: "tool_metadata",
-    segment: support?.segment ?? null,
-    groundingChunkIndices: support?.groundingChunkIndices ?? [],
-  }));
-
-  return {
-    candidateIndex: index,
-    finishReason: candidate?.finishReason ?? null,
-    modelText: { origin: "model_output", value: text },
-    sources,
-    supports,
-    searchQueries: grounding?.webSearchQueries ?? [],
-    searchEntryPointPresent: Boolean(grounding?.searchEntryPoint),
-    // Candidate-scoped on purpose. Reading this from the top level of the
-    // response attributed one candidate's retrieval status to all of them.
-    urlRetrieval: readUrlRetrieval(candidate?.urlContextMetadata ?? candidate?.url_context_metadata),
-  };
+/**
+ * Supports keep their own coordinate system. `partIndex` defaults to 0 only
+ * because the reference documents that default; the offset unit is recorded so
+ * no consumer can mistake these for JavaScript string indices.
+ */
+function readSupports(grounding) {
+  return (grounding?.groundingSupports ?? []).map((support) => {
+    const segment = support?.segment ?? null;
+    return {
+      origin: "tool_metadata",
+      segment: segment
+        ? {
+            partIndex: Number.isInteger(segment.partIndex) ? segment.partIndex : 0,
+            startIndex: Number.isInteger(segment.startIndex) ? segment.startIndex : null,
+            endIndex: Number.isInteger(segment.endIndex) ? segment.endIndex : null,
+            // Provider-supplied convenience copy; NOT the coordinate system.
+            text: typeof segment.text === "string" ? segment.text : null,
+            offsetUnit: "utf8_bytes_within_part",
+          }
+        : null,
+      groundingChunkIndices: Array.isArray(support?.groundingChunkIndices) ? support.groundingChunkIndices : [],
+    };
+  });
 }
 
 function readUrlRetrieval(metadata) {
   const entries = metadata?.urlMetadata ?? metadata?.url_metadata ?? [];
-  return entries.map((entry) => ({
-    origin: "tool_metadata",
-    url: entry?.retrievedUrl ?? entry?.retrieved_url ?? null,
-    // Preserved verbatim. A model sentence claiming it read a page is not a
-    // retrieval status, and the two must stay distinguishable.
-    status: entry?.urlRetrievalStatus ?? entry?.url_retrieval_status ?? null,
-  }));
+  return (Array.isArray(entries) ? entries : []).map((entry) => {
+    const status = entry?.urlRetrievalStatus ?? entry?.url_retrieval_status ?? null;
+    // Only an explicit SUCCESS is a retrieval. An unknown or unspecified status
+    // is neither success nor a demonstrated failure (G1).
+    const known = typeof status === "string" && /^URL_RETRIEVAL_STATUS_/.test(status);
+    const success = typeof status === "string" && /_SUCCESS$/.test(status);
+    const unspecified = typeof status === "string" && /_UNSPECIFIED$/.test(status);
+    return {
+      origin: "tool_metadata",
+      url: entry?.retrievedUrl ?? entry?.retrieved_url ?? null,
+      status,
+      statusRecognised: known,
+      retrieved: success,
+      // A failure must be positively reported, not inferred from "not success".
+      retrievalFailed: known && !success && !unspecified,
+    };
+  });
 }
 
-/**
- * The newer step-based shape documented on the capability guides, where search
- * calls, search results and model output are separate steps and citations are
- * inline annotations rather than a parallel metadata block.
- */
-function readStepShape(response) {
-  const steps = Array.isArray(response?.steps) ? response.steps : [];
-  const sources = [];
-  const supports = [];
-  const searchQueries = [];
-  const urlRetrieval = [];
-  const textChunks = [];
-
-  steps.forEach((step) => {
-    const kind = step?.type ?? step?.step_type ?? null;
-
-    if (kind === "google_search_call") {
-      for (const query of step?.queries ?? []) if (typeof query === "string") searchQueries.push(query);
-    }
-
-    if (kind === "url_context_result") {
-      for (const entry of step?.url_metadata ?? step?.urlMetadata ?? [step]) {
-        urlRetrieval.push({
-          origin: "tool_metadata",
-          url: entry?.retrieved_url ?? entry?.retrievedUrl ?? entry?.url ?? null,
-          status: entry?.status ?? entry?.url_retrieval_status ?? null,
-        });
-      }
-    }
-
-    if (kind === "model_output") {
-      const blocks = step?.content ?? [];
-      for (const block of Array.isArray(blocks) ? blocks : [blocks]) {
-        if (typeof block?.text === "string") textChunks.push(block.text);
-        for (const annotation of block?.annotations ?? []) {
-          const citation = annotation?.url_citation ?? annotation?.urlCitation;
-          if (!citation) continue;
-          const chunkIndex = sources.length;
-          sources.push({
-            chunkIndex,
-            origin: "tool_metadata",
-            uri: citation.url ?? null,
-            title: citation.title ?? null,
-            // An annotation points at a span of the model's own text. It is a
-            // pointer, not the fetched source body.
-            evidenceKind: "tool_metadata_only",
-            excerpt: null,
-          });
-          supports.push({
-            origin: "tool_metadata",
-            segment: {
-              startIndex: citation.start_index ?? citation.startIndex ?? null,
-              endIndex: citation.end_index ?? citation.endIndex ?? null,
-            },
-            groundingChunkIndices: [chunkIndex],
-          });
-        }
-      }
-    }
-
-    // `google_search_result` carries search suggestions, which are provider
-    // chrome for display. They are deliberately not pushed into `supports`:
-    // that list means "this span of output rests on these sources", and an
-    // entry with no source indices would read as an unsupported claim.
-  });
-
-  const searchSuggestionsPresent = steps.some(
-    (step) => (step?.type ?? step?.step_type) === "google_search_result"
-      && Array.isArray(step?.search_suggestions) && step.search_suggestions.length > 0,
-  );
+function readCandidate(candidate, index) {
+  const parts = readParts(candidate);
+  const grounding = candidate?.groundingMetadata ?? null;
+  const joined = parts.map((part) => part.text).join("");
+  const finishReason = candidate?.finishReason ?? null;
 
   return {
-    candidateIndex: 0,
-    finishReason: response?.finish_reason ?? response?.finishReason ?? null,
-    modelText: { origin: "model_output", value: textChunks.join("\n") },
-    sources,
-    supports,
-    searchQueries,
-    searchEntryPointPresent: searchSuggestionsPresent,
-    urlRetrieval,
+    candidateIndex: index,
+    finishReason,
+    usability: usabilityOf(finishReason, joined.trim().length > 0),
+    // Indexed parts are the citation coordinate system.
+    parts,
+    modelText: {
+      origin: "model_output",
+      value: joined,
+      // Concatenated without separators for display only. Never index into this
+      // with provider offsets; use resolveSegmentText.
+      concatenatedForDisplayOnly: true,
+    },
+    sources: readSources(grounding),
+    supports: readSupports(grounding),
+    searchQueries: Array.isArray(grounding?.webSearchQueries) ? grounding.webSearchQueries : [],
+    searchEntryPointPresent: Boolean(grounding?.searchEntryPoint),
+    // Candidate-scoped. Reading this from the response top level attributed one
+    // candidate's retrieval status to all of them.
+    urlRetrieval: readUrlRetrieval(candidate?.urlContextMetadata ?? candidate?.url_context_metadata),
   };
 }
 
 /**
- * Extract evidence, keeping every candidate separate.
+ * Resolve a grounding support back to the exact text it cites.
  *
- * `candidates` is an array even when there is one, because the previous
- * version concatenated every candidate's text and then attached only the first
- * candidate's citations to the result — which reads as though the citations
- * covered all of it.
+ * This is the G4 fix in one function: the offsets belong to ONE part and are
+ * counted in UTF-8 bytes. Returning a typed failure rather than a wrong slice is
+ * the point — a citation that cannot be resolved must not silently become a
+ * plausible-looking quotation.
  */
+export function resolveSegmentText(candidate, segment) {
+  if (!segment) return { ok: false, reason: "no_segment" };
+  const part = candidate?.parts?.find((entry) => entry.partIndex === (segment.partIndex ?? 0));
+  if (!part) return { ok: false, reason: "part_index_out_of_range", partIndex: segment.partIndex ?? 0 };
+
+  const { startIndex, endIndex } = segment;
+  if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) {
+    return { ok: false, reason: "missing_offsets" };
+  }
+  const bytes = Buffer.from(part.text, "utf8");
+  if (startIndex < 0 || endIndex > bytes.length || startIndex > endIndex) {
+    return { ok: false, reason: "offset_out_of_range", partByteLength: bytes.length, startIndex, endIndex };
+  }
+  return { ok: true, text: bytes.subarray(startIndex, endIndex).toString("utf8"), partIndex: part.partIndex };
+}
+
+/**
+ * G4b — quarantine, do not parse.
+ *
+ * A `steps` payload comes from the Interactions endpoint, which this harness
+ * does not call. Recording that it was seen is useful; treating it as evidence
+ * for generateContent would be a category error. The historical fixture is kept
+ * for provenance only.
+ */
+function quarantineUnsupportedShape(response) {
+  const steps = Array.isArray(response?.steps) ? response.steps : [];
+  return {
+    reason: "unsupported_response_shape",
+    detail:
+      "Payload carries a `steps` array, which is the Interactions endpoint shape. " +
+      "This harness calls models/{model}:generateContent only. The payload is recorded, " +
+      "not parsed, and contributes no evidence.",
+    stepTypes: steps.map((step) => step?.type ?? step?.step_type ?? null),
+    stepCount: steps.length,
+  };
+}
+
 export function extractEvidence(response) {
   const hasSteps = Array.isArray(response?.steps) && response.steps.length > 0;
   const rawCandidates = Array.isArray(response?.candidates) ? response.candidates : [];
 
-  const candidates = hasSteps
-    ? [readStepShape(response)]
-    : rawCandidates.map((candidate, index) => readClassicCandidate(candidate, index));
-
-  // Kept for the honest case where a response matched neither shape, so a
-  // caller can tell "no evidence" from "we did not understand the payload".
-  const shape = hasSteps ? "interactions_steps" : rawCandidates.length > 0 ? "generate_content_candidates" : "unrecognised";
+  if (hasSteps && rawCandidates.length === 0) {
+    return {
+      shape: "quarantined_unsupported_shape",
+      candidates: [],
+      quarantined: quarantineUnsupportedShape(response),
+      promptFeedback: response?.promptFeedback ?? null,
+      promptBlockReason: response?.promptFeedback?.blockReason ?? null,
+      usageMetadata: response?.usageMetadata ?? null,
+      modelVersion: response?.modelVersion ?? null,
+      topLevelUrlRetrieval: readUrlRetrieval(response?.urlContextMetadata ?? response?.url_context_metadata),
+    };
+  }
 
   return {
-    shape,
-    candidates,
+    shape: rawCandidates.length > 0 ? "generate_content_candidates" : "unrecognised",
+    candidates: rawCandidates.map((candidate, index) => readCandidate(candidate, index)),
+    quarantined: hasSteps ? quarantineUnsupportedShape(response) : null,
     promptFeedback: response?.promptFeedback ?? null,
+    promptBlockReason: response?.promptFeedback?.blockReason ?? null,
     usageMetadata: response?.usageMetadata ?? null,
     modelVersion: response?.modelVersion ?? null,
-    // A top-level block is still reported when present, but labelled, so it is
-    // never silently merged into a candidate's retrieval record.
+    // Recorded, but never merged into a candidate's retrieval record. Metadata
+    // with no candidate scope cannot support a candidate-scoped claim (G1).
     topLevelUrlRetrieval: readUrlRetrieval(response?.urlContextMetadata ?? response?.url_context_metadata),
   };
 }
 
-/** Total sources across candidates, for probe verdicts that need a count. */
-export function countSources(extracted) {
-  return extracted.candidates.reduce((total, candidate) => total + candidate.sources.length, 0);
+/** The candidate a semantic probe may judge, or null when none is usable (G5). */
+export function usableCandidate(extracted) {
+  if (extracted?.promptBlockReason) return null;
+  return extracted?.candidates?.find((candidate) => candidate.usability.usable) ?? null;
 }
 
-/**
- * Whether any source carries text the provider says it retrieved.
- *
- * Separated from `countSources` because "there are citations" and "there is a
- * quotable excerpt" are different claims, and conflating them is what turns a
- * bare URL into apparent proof.
- */
+/** Why no candidate was usable, for an honest verdict message. */
+export function unusableSummary(extracted) {
+  if (extracted?.promptBlockReason) {
+    return `prompt blocked before generation: ${extracted.promptBlockReason}`;
+  }
+  const states = (extracted?.candidates ?? []).map((c) => `#${c.candidateIndex}:${c.usability.state}`);
+  return states.length > 0 ? `no usable candidate (${states.join(", ")})` : "no candidates returned";
+}
+
+/** Sources on ONE candidate. Cross-candidate totals cannot support a claim (G1). */
+export function candidateSourceCount(candidate) {
+  return candidate?.sources?.length ?? 0;
+}
+
 export function hasRetrievedExcerpt(extracted) {
-  return extracted.candidates.some((candidate) =>
+  return (extracted?.candidates ?? []).some((candidate) =>
     candidate.sources.some((source) => source.evidenceKind === "retrieved_excerpt"));
 }
 
-/** Candidates that were cut short or blocked, which must never read as success. */
+/** Candidates that were blocked or truncated, i.e. must never read as success. */
 export function incompleteCandidates(extracted) {
-  const acceptable = new Set(["STOP", "MAX_TOKENS", null]);
-  return extracted.candidates
-    .filter((candidate) => !acceptable.has(candidate.finishReason))
-    .map((candidate) => ({ candidateIndex: candidate.candidateIndex, finishReason: candidate.finishReason }));
+  return (extracted?.candidates ?? [])
+    .filter((candidate) => !candidate.usability.usable)
+    .map((candidate) => ({
+      candidateIndex: candidate.candidateIndex,
+      finishReason: candidate.finishReason,
+      state: candidate.usability.state,
+    }));
 }

@@ -1,0 +1,28 @@
+{
+  "_synthetic": "Authored locally for C03. NOT a captured provider response.",
+  "_purpose": "G4 regression: a two-part candidate with non-ASCII text and a groundingSupport whose segment uses partIndex plus UTF-8 byte offsets WITHIN that part. Resolving correctly yields \"gęślą\". The superseded parser joined parts with a newline and applied these offsets to the flattened string, which yields \"ęść odpo\" — a different, plausible-looking quotation. Byte offsets computed from the part text; see docs/C03-corrections.md.",
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          { "text": "Pierwsza część odpowiedzi. " },
+          { "text": "Zażółć gęślą jaźń dla źdźbła." }
+        ]
+      },
+      "finishReason": "STOP",
+      "groundingMetadata": {
+        "webSearchQueries": ["synthetic multipart query"],
+        "groundingChunks": [
+          { "web": { "uri": "https://example.invalid/multipart-source", "title": "Synthetic multipart source" } }
+        ],
+        "groundingSupports": [
+          {
+            "segment": { "partIndex": 1, "startIndex": 11, "endIndex": 19, "text": "gęślą" },
+            "groundingChunkIndices": [0]
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": { "promptTokenCount": 3, "candidatesTokenCount": 5, "totalTokenCount": 8 }
+}
