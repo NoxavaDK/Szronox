@@ -46,6 +46,7 @@ import {
   toHook,
   toReel,
 } from './mapping.js';
+import type { SignedUpload, StorageAdapter } from './storage.js';
 
 const REEL_COLUMNS = `
   id, version, title, status, priority, input_note, original_input, script, editing_notes,
@@ -100,8 +101,19 @@ export function payloadHash(payload: unknown): string {
 
 export interface Actor { id: string; name: 'NOXAVA' | 'SZRON' }
 
+/**
+ * Which Reels a list request is asking for.
+ *
+ * `active` is the default and excludes soft-deleted rows. `deleted` returns ONLY
+ * soft-deleted rows, which is what the restore surface needs: T08 reported that a
+ * correct client request could not retrieve deleted records at all, because the
+ * list unconditionally filtered them out.
+ */
+export type ReelVisibility = 'active' | 'deleted';
+
 export interface ListReelsQuery {
   status?: ReelStatus;
+  visibility?: ReelVisibility;
   /** Only Reels currently in editing past the first attention threshold. */
   overdue?: boolean;
   limit?: number;
@@ -170,8 +182,13 @@ export class CoreRepository {
     return toReel(row, hooks.rows, attachments.rows, memes.rows.map((entry) => entry.meme_id));
   }
 
-  async getReel(reelId: string): Promise<Reel> {
-    return this.loadReel(this.db, reelId);
+  /**
+   * Read one Reel. `includeDeleted` is required to see a soft-deleted row, so a
+   * normal detail request still 404s on a deleted Reel while the restore surface
+   * can fetch it deliberately.
+   */
+  async getReel(reelId: string, options: { includeDeleted?: boolean } = {}): Promise<Reel> {
+    return this.loadReel(this.db, reelId, options);
   }
 
   /**
@@ -186,7 +203,10 @@ export class CoreRepository {
   async listReels(query: ListReelsQuery): Promise<ListReelsPage> {
     const limit = Math.min(Math.max(query.limit ?? 25, 1), 100);
     const params: unknown[] = [];
-    const where: string[] = ['deleted_at is null'];
+    // Deleted is an explicit request, never a side effect of omitting a filter.
+    const where: string[] = [
+      query.visibility === 'deleted' ? 'deleted_at is not null' : 'deleted_at is null',
+    ];
 
     if (query.status) {
       params.push(query.status);
@@ -688,7 +708,8 @@ export class CoreRepository {
       mimeType: string; byteSize: number; purpose?: AttachmentReference['purpose'];
     },
     limits: AttachmentLimits,
-  ): Promise<{ attachment: AttachmentReference; storageKey: string }> {
+    storage: StorageAdapter,
+  ): Promise<{ attachment: AttachmentReference; storageKey: string; upload: SignedUpload }> {
     if (!limits.allowedMimeTypes.includes(request.mimeType)) {
       throw validationError(`Unsupported attachment type: ${request.mimeType}`, { mimeType: request.mimeType });
     }
@@ -712,7 +733,14 @@ export class CoreRepository {
           request.fileName, request.mimeType, request.byteSize, storageKey,
         ],
       );
-      return { attachment: toAttachment(rows.rows[0]), storageKey };
+      // The browser needs somewhere to PUT the bytes. Minting the signed URL inside
+      // the idempotent body means a replayed initiate returns the same recorded
+      // result rather than issuing a second URL.
+      const upload = await storage.createSignedUpload(storageKey, {
+        mimeType: request.mimeType,
+        byteSize: request.byteSize,
+      });
+      return { attachment: toAttachment(rows.rows[0]), storageKey, upload };
     });
   }
 
@@ -724,7 +752,7 @@ export class CoreRepository {
   async completeAttachment(
     actor: Actor, reelId: string, attachmentId: string,
     request: { operationId: string },
-    storage: StorageProbe,
+    storage: StorageAdapter,
   ): Promise<AttachmentReference> {
     const route = `POST /reels/${reelId}/attachments/${attachmentId}/complete`;
     return this.idempotent(actor, request.operationId, route, { ...request, attachmentId }, async (tx) => {
@@ -763,7 +791,10 @@ export interface AttachmentLimits {
   allowedMimeTypes: string[];
 }
 
-/** Server-side existence/size probe. Injected so Storage stays outside this module. */
+/**
+ * Retained as the narrow read-only view of storage. `StorageAdapter` in
+ * ./storage.js extends this with signed-upload minting.
+ */
 export interface StorageProbe {
   statObject(storageKey: string): Promise<{ exists: boolean; byteSize: number }>;
 }
