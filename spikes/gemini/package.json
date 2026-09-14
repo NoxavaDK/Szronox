@@ -1,0 +1,13 @@
+{
+  "name": "szronox-gemini-diagnostic-spike",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check src/diagnostic.mjs && node --check src/endpoint.mjs && node --check src/evidence.mjs && node --check src/transport.mjs && node --check src/schema.mjs && node --check src/probes.mjs && node --check src/contract-checks.mjs && node --test",
+    "synthetic": "node src/diagnostic.mjs --mode synthetic",
+    "live": "node src/diagnostic.mjs --mode live"
+  }
+}

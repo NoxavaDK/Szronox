@@ -1,0 +1,27 @@
+{
+  "_synthetic": "Authored locally for T03. Application-shaped contract check input, not a provider response.",
+  "expectValid": true,
+  "inputSnapshot": {
+    "hooks": [
+      { "id": "h1", "text": "Existing user hook", "source": "user", "position": 0 },
+      { "id": "h2", "text": "Existing ai hook", "source": "ai", "position": 1 }
+    ],
+    "memeCandidateIds": ["m1", "m2"]
+  },
+  "result": {
+    "hooks": [
+      { "id": "h1", "text": "Existing user hook", "source": "user", "position": 0 },
+      { "id": "h2", "text": "Existing ai hook", "source": "ai", "position": 1 },
+      { "id": "h3", "text": "Appended alternative", "source": "ai", "position": 2 }
+    ],
+    "hookAdditions": ["Appended alternative"],
+    "memeSuggestion": { "memeId": "m2", "rationale": "Synthetic rationale." },
+    "claims": [
+      { "id": "c1", "location": { "field": "script" }, "text": "Claim", "status": "confirmed", "sourceIds": ["s1"] },
+      { "id": "c2", "location": { "field": "hook", "hookId": "h1" }, "text": "Claim", "status": "uncertain", "sourceIds": [] }
+    ],
+    "sources": [
+      { "id": "s1", "url": "https://example.invalid/source", "title": "Synthetic", "evidenceKind": "tool_metadata_only" }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "_synthetic": "Authored locally for T03. NOT a captured provider response.",
+  "_purpose": "Retrieval metadata nested inside the candidate, plus one success and one failure status.",
+  "candidates": [
+    {
+      "content": { "parts": [{ "text": "Synthetic answer referring to two URLs." }] },
+      "finishReason": "STOP",
+      "urlContextMetadata": {
+        "urlMetadata": [
+          { "retrievedUrl": "https://example.invalid/reachable", "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_SUCCESS" },
+          { "retrievedUrl": "https://example.invalid/missing", "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_ERROR" }
+        ]
+      }
+    }
+  ]
+}

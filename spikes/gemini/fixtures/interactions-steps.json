@@ -1,0 +1,20 @@
+{
+  "_synthetic": "Authored locally for T03. NOT a captured provider response.",
+  "_purpose": "Newer step-based shape documented on the capability guides: search call, url retrieval result and annotated model output.",
+  "steps": [
+    { "type": "google_search_call", "queries": ["synthetic step query"] },
+    { "type": "url_context_result", "url_metadata": [
+      { "retrieved_url": "https://example.invalid/step-source", "status": "SUCCESS" }
+    ] },
+    { "type": "google_search_result", "search_suggestions": ["synthetic suggestion"] },
+    { "type": "model_output", "content": [
+      {
+        "text": "Synthetic grounded sentence.",
+        "annotations": [
+          { "url_citation": { "url": "https://example.invalid/step-source", "title": "Step source", "start_index": 0, "end_index": 27 } }
+        ]
+      }
+    ] }
+  ],
+  "finish_reason": "STOP"
+}
