@@ -16,6 +16,8 @@ export function ReelListScreen(props: ReelListScreenProps) {
     <div className={styles.screen}>
       <header className={styles.header}>
         <h1 className={styles.title}>Rolki</h1>
+        {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}
+        <button type="button" onClick={props.onOpenDeleted} aria-label="Usunięte">⋮</button>
         <Avatar user={currentUser} size={32} />
       </header>
 
