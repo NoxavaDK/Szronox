@@ -181,3 +181,79 @@ HTTP surface including the unauthenticated envelope for all 14 routes.
   UUIDs. I did not touch `.env.example` — it is outside my allowlist.
 
 Stopping at this handoff. No other task started, nothing merged, no next batch dispatched.
+
+
+---
+
+# T05 follow-up — T08 blockers resolved (2026-09-14)
+
+Base: T05 `ea81fae`. Requested after T08 reported five missing backend capabilities.
+Agent: user-launched Opus 5 (`claude-opus-5`).
+
+## The five blockers
+
+| # | Blocker | Status |
+| --- | --- | --- |
+| 1 | Core routes not registered in `app.ts` | **Done.** `buildApp({ core })` registers them before the static plugins and not-found handler, so a core route is matched by its own handler instead of falling through to the SPA fallback. Omitting `core` yields the static/health-only app, so routes are never half-registered against a missing database — C01's shutdown and SPA tests are unaffected and still pass. |
+| 2 | `GET /reels?visibility=deleted` did nothing | **Done.** `visibility` is `active` (default) or `deleted`; an unknown value is refused with `VALIDATION_ERROR` rather than silently returning the wrong set. `GET /reels/:id?includeDeleted=true` lets the restore surface load a deleted Reel while an ordinary detail request still 404s. |
+| 3 | Attachment initiation returned no upload target | **Done in code, live UNVERIFIED.** `initiateAttachment` now mints a signed upload inside the idempotent body, so a replay returns the original URL instead of issuing a second one. The response carries `{ uploadUrl, method, headers, expiresAt }`. |
+| 4 | No asymmetric Supabase JWKS verification | **Done, with real evidence.** `src/auth/jwks.ts` verifies RS256 and ES256 against a JWKS document, with caching, rotation on unknown `kid`, and a refetch floor. |
+| 5 | No real Storage adapter/configuration | **Done in code, live UNVERIFIED.** `src/core/storage.ts` has a Supabase adapter and an in-memory one; `src/core/config.ts` selects them from environment. |
+
+## What is real evidence, and what is not
+
+**Real.** The JWKS path is exercised with genuinely generated RSA and EC keypairs, a
+served JWKS document and real signatures — `node:crypto` does the signing and
+verification, so no part of the crypto is stubbed. Tests cover: valid RS256, valid
+ES256 (raw `r||s`, which if mishandled rejects every valid EC token), tampered
+payload, foreign key with the same `kid`, algorithm confusion (`HS256`/`none`/`RS512`
+refused against a public key), a key published for one algorithm refusing another,
+issuer/audience/expiry/`nbf`/subject/allowlist enforcement, rotation pickup, and that
+repeated unknown-`kid` tokens cannot be used as a JWKS fetch amplifier.
+
+`visibility=deleted`, `includeDeleted`, the signed-upload response shape, replay
+behaviour and `app.ts` registration are all verified against real PostgreSQL via
+PGlite and real Fastify injection.
+
+**Not real.** No Supabase project exists, so the Supabase Storage adapter has never
+run against one. Its request shapes follow the documented signed-upload flow and are
+unit-tested against an injected transport, including that a sizeless info response is
+an error rather than a silent zero — a zero would make the size-mismatch check pass by
+accident. **Treat those endpoint shapes as unverified configuration.** Likewise, JWKS
+verification has never met a specific project's key set; issuer, audience and the
+JWKS URL are configuration inputs.
+
+## Configuration required
+
+`src/core/config.ts` refuses ambiguous or partial configuration rather than
+degrading quietly:
+
+- `SUPABASE_JWT_ISSUER`, `SUPABASE_JWT_AUDIENCE` — both mandatory.
+- Exactly one of `SUPABASE_JWKS_URL` or `SUPABASE_JWT_SECRET`. Both is an error,
+  because accepting either signature type widens the trust boundary invisibly.
+- `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` + `SUPABASE_STORAGE_BUCKET`, all three
+  or none. A partial set is an error: it would make uploads appear to work while
+  storing nothing. `STORAGE_DRIVER=memory` is the explicit development opt-in.
+- `APP_ALLOWLIST` as `NOXAVA:<uuid>,SZRON:<uuid>` — exactly two distinct users.
+
+`describeConfig()` reports what is configured without printing any value.
+
+The database driver is deliberately NOT chosen here: `Database` is injected, so `pg`
+stays out of this package and the composition root keeps that decision. C01's
+shutdown path is untouched.
+
+## Verification
+
+```sh
+cd .worktrees/t05-core
+npm run typecheck   # clean
+npm test            # 65/65 pass (11 pre-existing C01 + 54 T05)
+```
+
+## Still open
+
+- **Root `package-lock.json` remains modified and uncommitted** (pglite from the
+  original T05). Still the lead's to reconcile.
+- Supabase Storage and project JWKS remain live-UNVERIFIED, as above.
+- Multi-session concurrency still needs a real Postgres server; PGlite is
+  single-connection.

@@ -11,12 +11,11 @@
  *     full, using `node:crypto` only. That is Supabase's shared-secret model and it
  *     is testable locally with self-issued tokens, so the auth boundary is real
  *     evidence rather than a stub.
- *   - Asymmetric verification via a JWKS endpoint is **not** implemented. Supabase
- *     projects can be configured for RS256/ES256, and doing that properly needs the
- *     project's JWKS URL plus key rotation handling. `TokenVerifier` is an interface
- *     precisely so a JWKS verifier can be added without touching route code, and
- *     the gap is recorded in docs/implementation/T05-result.md rather than papered
- *     over.
+ *   - Asymmetric RS256/ES256 verification against a JWKS endpoint now lives in
+ *     `./jwks.ts`, added after T08 reported its absence as a blocker. Use
+ *     `selectVerifier` to choose between the two from configuration; configuring
+ *     both is refused rather than silently preferring one, because accepting either
+ *     signature type widens the trust boundary invisibly.
  *
  * Nothing here logs a token, a secret or a signature.
  */
@@ -43,6 +42,8 @@ export type AuthFailureReason =
   | 'wrong_issuer'
   | 'wrong_audience'
   | 'missing_subject'
+  /** Asymmetric only: no JWKS key matched the token's `kid`. */
+  | 'unknown_key'
   | 'not_allowlisted';
 
 export type VerifyOutcome =

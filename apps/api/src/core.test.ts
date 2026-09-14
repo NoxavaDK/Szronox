@@ -17,7 +17,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import { PGlite } from '@electric-sql/pglite';
@@ -28,7 +28,9 @@ import { migrate, seedUsers } from './db/migrate.js';
 import { CoreRepository, DEFAULT_ATTACHMENT_LIMITS, payloadHash } from './core/repository.js';
 import { CoreError } from './core/errors.js';
 import { deriveVerificationState } from './core/mapping.js';
-import type { StorageProbe } from './core/repository.js';
+import { memoryStorageAdapter, supabaseStorageAdapter, StorageError } from './core/storage.js';
+import type { StorageAdapter } from './core/storage.js';
+import { createJwksVerifier, selectVerifier } from './auth/jwks.js';
 
 const NOXAVA = { id: '11111111-1111-4111-8111-111111111111', name: 'NOXAVA' as const };
 const SZRON = { id: '22222222-2222-4222-8222-222222222222', name: 'SZRON' as const };
@@ -36,15 +38,8 @@ const SECRET = 'diagnostic-only-jwt-secret-not-a-real-credential';
 const ISSUER = 'https://project.supabase.co/auth/v1';
 const AUDIENCE = 'authenticated';
 
-/** A storage probe that reports whatever the test decides is really stored. */
-function storageProbe(objects: Map<string, number>): StorageProbe {
-  return {
-    async statObject(key) {
-      const byteSize = objects.get(key);
-      return byteSize === undefined ? { exists: false, byteSize: 0 } : { exists: true, byteSize };
-    },
-  };
-}
+/** The in-memory adapter doubles as the "what is really stored" control. */
+type MemoryStorage = ReturnType<typeof memoryStorageAdapter>;
 
 async function freshDatabase(): Promise<Database> {
   const db = pgliteDatabase(await PGlite.create());
@@ -56,14 +51,12 @@ async function freshDatabase(): Promise<Database> {
 interface Fixture {
   db: Database;
   repo: CoreRepository;
-  objects: Map<string, number>;
-  storage: StorageProbe;
+  storage: MemoryStorage;
 }
 
 async function fixture(): Promise<Fixture> {
   const db = await freshDatabase();
-  const objects = new Map<string, number>();
-  return { db, repo: new CoreRepository(db), objects, storage: storageProbe(objects) };
+  return { db, repo: new CoreRepository(db), storage: memoryStorageAdapter() };
 }
 
 const capture = (over: Record<string, unknown> = {}) => ({
@@ -682,14 +675,14 @@ test('verification state is derived, not stored', () => {
 // ══════════════════════════ attachments ═════════════════════════════════════
 
 test('upload completion is validated server-side, not accepted on assertion', async () => {
-  const { db, repo, objects, storage } = await fixture();
+  const { db, repo, storage } = await fixture();
   try {
     const request = capture();
     const reel = await repo.createReel(NOXAVA, request as never);
     const initiated = await repo.initiateAttachment(NOXAVA, request.reelId, {
       operationId: randomUUID(), attachmentId: randomUUID(),
       fileName: 'obraz.png', mimeType: 'image/png', byteSize: 2048,
-    }, DEFAULT_ATTACHMENT_LIMITS);
+    }, DEFAULT_ATTACHMENT_LIMITS, storage);
     assert.equal(initiated.attachment.state, 'pending');
 
     // Nothing in storage yet: completion is refused.
@@ -701,7 +694,7 @@ test('upload completion is validated server-side, not accepted on assertion', as
     );
 
     // Present but the wrong size: still refused rather than rounded off.
-    objects.set(initiated.storageKey, 999);
+    storage.put(initiated.storageKey, 999);
     await expectCode(
       () => repo.completeAttachment(NOXAVA, request.reelId, initiated.attachment.id, {
         operationId: randomUUID(),
@@ -709,7 +702,7 @@ test('upload completion is validated server-side, not accepted on assertion', as
       'UPLOAD_INCOMPLETE', 422,
     );
 
-    objects.set(initiated.storageKey, 2048);
+    storage.put(initiated.storageKey, 2048);
     const ready = await repo.completeAttachment(NOXAVA, request.reelId, initiated.attachment.id, {
       operationId: randomUUID(),
     }, storage);
@@ -721,7 +714,7 @@ test('upload completion is validated server-side, not accepted on assertion', as
 });
 
 test('attachment initiation enforces the configured type and size bounds', async () => {
-  const { db, repo } = await fixture();
+  const { db, repo, storage } = await fixture();
   try {
     const request = capture();
     await repo.createReel(NOXAVA, request as never);
@@ -729,7 +722,7 @@ test('attachment initiation enforces the configured type and size bounds', async
       () => repo.initiateAttachment(NOXAVA, request.reelId, {
         operationId: randomUUID(), attachmentId: randomUUID(),
         fileName: 'film.mp4', mimeType: 'video/mp4', byteSize: 1024,
-      }, DEFAULT_ATTACHMENT_LIMITS),
+      }, DEFAULT_ATTACHMENT_LIMITS, storage),
       'VALIDATION_ERROR', 422,
     );
     await expectCode(
@@ -737,7 +730,7 @@ test('attachment initiation enforces the configured type and size bounds', async
         operationId: randomUUID(), attachmentId: randomUUID(),
         fileName: 'duzy.png', mimeType: 'image/png',
         byteSize: DEFAULT_ATTACHMENT_LIMITS.maxByteSize + 1,
-      }, DEFAULT_ATTACHMENT_LIMITS),
+      }, DEFAULT_ATTACHMENT_LIMITS, storage),
       'VALIDATION_ERROR', 422,
     );
   } finally {
@@ -843,7 +836,7 @@ test('the overdue flag counts only Reels currently in editing past the first thr
 async function server() {
   const { default: Fastify } = await import('fastify');
   const { registerCoreRoutes } = await import('./core/routes.js');
-  const { db, objects, storage } = await fixture();
+  const { db, storage } = await fixture();
   const app = Fastify({ logger: false });
   registerCoreRoutes(app, {
     db,
@@ -859,7 +852,7 @@ async function server() {
     { sub, iss: ISSUER, aud: AUDIENCE, exp: Math.floor(1_800_000_000_000 / 1000) + 600 }, SECRET,
   );
   return {
-    app, db, objects,
+    app, db, storage,
     async call(method: string, url: string, options: { as?: string; body?: unknown } = {}) {
       return app.inject({
         method: method as never,
@@ -1009,5 +1002,532 @@ test('an unexpected internal failure is reduced to a generic envelope', async ()
     assert.ok(!/select|app\.reels|pglite/i.test(JSON.stringify(body)), 'no internals may leak');
   } finally {
     await ctx.app.close();
+  }
+});
+
+// ══════════════════════ T08 blockers: deleted visibility ════════════════════
+
+test('visibility=deleted returns only soft-deleted Reels, and active excludes them', async () => {
+  // T08 reported that a correct client request could not retrieve deleted records
+  // at all, because the list unconditionally filtered them out.
+  const { db, repo } = await fixture();
+  try {
+    const kept = capture();
+    const removed = capture();
+    const keptReel = await repo.createReel(NOXAVA, kept as never);
+    const removedReel = await repo.createReel(NOXAVA, removed as never);
+    await repo.setDeleted(NOXAVA, removed.reelId, {
+      operationId: randomUUID(), expectedVersion: removedReel.version,
+    }, true);
+
+    const active = await repo.listReels({});
+    assert.deepEqual(active.items.map((r) => r.id), [keptReel.id]);
+
+    const deleted = await repo.listReels({ visibility: 'deleted' });
+    assert.deepEqual(deleted.items.map((r) => r.id), [removed.reelId]);
+    assert.ok(deleted.items[0].deletedAt, 'a deleted Reel carries its deletedAt');
+
+    // Explicit active is the same as the default.
+    assert.deepEqual(
+      (await repo.listReels({ visibility: 'active' })).items.map((r) => r.id),
+      [keptReel.id],
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test('a deleted Reel is readable only with an explicit opt-in', async () => {
+  const { db, repo } = await fixture();
+  try {
+    const request = capture();
+    const created = await repo.createReel(NOXAVA, request as never);
+    await repo.setDeleted(NOXAVA, request.reelId, {
+      operationId: randomUUID(), expectedVersion: created.version,
+    }, true);
+
+    // The ordinary detail path still treats it as gone.
+    await expectCode(() => repo.getReel(request.reelId), 'NOT_FOUND', 404);
+    // The restore surface can fetch it deliberately.
+    const forRestore = await repo.getReel(request.reelId, { includeDeleted: true });
+    assert.equal(forRestore.id, request.reelId);
+    assert.ok(forRestore.deletedAt);
+  } finally {
+    await db.close();
+  }
+});
+
+test('the deleted list and restore round-trip over HTTP', async () => {
+  const ctx = await server();
+  try {
+    const reelId = randomUUID();
+    const created = await ctx.call('POST', '/api/v1/reels', {
+      as: NOXAVA.id,
+      body: { operationId: randomUUID(), reelId, input: { text: 'Do usunięcia', images: [] } },
+    });
+    const version = created.json().version;
+    const deleted = await ctx.call('POST', `/api/v1/reels/${reelId}/delete`, {
+      as: NOXAVA.id, body: { operationId: randomUUID(), expectedVersion: version },
+    });
+    assert.equal(deleted.statusCode, 200);
+
+    // Absent from the active list, present in the deleted one.
+    assert.deepEqual((await ctx.call('GET', '/api/v1/reels', { as: NOXAVA.id })).json().items, []);
+    const deletedList = await ctx.call('GET', '/api/v1/reels?visibility=deleted', { as: NOXAVA.id });
+    assert.equal(deletedList.statusCode, 200);
+    assert.deepEqual(deletedList.json().items.map((r: { id: string }) => r.id), [reelId]);
+
+    // Restorable from there.
+    const restored = await ctx.call('POST', `/api/v1/reels/${reelId}/restore`, {
+      as: NOXAVA.id, body: { operationId: randomUUID(), expectedVersion: deleted.json().version },
+    });
+    assert.equal(restored.statusCode, 200);
+    assert.equal(restored.json().deletedAt, null);
+    assert.deepEqual(
+      (await ctx.call('GET', '/api/v1/reels', { as: NOXAVA.id })).json().items.map((r: { id: string }) => r.id),
+      [reelId],
+    );
+
+    // An unknown visibility is refused rather than silently treated as active.
+    const bogus = await ctx.call('GET', '/api/v1/reels?visibility=everything', { as: NOXAVA.id });
+    assert.equal(bogus.statusCode, 422);
+    assert.equal(bogus.json().error.code, 'VALIDATION_ERROR');
+  } finally {
+    await ctx.app.close();
+    await ctx.db.close();
+  }
+});
+
+// ══════════════════════ T08 blockers: signed upload ═════════════════════════
+
+test('attachment initiation returns a signed upload the browser can use', async () => {
+  const { db, repo, storage } = await fixture();
+  try {
+    const request = capture();
+    await repo.createReel(NOXAVA, request as never);
+    const initiated = await repo.initiateAttachment(NOXAVA, request.reelId, {
+      operationId: randomUUID(), attachmentId: randomUUID(),
+      fileName: 'obraz.png', mimeType: 'image/png', byteSize: 2048,
+    }, DEFAULT_ATTACHMENT_LIMITS, storage);
+
+    // T08's blocker: initiate previously returned only a storage key.
+    assert.ok(initiated.upload.uploadUrl, 'a browser needs somewhere to PUT the bytes');
+    assert.equal(initiated.upload.method, 'PUT');
+    assert.ok(initiated.upload.expiresAt > Math.floor(Date.now() / 1000), 'the URL must be short-lived');
+    assert.deepEqual(storage.uploads(), [initiated.storageKey], 'signed for exactly this object');
+    assert.equal(initiated.attachment.state, 'pending');
+  } finally {
+    await db.close();
+  }
+});
+
+test('a replayed initiate returns the original signed upload rather than minting another', async () => {
+  const { db, repo, storage } = await fixture();
+  try {
+    const request = capture();
+    await repo.createReel(NOXAVA, request as never);
+    const body = {
+      operationId: randomUUID(), attachmentId: randomUUID(),
+      fileName: 'obraz.png', mimeType: 'image/png', byteSize: 2048,
+    };
+    const first = await repo.initiateAttachment(NOXAVA, request.reelId, body, DEFAULT_ATTACHMENT_LIMITS, storage);
+    const replay = await repo.initiateAttachment(NOXAVA, request.reelId, body, DEFAULT_ATTACHMENT_LIMITS, storage);
+    assert.deepEqual(replay, first);
+    assert.equal(storage.uploads().length, 1, 'a retry must not issue a second URL');
+  } finally {
+    await db.close();
+  }
+});
+
+test('the signed upload is exposed over HTTP without leaking a service key', async () => {
+  const ctx = await server();
+  try {
+    const reelId = randomUUID();
+    await ctx.call('POST', '/api/v1/reels', {
+      as: NOXAVA.id,
+      body: { operationId: randomUUID(), reelId, input: { text: 'Z obrazem', images: [] } },
+    });
+    const response = await ctx.call('POST', `/api/v1/reels/${reelId}/attachments/initiate`, {
+      as: NOXAVA.id,
+      body: {
+        operationId: randomUUID(), attachmentId: randomUUID(),
+        fileName: 'a.png', mimeType: 'image/png', byteSize: 1024,
+      },
+    });
+    assert.equal(response.statusCode, 201);
+    const body = response.json();
+    assert.ok(body.upload.uploadUrl);
+    assert.equal(body.upload.method, 'PUT');
+    // No server credential may ride out with the signed URL.
+    assert.ok(!JSON.stringify(body).includes('service_role'));
+    assert.ok(!/apikey|authorization/i.test(JSON.stringify(body.upload.headers ?? {})));
+  } finally {
+    await ctx.app.close();
+    await ctx.db.close();
+  }
+});
+
+test('the Supabase storage adapter reports a missing object and refuses a sizeless response', async () => {
+  // The provider call itself is UNVERIFIED — no project exists. What is asserted
+  // here is that this adapter handles the documented shapes without inventing a
+  // size, because a silent zero would make a mismatch check pass by accident.
+  const missing = supabaseStorageAdapter({
+    url: 'https://project.supabase.co', serviceRoleKey: 'fake-service-key', bucket: 'attachments',
+    fetchImpl: async () => ({ ok: false, status: 404, json: async () => ({}) }) as never,
+  });
+  assert.deepEqual(await missing.statObject('reels/a/b'), { exists: false, byteSize: 0 });
+
+  const sizeless = supabaseStorageAdapter({
+    url: 'https://project.supabase.co', serviceRoleKey: 'fake-service-key', bucket: 'attachments',
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ name: 'b' }) }) as never,
+  });
+  await assert.rejects(sizeless.statObject('reels/a/b'), StorageError);
+
+  const signing = supabaseStorageAdapter({
+    url: 'https://project.supabase.co/', serviceRoleKey: 'fake-service-key', bucket: 'attachments',
+    now: () => 1_800_000_000_000,
+    fetchImpl: async (url, init) => {
+      // The service-role key authenticates the signing request, server-side only.
+      assert.match(String(url), /\/storage\/v1\/object\/upload\/sign\/attachments\/reels\/a\/b$/);
+      assert.equal((init as { method?: string }).method, 'POST');
+      return { ok: true, status: 200, json: async () => ({ url: '/object/upload/sign/attachments/reels/a/b?token=x' }) } as never;
+    },
+  });
+  const upload = await signing.createSignedUpload('reels/a/b', { mimeType: 'image/png', byteSize: 10 });
+  assert.equal(upload.uploadUrl, 'https://project.supabase.co/storage/v1/object/upload/sign/attachments/reels/a/b?token=x');
+  assert.equal(upload.expiresAt, 1_800_000_000 + 300);
+  assert.ok(!JSON.stringify(upload.headers).includes('fake-service-key'), 'the signed URL carries the authority, not the key');
+});
+
+// ══════════════════════ T08 blocker: asymmetric JWKS ════════════════════════
+//
+// Real cryptography: keypairs are generated here, a JWKS document is served, and
+// tokens are signed with the private keys. `node:crypto` does the signing and
+// verification, so nothing about the crypto path is stubbed. What remains
+// unverified is only whether a SPECIFIC Supabase project's JWKS matches this shape.
+
+function b64url(input: Buffer | string): string {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function rsaKeypair(kid: string) {
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...(publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid, alg: 'RS256', use: 'sig' };
+  const sign = (payload: Record<string, unknown>, header: Record<string, unknown> = {}) => {
+    const h = b64url(JSON.stringify({ alg: 'RS256', kid, typ: 'JWT', ...header }));
+    const p = b64url(JSON.stringify(payload));
+    return `${h}.${p}.${b64url(createSign('RSA-SHA256').update(`${h}.${p}`).sign(privateKey))}`;
+  };
+  return { jwk, sign };
+}
+
+function ecKeypair(kid: string) {
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const jwk = { ...(publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid, alg: 'ES256', use: 'sig' };
+  const sign = (payload: Record<string, unknown>) => {
+    const h = b64url(JSON.stringify({ alg: 'ES256', kid, typ: 'JWT' }));
+    const p = b64url(JSON.stringify(payload));
+    // JWT ES256 signatures are raw r||s, not DER.
+    const signature = createSign('SHA256').update(`${h}.${p}`).sign({ key: privateKey, dsaEncoding: 'ieee-p1363' });
+    return `${h}.${p}.${b64url(signature)}`;
+  };
+  return { jwk, sign };
+}
+
+function jwksServer(keys: Array<Record<string, unknown>>) {
+  let calls = 0;
+  const current = { keys: [...keys] };
+  const fetchImpl = (async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => current } as never;
+  }) as unknown as typeof fetch;
+  return {
+    fetchImpl,
+    calls: () => calls,
+    rotate(next: Array<Record<string, unknown>>) { current.keys = next; },
+  };
+}
+
+const NOW_MS = 1_800_000_000_000;
+const claims = (over: Record<string, unknown> = {}) => ({
+  sub: NOXAVA.id, iss: ISSUER, aud: AUDIENCE, exp: Math.floor(NOW_MS / 1000) + 600, ...over,
+});
+
+test('a genuine RS256 token verifies against the served JWKS', async () => {
+  const rsa = rsaKeypair('key-1');
+  const jwks = jwksServer([rsa.jwk]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://project.supabase.co/auth/v1/.well-known/jwks.json',
+    issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA, SZRON],
+    fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+  });
+
+  const outcome = await verifier.verify(rsa.sign(claims()));
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(outcome.ok && outcome.actor, { id: NOXAVA.id, name: 'NOXAVA' });
+  assert.equal(verifier.cacheState().keyCount, 1);
+});
+
+test('a genuine ES256 token verifies, with raw r||s signature handling', async () => {
+  // Treating an ES256 signature as DER rejects every valid EC token, which would
+  // look like "asymmetric auth is broken".
+  const ec = ecKeypair('ec-1');
+  const jwks = jwksServer([ec.jwk]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://project.supabase.co/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+  });
+  assert.equal((await verifier.verify(ec.sign(claims()))).ok, true);
+});
+
+test('asymmetric verification refuses a tampered payload and a foreign key', async () => {
+  const rsa = rsaKeypair('key-1');
+  const other = rsaKeypair('key-1'); // same kid, different key material
+  const jwks = jwksServer([rsa.jwk]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+  });
+
+  // Signed by a key that is not the published one.
+  assert.equal((await verifier.verify(other.sign(claims()))).ok, false);
+
+  // Payload swapped after signing.
+  const token = rsa.sign(claims());
+  const [h, , s] = token.split('.');
+  const forged = `${h}.${b64url(JSON.stringify(claims({ sub: randomUUID() })))}.${s}`;
+  const outcome = await verifier.verify(forged);
+  assert.equal(!outcome.ok && outcome.reason, 'bad_signature');
+});
+
+test('an HS256 or alg:none token is never verified with a public key', async () => {
+  // Algorithm confusion: a symmetric token must not be accepted by the asymmetric
+  // verifier just because a key is available.
+  const rsa = rsaKeypair('key-1');
+  const jwks = jwksServer([rsa.jwk]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+  });
+  for (const alg of ['HS256', 'none', 'RS512']) {
+    const h = b64url(JSON.stringify({ alg, kid: 'key-1', typ: 'JWT' }));
+    const p = b64url(JSON.stringify(claims()));
+    const outcome = await verifier.verify(`${h}.${p}.${b64url('x')}`);
+    assert.equal(!outcome.ok && outcome.reason, 'unsupported_algorithm', `alg=${alg}`);
+  }
+});
+
+test('asymmetric verification enforces issuer, audience, expiry and the allowlist', async () => {
+  const rsa = rsaKeypair('key-1');
+  const jwks = jwksServer([rsa.jwk]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+  });
+  const seconds = Math.floor(NOW_MS / 1000);
+  const cases: Array<[string, string]> = [
+    ['wrong_issuer', rsa.sign(claims({ iss: 'https://evil.example' }))],
+    ['wrong_audience', rsa.sign(claims({ aud: 'anon' }))],
+    ['expired', rsa.sign(claims({ exp: seconds - 1 }))],
+    ['not_yet_valid', rsa.sign(claims({ nbf: seconds + 60 }))],
+    ['missing_subject', rsa.sign(claims({ sub: undefined }))],
+    // Correctly signed by the real key, but not a product user.
+    ['not_allowlisted', rsa.sign(claims({ sub: randomUUID() }))],
+  ];
+  for (const [reason, token] of cases) {
+    const outcome = await verifier.verify(token);
+    assert.equal(!outcome.ok && outcome.reason, reason);
+  }
+});
+
+test('key rotation is picked up, and an unknown kid cannot be used as a fetch amplifier', async () => {
+  const oldKey = rsaKeypair('old');
+  const newKey = rsaKeypair('new');
+  const jwks = jwksServer([oldKey.jwk]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+    minRefetchIntervalMs: 0,
+  });
+
+  assert.equal((await verifier.verify(oldKey.sign(claims()))).ok, true);
+  const afterFirst = jwks.calls();
+
+  // A token signed by a key the server has not published yet triggers one refetch.
+  assert.equal((await verifier.verify(newKey.sign(claims()))).ok, false);
+  jwks.rotate([newKey.jwk]);
+  assert.equal((await verifier.verify(newKey.sign(claims()))).ok, true, 'rotation is picked up');
+  assert.ok(jwks.calls() > afterFirst);
+
+  // With the floor engaged, repeated unknown-kid tokens do not each cause a fetch.
+  const throttled = createJwksVerifier({
+    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+    minRefetchIntervalMs: 60_000,
+  });
+  await throttled.verify(oldKey.sign(claims()));
+  const before = jwks.calls();
+  for (let i = 0; i < 5; i += 1) {
+    const stranger = rsaKeypair(`stranger-${i}`);
+    assert.equal((await throttled.verify(stranger.sign(claims()))).ok, false);
+  }
+  assert.equal(jwks.calls(), before, 'unknown kids must not each trigger a JWKS fetch');
+});
+
+test('a key published for one algorithm cannot be used to verify another', async () => {
+  const rsa = rsaKeypair('key-1');
+  const jwks = jwksServer([{ ...rsa.jwk, alg: 'RS256' }]);
+  const verifier = createJwksVerifier({
+    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
+    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
+  });
+  // ES256 header against an RS256 key.
+  const h = b64url(JSON.stringify({ alg: 'ES256', kid: 'key-1', typ: 'JWT' }));
+  const p = b64url(JSON.stringify(claims()));
+  const outcome = await verifier.verify(`${h}.${p}.${b64url('x')}`);
+  assert.equal(!outcome.ok && outcome.reason, 'unsupported_algorithm');
+});
+
+test('verifier selection refuses an ambiguous or absent configuration', () => {
+  const base = { issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA] };
+  assert.throws(
+    () => selectVerifier({ ...base, jwksUri: 'https://p/jwks', secret: SECRET }, createHs256Verifier),
+    /not both/,
+  );
+  assert.throws(() => selectVerifier({ ...base }, createHs256Verifier), /No token verification is configured/);
+  assert.ok(selectVerifier({ ...base, secret: SECRET }, createHs256Verifier));
+  assert.ok(selectVerifier({ ...base, jwksUri: 'https://p/jwks' }, createHs256Verifier));
+});
+
+// ══════════════════════ T08 blocker: app.ts registration ════════════════════
+
+test('buildApp registers the core routes when dependencies are supplied', async () => {
+  const { buildApp } = await import('./app.js');
+  const { db, storage } = await fixture();
+  const app = buildApp({
+    core: {
+      db, storage,
+      verifier: createHs256Verifier({
+        secret: SECRET, issuer: ISSUER, audience: AUDIENCE,
+        allowlist: [NOXAVA, SZRON], now: () => NOW_MS,
+      }),
+      allowlist: [{ ...NOXAVA, avatarUrl: null }, { ...SZRON, avatarUrl: null }],
+    },
+  });
+  try {
+    await app.ready();
+    const token = signHs256(claims(), SECRET);
+    const me = await app.inject({ method: 'GET', url: '/api/v1/me', headers: { authorization: `Bearer ${token}` } });
+    assert.equal(me.statusCode, 200, 'core routes must be reachable through app.ts');
+    assert.equal(me.json().user.name, 'NOXAVA');
+
+    // The pre-existing surface still behaves: health, the shared 404 envelope and
+    // the SPA fallback are unaffected by registration.
+    assert.equal((await app.inject({ method: 'GET', url: '/api/v1/health' })).statusCode, 200);
+    const unknown = await app.inject({ method: 'POST', url: '/api/v1/nope' });
+    assert.equal(unknown.statusCode, 404);
+    assert.equal(unknown.json().error.code, 'NOT_FOUND');
+
+    // A core route must be matched by its own handler, not swallowed by the SPA
+    // fallback, and must answer 401 rather than 200 HTML when unauthenticated.
+    const unauthenticated = await app.inject({ method: 'GET', url: '/api/v1/reels' });
+    assert.equal(unauthenticated.statusCode, 401);
+    assert.equal(unauthenticated.json().error.code, 'UNAUTHENTICATED');
+  } finally {
+    await app.close();
+    await db.close();
+  }
+});
+
+test('buildApp without core dependencies serves the static app only', async () => {
+  const { buildApp } = await import('./app.js');
+  const app = buildApp();
+  try {
+    await app.ready();
+    assert.equal((await app.inject({ method: 'GET', url: '/api/v1/health' })).statusCode, 200);
+    // Core routes are absent rather than half-registered against no database.
+    const reels = await app.inject({ method: 'GET', url: '/api/v1/reels' });
+    assert.equal(reels.statusCode, 404);
+    assert.equal(reels.json().error.code, 'NOT_FOUND');
+  } finally {
+    await app.close();
+  }
+});
+
+// ══════════════════════ T08 blocker: storage configuration ══════════════════
+
+test('configuration refuses partial Supabase storage rather than silently using memory', async () => {
+  const { buildStorage, buildVerifier, parseAllowlist, describeConfig, ConfigError } =
+    await import('./core/config.js');
+
+  // A half-configured bucket would make uploads appear to work while storing nothing.
+  assert.throws(
+    () => buildStorage({ SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' }),
+    ConfigError,
+  );
+  assert.throws(() => buildStorage({}), /No storage is configured/);
+  assert.ok(buildStorage({ STORAGE_DRIVER: 'memory' }));
+  assert.ok(buildStorage({
+    SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_STORAGE_BUCKET: 'attachments',
+  }));
+
+  // Verification: exactly one mechanism, and issuer/audience are mandatory.
+  const allowlist = [NOXAVA, SZRON];
+  assert.throws(() => buildVerifier({ SUPABASE_JWT_SECRET: SECRET }, allowlist), /ISSUER is required/);
+  assert.throws(
+    () => buildVerifier({
+      SUPABASE_JWT_SECRET: SECRET, SUPABASE_JWKS_URL: 'https://p/jwks',
+      SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
+    }, allowlist),
+    /not both/,
+  );
+  assert.ok(buildVerifier({
+    SUPABASE_JWKS_URL: 'https://p/jwks', SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
+  }, allowlist));
+
+  // The allowlist is exactly two distinct product users.
+  assert.deepEqual(
+    parseAllowlist(`NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`),
+    [{ id: NOXAVA.id, name: 'NOXAVA' }, { id: SZRON.id, name: 'SZRON' }],
+  );
+  assert.throws(() => parseAllowlist(`NOXAVA:${NOXAVA.id}`), /exactly two/);
+  assert.throws(() => parseAllowlist(`NOXAVA:${NOXAVA.id},NOXAVA:${SZRON.id}`), /NOXAVA and SZRON/);
+  assert.throws(() => parseAllowlist(`NOXAVA:${NOXAVA.id},SZRON:${NOXAVA.id}`), /distinct ids/);
+  assert.throws(() => parseAllowlist(`ADMIN:${NOXAVA.id},SZRON:${SZRON.id}`), /unknown user name/);
+  assert.throws(() => parseAllowlist(undefined), /required/);
+
+  // The startup summary names what is configured without exposing any value.
+  const described = describeConfig({
+    SUPABASE_JWT_SECRET: SECRET, SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
+    SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'super-secret-key',
+    SUPABASE_STORAGE_BUCKET: 'attachments', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
+  });
+  assert.equal(described.verification, 'hs256_shared_secret');
+  assert.equal(described.storage, 'supabase');
+  const serialised = JSON.stringify(described);
+  assert.ok(!serialised.includes(SECRET) && !serialised.includes('super-secret-key'), 'no secret may appear');
+});
+
+test('buildCoreDependencies composes a working dependency set from environment', async () => {
+  const { buildCoreDependencies } = await import('./core/config.js');
+  const { buildApp } = await import('./app.js');
+  const { db } = await fixture();
+  const app = buildApp({
+    core: buildCoreDependencies(db, {
+      SUPABASE_JWT_SECRET: SECRET, SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
+      STORAGE_DRIVER: 'memory', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
+    }),
+  });
+  try {
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET', url: '/api/v1/me',
+      headers: { authorization: `Bearer ${signHs256(claims(), SECRET)}` },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().peer.name, 'SZRON');
+  } finally {
+    await app.close();
+    await db.close();
   }
 });

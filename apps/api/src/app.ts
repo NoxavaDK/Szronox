@@ -4,6 +4,8 @@ import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import type { ApiError, ErrorResponse } from '@szronox/contracts';
 
+import { type CoreDependencies, registerCoreRoutes } from './core/routes.js';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 function notFoundEnvelope(message: string): ErrorResponse {
@@ -15,9 +17,26 @@ function isApiPath(pathname: string): boolean {
   return pathname === '/api' || pathname.startsWith('/api/');
 }
 
-export function buildApp() {
+export interface BuildAppOptions {
+  /**
+   * Core API dependencies. Supplied here rather than constructed inside app.ts so
+   * the composition root stays explicit and a test can compose the same routes
+   * against its own database, verifier and storage.
+   *
+   * Omitting it yields the static/health-only app, which is what the SPA fallback
+   * and shutdown tests need. Core routes are then simply absent — they are never
+   * half-registered against a missing database.
+   */
+  core?: CoreDependencies;
+}
+
+export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({ logger: false });
   app.get('/api/v1/health', async () => ({ status: 'ok' as const }));
+
+  // Registered BEFORE the static plugins and the not-found handler, so a core route
+  // is matched by its own handler rather than falling through to the SPA fallback.
+  if (options.core) registerCoreRoutes(app, options.core);
 
   const webRoot = path.resolve(here, '../../web/dist');
   // Root registration only supplies the reply.sendFile decorator used for the SPA fallback below.

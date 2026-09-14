@@ -19,14 +19,14 @@ import {
   type AttachmentLimits,
   CoreRepository,
   DEFAULT_ATTACHMENT_LIMITS,
-  type StorageProbe,
 } from './repository.js';
+import type { StorageAdapter } from './storage.js';
 import type { Database } from '../db/client.js';
 
 export interface CoreDependencies {
   db: Database;
   verifier: TokenVerifier;
-  storage: StorageProbe;
+  storage: StorageAdapter;
   attachmentLimits?: AttachmentLimits;
   /** The two allowlisted users, for /me peer identity. */
   allowlist: Array<{ id: string; name: 'NOXAVA' | 'SZRON'; avatarUrl?: string | null }>;
@@ -103,6 +103,11 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     if (query.status !== undefined && !statuses.includes(query.status)) {
       throw validationError('Unknown status filter', { status: query.status });
     }
+    // An unknown visibility is refused rather than silently treated as active,
+    // which would quietly return the wrong set.
+    if (query.visibility !== undefined && query.visibility !== 'active' && query.visibility !== 'deleted') {
+      throw validationError('visibility must be "active" or "deleted"', { visibility: query.visibility });
+    }
     const limit = query.limit === undefined ? undefined : Number(query.limit);
     if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
       throw validationError('limit must be a positive integer');
@@ -110,6 +115,7 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     // Both Reels are shared: either allowlisted user sees the same list.
     return repository.listReels({
       status: query.status as never,
+      visibility: (query.visibility as never) ?? 'active',
       overdue: query.overdue === 'true',
       limit,
       cursor: query.cursor,
@@ -119,7 +125,12 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
   app.get('/api/v1/reels/:id', handle(async (request) => {
     await actorOf(request);
     const { id } = request.params as { id: string };
-    return repository.getReel(requireUuid(id, 'id'));
+    const query = (request.query ?? {}) as Record<string, string | undefined>;
+    // Deliberate opt-in, so the restore surface can load a deleted Reel while an
+    // ordinary detail request still treats it as gone.
+    return repository.getReel(requireUuid(id, 'id'), {
+      includeDeleted: query.includeDeleted === 'true',
+    });
   }));
 
   // ── Capture ────────────────────────────────────────────────────────────────
@@ -256,7 +267,7 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
       mimeType: body.mimeType,
       byteSize: body.byteSize,
       purpose: body.purpose as never,
-    }, limits);
+    }, limits, dependencies.storage);
     return reply.code(201).send(result);
   }));
 
@@ -276,3 +287,4 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
 }
 
 export type { VerifiedActor };
+export type { StorageAdapter };
