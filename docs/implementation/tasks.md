@@ -4,14 +4,14 @@ Current authorization: accepted C01–C03 outputs are integrated. Prepare the ne
 
 | Task | Status | Ownership | Acceptance |
 | --- | --- | --- | --- |
-| T00 contracts | Frozen baseline plus required feed-cover amendment | AGENTS.md, docs/implementation, packages/contracts/src | Persistent hooks and additive AI application; existing-meme FK suggestion; feedCoverDone defaults false and gates transition to published; compact Detail/Publication placement governed by consolidated written visual spec; no final editorial prompts; T16 explicit block |
+| T00 contracts | Frozen baseline plus all approved amendments, including Reel Detail/Language Check | AGENTS.md, docs/implementation, packages/contracts/src | Persistent hooks and additive AI application; existing-meme FK suggestion; feedCoverDone defaults false and gates transition to published; compact Detail/Publication placement governed by consolidated written visual spec; no final editorial prompts; T16 explicit block |
 | T01 scaffold | ACCEPTED and integrated: C01 5cae797 | apps/web, apps/api, apps/worker, build/package/CI files | User acceptance authoritative; shutdown decision frozen in T00. Reports retained. Combined build/typecheck PASS; no repeat adversarial review. |
 | T02 Android Share Target spike | ACCEPTED and integrated: C02 da223c3 | spikes/android-share only | Reports and limitations retained. Installed Android, real browser concurrent promotion and expanded browser checks remain open gates, not blockers to core implementation. |
 | T03 Gemini capability spike | ACCEPTED and integrated: C03 a01e650 | spikes/gemini only | Reports and limitations retained. Credentialed/live provider behavior remains UNVERIFIED; no fixture-to-provider inference. |
 | T04 kDrive spike | NOT AUTHORIZED; do not auto-start | spikes/kdrive only | Isolated folder create/lookup/access/rename/move/error experiments only on designated disposable test folder; classify ambiguous creation; no production data changes or uploader |
 | T12 generic AI lifecycle | Not dispatched | Future worker/job modules | May later implement infrastructure only; no frozen writing prompts |
 | T13/T14/T15 service work | Not dispatched | Future owned handlers | Typed contracts/fixtures permitted in principle; editorial decisions remain with user/lead; no production prompt freeze |
-| T16 AI result UI | NOT DISPATCHED; explicit approval required | No implementation authorized | Written visual authority: design/frozen-visual-spec.md. Completed Opracowanie/Fact Check and programme surfaces frozen; no PNG prerequisite. Sprawdź język, publication-draft collision UI and other unspecified surfaces remain blocked. |
+| T16 AI result UI | NOT DISPATCHED; explicit approval required | No implementation authorized | Written visual authority: design/frozen-visual-spec.md. Completed Opracowanie/Fact Check and programme surfaces frozen; no PNG prerequisite. Sprawdź język is frozen by the Reel Detail batch delta; publication-draft collision UI and other unspecified surfaces remain visually pending. All implementation requires approval. |
 
 Sprawdź fakty: core claim/evidence/correction/freshness contracts are frozen in T00, including per-claim exact replacement and unchanged-item usability. The completed visual workspace is now frozen in the consolidated written specification; implementation still requires approval. This amendment does not dispatch a task or expand C01–C03.
 
@@ -30,3 +30,5 @@ Handoff: files, commands and outcomes; live vs simulated evidence; limitations/b
 Visual authority update: `design/frozen-visual-spec.md` is preserved verbatim from the user. Together with T00 it supersedes any older missing-render/PNG prerequisite, including in historical review and handoff documents. Existing images and reviewed artifacts are preserved. No additional render or UI dispatch is requested.
 
 Next proposed work: T05 persistence/authentication and T06 non-AI screen shells in parallel; T04 isolated kDrive feasibility independently; T08 drafts/synchronization and app wiring after T05/T06 interfaces are available. See next-non-ai-batch.md for exact task/model/ownership/acceptance proposals. Nothing dispatched.
+
+Reel Detail/Language Check batch: design/frozen-reel-detail-language-spec.md now governs all eight newly frozen surfaces. T00 pins language scriptRevision/apply freshness, additionalText provenance, Meme create/attach, Materials/selector behavior, shared notes and deleted-view recovery. No dispatch.
