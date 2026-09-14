@@ -7,7 +7,24 @@ import { composePublicationText } from '../data/publication.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
 
-export type Route = { name: 'list' } | { name: 'capture'; draftId: string } | { name: 'detail'; reelId: string };
+export type Route =
+  | { name: 'list' }
+  | { name: 'capture'; draftId: string }
+  | { name: 'detail'; reelId: string }
+  /** `Usunięte` — a secondary view, never a sixth status (frozen batch sec. 8). */
+  | { name: 'deleted' };
+
+/**
+ * A 409 keeps the local draft and offers an explicit choice. Nothing is resolved
+ * automatically and the local value is never discarded on arrival.
+ */
+export interface ConflictState {
+  field: string;
+  localValue: string;
+  serverValue: string;
+  changes: ReelPatchRequest['changes'];
+  serverReel: Reel;
+}
 export interface CaptureForm {
   draft: CaptureDraft; kind: 'image' | 'url' | 'text'; blobs: Map<string, Blob>; showAdditional: boolean; showHook: boolean;
 }
@@ -23,6 +40,8 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'offline' | 'conflict' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [capture, setCapture] = useState<CaptureForm | null>(null);
+  const [deleted, setDeleted] = useState<Reel[]>([]);
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
   const saveTimer = useRef<number>();
   const currentRef = useRef<Reel | null>(null);
   const pendingPatch = useRef<{ reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | null>(null);
@@ -45,10 +64,17 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
   }, [api, status, user]);
   useEffect(() => { if (route.name === 'list') void loadList(); }, [loadList, route.name]);
 
+  const loadDeleted = useCallback(async () => {
+    if (!user) return; setLoadState('loading');
+    try { const page = await api.list({ visibility: 'deleted' }); setDeleted(page.items); setLoadState('loaded'); }
+    catch (error) { setLoadState(navigator.onLine ? 'error' : 'offline'); setMessage(polishError(error)); }
+  }, [api, user]);
+  useEffect(() => { if (route.name === 'deleted') void loadDeleted(); }, [loadDeleted, route.name]);
+
   const openDetail = useCallback(async (reelId: string) => {
     setRoute({ name: 'detail', reelId }); setLoadState('loading');
     try {
-      const reel = await api.reel(reelId); const draft = user ? await store.reel(user.id, reelId) : undefined;
+      const reel = await api.reel(reelId, { includeDeleted: true }); const draft = user ? await store.reel(user.id, reelId) : undefined;
       setCurrent(draft ? { ...reel, ...draft.changes } : reel); setSaveState(draft ? 'offline' : 'idle'); setLoadState('loaded');
     } catch (error) { setLoadState(navigator.onLine ? 'error' : 'offline'); setMessage(polishError(error)); }
   }, [api, store, user]);
@@ -96,7 +122,27 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
         const request = { operationId: crypto.randomUUID(), expectedVersion: sending.expectedVersion, changes: sending.changes };
         try { const saved = await api.patch(sending.reelId, request); currentRef.current = saved; setCurrent(saved); await store.deleteReel(user.id, sending.reelId); setSaveState('saved'); }
         catch (error) {
-          if (error instanceof ClientApiError && error.status === 409) { await store.saveReel({ ...draft, conflictSnapshot: error.api.details }); setSaveState('conflict'); }
+          if (error instanceof ClientApiError && error.status === 409) {
+            // Keep the draft, then read the authoritative value so the user is shown
+            // a real comparison rather than "something changed".
+            await store.saveReel({ ...draft, conflictSnapshot: error.api.details });
+            setSaveState('conflict');
+            try {
+              const serverReel = await api.reel(sending.reelId);
+              const field = Object.keys(sending.changes)[0] ?? 'title';
+              const read = (source: Record<string, unknown>) => {
+                const value = source[field];
+                return Array.isArray(value) ? value.join(', ') : value === null || value === undefined ? '' : String(value);
+              };
+              setConflict({
+                field,
+                localValue: read(sending.changes as Record<string, unknown>),
+                serverValue: read(serverReel as unknown as Record<string, unknown>),
+                changes: sending.changes,
+                serverReel,
+              });
+            } catch { /* the conflict state alone is still truthful */ }
+          }
           else { await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'patch', reelId: sending.reelId, createdAt: Date.now(), state: 'pending', payload: request }); setSaveState(navigator.onLine ? 'error' : 'offline'); }
           setMessage(polishError(error));
         }
@@ -130,6 +176,54 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
     }
   }, [api, store, user]);
 
+  /**
+   * Explicit recovery. `local` retries the same edit against the current version;
+   * `server` abandons the local edit. Neither happens without the user asking.
+   */
+  const resolveConflict = useCallback(async (choice: 'local' | 'server') => {
+    const pending = conflict;
+    if (!pending || !user) return;
+    setConflict(null);
+    if (choice === 'server') {
+      currentRef.current = pending.serverReel; setCurrent(pending.serverReel);
+      await store.deleteReel(user.id, pending.serverReel.id); setSaveState('idle'); return;
+    }
+    setSaveState('saving');
+    try {
+      const saved = await api.patch(pending.serverReel.id, {
+        operationId: crypto.randomUUID(),
+        expectedVersion: pending.serverReel.version,
+        changes: pending.changes,
+      });
+      currentRef.current = saved; setCurrent(saved);
+      await store.deleteReel(user.id, saved.id); setSaveState('saved');
+    } catch (error) { setSaveState('error'); setMessage(polishError(error)); }
+  }, [api, conflict, store, user]);
+
+  const replaceExport = useCallback(async (reference: { url: string; label: string }) => {
+    const reel = currentRef.current;
+    if (!reel) return; setSaveState('saving');
+    try {
+      const saved = await api.replaceExport(reel.id, {
+        operationId: crypto.randomUUID(), expectedVersion: reel.version, export: reference,
+      });
+      currentRef.current = saved; setCurrent(saved); setSaveState('saved');
+    } catch (error) { setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
+  }, [api]);
+
+  const verifyExport = useCallback(async () => {
+    const reel = currentRef.current;
+    if (!reel || reel.currentExport === null) return; setSaveState('saving');
+    try {
+      const saved = await api.verifyExport(reel.id, {
+        operationId: crypto.randomUUID(),
+        expectedVersion: reel.version,
+        exportRevision: reel.currentExport.revision,
+      });
+      currentRef.current = saved; setCurrent(saved); setSaveState('saved');
+    } catch (error) { setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
+  }, [api]);
+
   const copyPublication = useCallback(async () => {
     if (!current) return; const { publicationDescription: description, publicationHashtags: hashtags } = current;
     const value = composePublicationText(description, hashtags);
@@ -139,5 +233,6 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
   }, [current]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { user, peer, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication, signOut: () => { auth.signOut(); setCurrent(null); setCapture(null); setReels([]); setRoute({ name: 'list' }); } };
+  return { user, peer, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
+    deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut: () => { auth.signOut(); setCurrent(null); setCapture(null); setReels([]); setRoute({ name: 'list' }); } };
 }

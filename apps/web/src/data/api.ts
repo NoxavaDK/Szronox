@@ -32,7 +32,9 @@ export class CoreApiClient {
     for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
     return this.request<ReelPage>(`/reels${params.size ? `?${params}` : ''}`);
   }
-  reel = (id: string) => this.request<Reel>(`/reels/${encodeURIComponent(id)}`);
+  /** `includeDeleted` is an explicit opt-in so the restore view can load a deleted Reel. */
+  reel = (id: string, options: { includeDeleted?: boolean } = {}) =>
+    this.request<Reel>(`/reels/${encodeURIComponent(id)}${options.includeDeleted ? '?includeDeleted=true' : ''}`);
   create = (body: CreateReelRequest) => this.request<Reel>('/reels', { method: 'POST', body: JSON.stringify(body) });
   patch = (id: string, body: ReelPatchRequest) => this.request<Reel>(`/reels/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) });
   addHook = (id: string, body: AddHookRequest) => this.request<Reel>(`/reels/${id}/hooks`, { method: 'POST', body: JSON.stringify(body) });

@@ -76,3 +76,58 @@ IndexedDB capture/blob/reload/concurrent promotion remain **UNVERIFIED**. The In
 was typechecked and reviewed, not mislabeled as browser evidence. No live service mutation,
 account creation, invitation, kDrive operation, AI execution, deployment or provisioning was
 performed.
+
+---
+
+# T08 follow-up — wired against the corrected T05/T06 interfaces (2026-09-14)
+
+Base: T08 `c131987`, with the corrected `agents/t05-core` and `agents/t06-screens`
+merged in (merges, not resets — Sol's work is preserved). Agent: user-launched
+Opus 5 (`claude-opus-5`), an approved substitution for `gpt-5.6-sol`.
+
+## The workarounds are gone
+
+| Previously worked around | Now wired to |
+| --- | --- |
+| `window.confirm` for delete | `ReelOverflow` with the frozen `Usunąć rolkę?` copy and exact `Anuluj`/`Usuń` labels |
+| Sources dumped into a notice via `setMessage(sourceText(reel))` | `SourcesSection` — original LINK/TEKST, `DODATKOWY TEKST`, `ZAŁĄCZNIKI` and an editable `NOTATKA DO WEJŚCIA` |
+| "Edycja notatki wymaga kontrolki…" placeholder | `EditingNotesSection`, a real controlled field on `editingNotes` |
+| Materials as a message | `MaterialsSection` with export replace/open and derived verification |
+| No status/priority/editor editing at all | `MetadataSelectors`, each selection going through `changeReel` |
+| No deleted view | `{ name: 'deleted' }` route, `GET /reels?visibility=deleted`, `RestoreBanner` |
+| Conflict only a `saveState` | `ConflictRecoveryView` with the real local and server values |
+
+## New controller capability
+
+- `loadDeleted()` fetching `visibility: 'deleted'`, and `openDetail` now requesting
+  `includeDeleted` so a deleted Reel can be opened to restore it.
+- `replaceExport()` and `verifyExport()` against the T05 routes. Verification sends
+  the current export revision, so it verifies that revision and not "whatever is
+  current when the server reads it".
+- Conflict recovery: on 409 the draft is kept, the authoritative Reel is fetched, and
+  the differing field's local and server values are surfaced. `resolveConflict('local')`
+  retries the same change against the current version; `'server'` abandons the local
+  edit. **Neither happens without the user choosing.**
+- Verification view state is derived, never chosen: no export → no section; no editor
+  → `Wybierz montażystę…`; current user is the editor → `○ Czeka na <peer>`; otherwise
+  `○ Nie sprawdzone` with the verify action.
+
+## Cross-task finding fixed in T05
+
+Merging revealed that the pinned contract had gained `Reel.scriptRevision` after T05
+was written, so `mapping.ts` no longer satisfied the `Reel` type. Implemented on the
+T05 branch rather than patched here: migration `0002_script_revision.sql` plus an
+increment that fires only when `script` is present in the changes **and** actually
+differs. `version` bumps on every mutation and so cannot answer "has the script
+changed since this AI run read it?".
+
+## Verification
+
+`npm run typecheck` and `npm run build` are clean across all four workspaces. The
+Publication composition test and the T06 frozen-copy conformance suite pass.
+
+**Deliberately not re-verified in this follow-up**, at the user's direction since the
+project is moving to a VPS: no live browser run, no authenticated end-to-end pass, no
+Supabase project, no Storage transport, no real IndexedDB capture/reload evidence.
+Those gates stay exactly as open as T08 originally reported them. The wiring is
+typechecked and builds; it is **not** browser-proven.
