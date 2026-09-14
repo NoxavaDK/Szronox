@@ -32,7 +32,13 @@ Regression tests (new file `apps/api/src/shutdown.test.ts`, spawns the real comp
 - `a connection attempt after shutdown has begun is refused, not silently accepted` — confirms new connections are rejected once shutdown starts (i.e. stop-accepting-new-work is real).
 - `SIGINT triggers the same bounded, repeat-safe shutdown path` — same guard/path via the other signal, with two back-to-back signals.
 
-Honesty note: the "exceeds-deadline → forced exit" branch is implemented (see above) but not integration-tested — doing so would require an artificial hang inside the app, which would be a feature addition outside C01's bounded scope. It was reviewed by inspection only.
+Honesty note (original): the "exceeds-deadline → forced exit" branch is implemented but not
+integration-tested — doing so would require an artificial hang inside the app.
+
+**Closed by C04 (2026-09-14):** the branch is now integration-tested through an env-gated
+test-only seam (`API_TEST_SEAM`, `apps/api/src/test-seam.ts`), which nothing in production
+sets and which registers nothing when absent. Both the deadline branch and the close-error
+branch are exercised and assert their reported stderr output. See the C04 section below.
 
 ## F5 — real contract-consumer dependency
 
@@ -63,7 +69,11 @@ npm test
 
 Test suite ran green across 4 repeated invocations to check for flakiness in the new shutdown tests (raw-socket approach is deterministic — no reliance on undici keep-alive pooling, which was tried first and found to open a fresh connection per call, racing shutdown nondeterministically; that approach was discarded).
 
-No remote CI was run (none exists in this repo yet; not part of C01's file allowlist). No live browser/Android/device verification — out of scope for this backend-only correction batch.
+**Corrected by C04 (2026-09-14):** CI **is** configured — `.github/workflows/ci.yml` exists
+(added in T01 `b3e39d8`) and runs `npm ci`, `build`, `typecheck`, `test` on push and pull
+request. The original statement that "none exists in this repo yet" was wrong. What is true
+is that **remote CI execution remains unverified**: the workflow has never been observed
+running, and C04 did not trigger it. No live browser/Android/device verification — out of scope for this backend-only correction batch.
 
 ## Changed files
 
@@ -81,3 +91,116 @@ Not touched: shared contract source (`packages/contracts/src/**`), worker code, 
 ## Handoff
 
 Unmerged, on `agents/t01-scaffold`. Awaiting lead review. Commit ID reported below after creation.
+
+
+---
+
+# C04 follow-up (2026-09-14)
+
+Base: **`75451f5`**. Agent: user-launched Opus 5 (`claude-opus-5`), manual handoff, approved
+as a substitute for this pass. C01 itself was implemented by an approved Sonnet 5 substitute
+for the originally named `gpt-5.6-luna`; that attribution is unchanged.
+
+Input: the C04 runthrough items 1–5 for C01. Scope stayed inside `apps/api/src/**`,
+`apps/web/src/contracts-check.ts` and this file.
+
+## 1. Reproduced C01's claims independently
+
+All verified against `75451f5` before changing anything: clean `build`/`typecheck`, 8/8
+tests, unknown-API-method envelopes across GET/POST/PATCH/PUT/DELETE/OPTIONS/HEAD (plus
+method-mismatch on an existing route), missing `/assets/*` 404 with real assets keeping their
+MIME, SPA navigation intact including dotted paths, and contracts resolving through the real
+package `exports` map with no `paths`/`baseUrl` alias. Hiding
+`packages/contracts/dist/index.d.ts` makes both `apps/api` and `apps/web` fail `tsc`
+(TS7016) and restoring it makes them pass, so the consumption check is load-bearing.
+
+## 2. Shutdown evidence strengthened
+
+The previous suite equated a client TCP connect+write with server handler entry. It does not:
+the bytes can sit in a socket buffer while the signal arrives first.
+
+- **Handler entry is now proven.** The test-only seam writes
+  `TEST_SEAM_HANDLER_ENTERED` to stdout *from inside the handler*; the test waits for that
+  marker before signalling.
+- **Refusal is asserted during shutdown, not after exit.** With a held request keeping
+  shutdown open, the test asserts `exitCode === null` and that a brand-new TCP connection is
+  refused. The old test waited for exit first, so it only showed that an exited process
+  refuses connections.
+- **Draining is asserted on the same request**, which returns 200 after the signal.
+
+## 3. Harness bounded
+
+- Exit is observed from spawn, so nothing depends on attaching a listener before or after a
+  signal, and an already-exited child resolves immediately.
+- Every wait (`freePort`, readiness, stdout marker, response, exit) is bounded; a regression
+  fails instead of hanging the suite.
+- Every child is reaped in `finally`, including on assertion failure. Four consecutive runs:
+  11/11 with no leaked `dist/index.js` processes.
+- The deadline and close-error branches are driven through the env-gated seam, not a
+  production endpoint. A test asserts the seam is absent unless enabled.
+
+## 4. Unsound type guard removed
+
+`contracts-check.ts` exported `isErrorResponse`, which accepted `{ error: null }` as an
+`ErrorResponse` although `ApiError` is not nullable. Nothing consumed it — it existed to force
+an import — so an unsound validator sat in the source waiting to be believed. It is replaced
+by type-level assertions (`ErrorResponse['error']` is exactly `ApiError`; `ApiError['code']`
+is exactly `ErrorCode`) plus one concrete typed value. These fail `tsc` for exactly the
+intended reason and ship no runtime validator that lies.
+
+## 5. Failure paths are no longer silent
+
+The app is built with `logger: false`, so `app.log.error(...)` was a no-op and **both**
+shutdown failure branches produced no output — leaving exit code 1 as the only signal,
+ambiguous between a hung close and a close error. Both now also write to `process.stderr`,
+and the tests assert the specific message.
+
+## New finding for the lead — keep-alive in-flight shutdown
+
+Discovered while building the handler-entry test, and **pinned in a test rather than
+silently changed**.
+
+When a request is still in flight as SIGTERM arrives over a **keep-alive** connection (Node's
+`fetch` default), the socket returns to the keep-alive pool *after* `close()` has begun and is
+not reclaimed. Shutdown therefore waits out the full deadline and exits **1**. The request
+itself completes normally — draining works.
+
+Measured directly against Fastify 5.12.4:
+
+| `forceCloseConnections` | `close()` | in-flight request |
+| --- | --- | --- |
+| unset (current) | hangs past 2s | **completes (200)** |
+| `'idle'` | hangs past 2s | **completes (200)** |
+| `true` | returns in ~5ms | **aborted** |
+
+So no single Fastify option gives drain-then-reclaim. The current behaviour is the safe side
+of the trade-off: it never cuts off an in-flight response. The costs are a non-zero exit and a
+full deadline wait whenever a deploy catches a keep-alive request mid-flight, which an
+orchestrator may read as a crash.
+
+Choosing a drain-then-reclaim strategy (for example polling
+`server.closeIdleConnections()` after draining) is a shutdown-design decision with real risk
+of cutting requests off, so it is **left to the lead** rather than taken here. A test now
+documents the current behaviour so it cannot regress unnoticed.
+
+## Commands
+
+```sh
+npm run build        # clean
+npm run typecheck    # clean
+npm test             # 11/11 pass (was 8), stable across 4 runs, no leaked children
+```
+
+## Status
+
+| Item | Status |
+| --- | --- |
+| 1 Reproduce C01's claims | **PASS**, independently verified |
+| 2 Shutdown evidence (handler entry, drain, refusal during shutdown) | **corrected** |
+| 3 Bounded harness, seam-driven branches, child cleanup | **corrected** |
+| 4 Misleading type guard | **removed**, replaced by compile-time assertions |
+| 5 CI report | **corrected**: configured, remote execution unverified |
+| Deadline branch (previously untested) | **now integration-tested** |
+| Close-error branch | **now integration-tested** |
+| Keep-alive in-flight shutdown | **new finding**, pinned in a test, decision left to the lead |
+| Remote CI execution | **UNVERIFIED** — not triggered |
