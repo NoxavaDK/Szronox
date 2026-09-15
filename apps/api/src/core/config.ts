@@ -21,8 +21,8 @@ import type { CoreDependencies } from './routes.js';
 import {
   memoryStorageAdapter,
   type StorageAdapter,
-  supabaseStorageAdapter,
 } from './storage.js';
+import { filesystemStorageAdapter } from '../storage/filesystem.js';
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -39,6 +39,11 @@ export interface CoreEnv {
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   SUPABASE_STORAGE_BUCKET?: string;
+  /** Absolute private filesystem root. */
+  APP_STORAGE_ROOT?: string;
+  /** Same-origin base used to construct absolute upload transport URLs. */
+  APP_ORIGIN?: string;
+  APP_UPLOAD_TICKET_TTL_SECONDS?: string;
   /** Comma-separated `NAME:uuid` pairs for the two allowlisted users. */
   APP_ALLOWLIST?: string;
   /** Opt-in, development only: use the in-memory storage adapter. */
@@ -76,33 +81,22 @@ export function parseAllowlist(raw: string | undefined): AllowlistEntry[] {
 /**
  * Build the storage adapter.
  *
- * Supabase is selected when a URL, service-role key and bucket are all present.
- * A partial Supabase configuration is an error, never a silent fallback to
- * in-memory — that would make uploads appear to work while storing nothing.
+ * Production storage is always the private VPS filesystem. The memory adapter is
+ * an explicit local/test choice and is never an implicit fallback.
  */
 export function buildStorage(env: CoreEnv): StorageAdapter {
   if (env.STORAGE_DRIVER === 'memory') return memoryStorageAdapter();
-
-  const url = env.SUPABASE_URL;
-  const key = env.SUPABASE_SERVICE_ROLE_KEY;
-  const bucket = env.SUPABASE_STORAGE_BUCKET;
-  const supplied = [url, key, bucket].filter(present).length;
-  if (supplied === 0) {
-    throw new ConfigError(
-      'No storage is configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and '
-      + 'SUPABASE_STORAGE_BUCKET, or STORAGE_DRIVER=memory for local development.',
-    );
+  if (!present(env.APP_STORAGE_ROOT)) throw new ConfigError('APP_STORAGE_ROOT is required');
+  if (!present(env.APP_ORIGIN)) throw new ConfigError('APP_ORIGIN is required for upload transport URLs');
+  const rawTtl = env.APP_UPLOAD_TICKET_TTL_SECONDS;
+  const ttl = rawTtl === undefined ? 300 : Number(rawTtl);
+  if (!Number.isInteger(ttl) || ttl < 1 || ttl > 900) {
+    throw new ConfigError('APP_UPLOAD_TICKET_TTL_SECONDS must be an integer from 1 to 900');
   }
-  if (supplied !== 3) {
-    throw new ConfigError(
-      'Supabase storage is partially configured. All of SUPABASE_URL, '
-      + 'SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET are required.',
-    );
-  }
-  return supabaseStorageAdapter({
-    url: url as string,
-    serviceRoleKey: key as string,
-    bucket: bucket as string,
+  return filesystemStorageAdapter({
+    root: env.APP_STORAGE_ROOT,
+    appOrigin: env.APP_ORIGIN,
+    defaultExpiresInSeconds: ttl,
   });
 }
 
@@ -137,12 +131,8 @@ export function describeConfig(env: CoreEnv = process.env as CoreEnv) {
       : present(env.SUPABASE_JWT_SECRET) ? 'hs256_shared_secret' : 'unconfigured',
     issuerConfigured: present(env.SUPABASE_JWT_ISSUER),
     audienceConfigured: present(env.SUPABASE_JWT_AUDIENCE),
-    storage: env.STORAGE_DRIVER === 'memory'
-      ? 'memory'
-      : present(env.SUPABASE_URL) && present(env.SUPABASE_SERVICE_ROLE_KEY) && present(env.SUPABASE_STORAGE_BUCKET)
-        ? 'supabase'
-        : 'unconfigured',
-    bucket: present(env.SUPABASE_STORAGE_BUCKET) ? env.SUPABASE_STORAGE_BUCKET : null,
+    storage: env.STORAGE_DRIVER === 'memory' ? 'memory' : present(env.APP_STORAGE_ROOT) ? 'filesystem' : 'unconfigured',
+    storageRootConfigured: present(env.APP_STORAGE_ROOT),
     allowlistConfigured: present(env.APP_ALLOWLIST),
   };
 }
