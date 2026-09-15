@@ -1,6 +1,6 @@
 # Authorized delegation
 
-Current authorization: VPS-01–03 finished and were reconciled once on codex/vps-reconcile at b478100. VPS-04 is proposed only (Sol/high); no agent dispatch or live VPS mutation is authorized. The testing/review budget policy in AGENTS.md applies. Historical entries below retain their original context.
+Current authorization: VPS-04 approved on gpt-5.6-sol/high with the required APP_ORIGIN and ordered startup/readiness clarifications in VPS-04-approval.md. One bounded Sol agent is continuing the existing manual Opus implementation in .worktrees/vps-04-runtime from 77e33ba. No duplicate implementation/full audit, nested agents, live VPS changes or VPS-05 dispatch. Testing/review budget policy applies.
 
 | Task | Status | Ownership | Acceptance |
 | --- | --- | --- | --- |
@@ -51,3 +51,8 @@ VPS-01 auth, VPS-02 storage and VPS-03 environment are proposed parallel tasks, 
 Completed agents: Opus VPS-01 b289569, Sol VPS-02 5568699, Luna VPS-03 d2b5e9c. Preserved together on codex/vps-reconcile, final reconciliation b478100af553dcdbab67c08502a34fbb8157e2fe; original task worktrees remain intact. Root master remains separate, with pre-existing untracked deploy/ untouched.
 
 Result: `.worktrees/vps-reconcile/docs/implementation/VPS-integration-result.md`. Next eight-part proposal: `.worktrees/vps-reconcile/docs/implementation/VPS-04-proposal.md`. Reconciliation corrected /me, auth migration identity, shared configuration and throttling pins. Fourteen targeted integration/changed-boundary checks passed; no broad independent rerun. Remaining startup/provisioning/credential wiring blocks deployment, and real-PG/browser/VPS evidence remains deferred. VPS-04 is not dispatched.
+
+
+## VPS-04 continuation
+
+Dispatched /root/vps04_runtime on gpt-5.6-sol/high after explicit approval and Continue. Worktree .worktrees/vps-04-runtime, branch codex/vps-04-runtime. Existing Opus runtime commit 346f0e7 is preserved; root pinned clarifications at 77e33ba498284555b30b3fa74eedcf0f8531a0a8. Sol is limited to finishing approved work and concrete clarification gaps, with targeted checks only. After handoff root performs bounded review and prepares VPS-05 for explicit approval.
