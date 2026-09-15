@@ -1,0 +1,11 @@
+{
+  "//": "Emit-only variant of tsconfig.json, so `node --test` can run the browser auth tests. The app build is Vite's job and stays untouched; this only produces plain JS for the test runner. Output lands under dist/, which is already ignored. Wiring a script into package.json is root's call, so the exact command is documented in docs/implementation/VPS-01-result.md instead.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false,
+    "outDir": "dist/test"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

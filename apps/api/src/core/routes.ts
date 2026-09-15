@@ -7,13 +7,17 @@
  *
  * Every route requires a verified, allowlisted actor. There is no anonymous or
  * third-user path, and no route accepts a privileged key from a browser.
+ *
+ * VPS-01 replaced the token verifier with a session seam: `authenticate` resolves
+ * the actor from the server's own session record and additionally enforces Origin
+ * and CSRF on unsafe methods, so a request body still cannot state who it is and
+ * there is no second bearer-token authorization path.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import type { TokenVerifier, VerifiedActor } from '../auth/verify.js';
-import { bearerToken } from '../auth/verify.js';
-import { CoreError, internalError, unauthenticated, validationError } from './errors.js';
+import type { RequestAuthenticator, VerifiedActor } from '../auth/service.js';
+import { CoreError, internalError, validationError } from './errors.js';
 import {
   type Actor,
   type AttachmentLimits,
@@ -25,7 +29,8 @@ import type { Database } from '../db/client.js';
 
 export interface CoreDependencies {
   db: Database;
-  verifier: TokenVerifier;
+  /** Resolves the session cookie to an actor, or throws the shared 401/403 envelope. */
+  authenticate: RequestAuthenticator;
   storage: StorageAdapter;
   attachmentLimits?: AttachmentLimits;
   /** The two allowlisted users, for /me peer identity. */
@@ -55,11 +60,13 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
   const repository = new CoreRepository(dependencies.db);
   const limits = dependencies.attachmentLimits ?? DEFAULT_ATTACHMENT_LIMITS;
 
-  /** Verify the bearer token, or throw. Failure reasons are not echoed to clients. */
+  /**
+   * Resolve the actor from the session, or throw. The seam already collapses every
+   * failure reason into the shared envelope, so nothing about why a session was
+   * refused is echoed back to the caller.
+   */
   async function actorOf(request: FastifyRequest): Promise<Actor> {
-    const outcome = await dependencies.verifier.verify(bearerToken(request.headers.authorization));
-    if (!outcome.ok) throw unauthenticated();
-    return outcome.actor;
+    return dependencies.authenticate(request);
   }
 
   /** One error funnel, so every route answers with the shared envelope. */

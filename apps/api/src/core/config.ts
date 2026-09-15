@@ -2,20 +2,24 @@
  * Composition from environment.
  *
  * T08 reported "real Storage adapter/configuration" as a blocker. This is that
- * wiring: it turns environment variables into the verifier and storage adapter the
- * core routes need, refusing ambiguous or incomplete configuration rather than
- * quietly degrading.
+ * wiring: it turns environment variables into the storage adapter and the
+ * authentication seam the core routes need, refusing ambiguous or incomplete
+ * configuration rather than quietly degrading.
  *
  * What it deliberately does NOT do is choose a database driver. `Database` is
  * passed in, so `pg` stays out of this package's dependency graph and the
  * composition root keeps that decision. C01's shutdown path is untouched.
  *
+ * VPS-01 removed the JWT half of this file. There is no issuer, audience, JWKS URL
+ * or shared signing secret to configure any more; `apps/api/src/auth/config.ts`
+ * owns the session, CSRF and throttling settings instead.
+ *
  * Nothing here logs a secret. `describeConfig` exists so a startup line can state
  * what was configured without printing any of it.
  */
 
-import { createHs256Verifier, type AllowlistEntry, type TokenVerifier } from '../auth/verify.js';
-import { selectVerifier } from '../auth/jwks.js';
+import { buildAuthDependencies } from '../auth/compose.js';
+import { type AuthEnv, describeAuthConfig } from '../auth/config.js';
 import type { Database } from '../db/client.js';
 import type { CoreDependencies } from './routes.js';
 import {
@@ -24,6 +28,12 @@ import {
   supabaseStorageAdapter,
 } from './storage.js';
 
+/** The two provisioned users, as configured. Ids are supplied, never generated. */
+export interface AllowlistEntry {
+  id: string;
+  name: 'NOXAVA' | 'SZRON';
+}
+
 export class ConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -31,11 +41,7 @@ export class ConfigError extends Error {
   }
 }
 
-export interface CoreEnv {
-  SUPABASE_JWT_SECRET?: string;
-  SUPABASE_JWKS_URL?: string;
-  SUPABASE_JWT_ISSUER?: string;
-  SUPABASE_JWT_AUDIENCE?: string;
+export interface CoreEnv extends AuthEnv {
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   SUPABASE_STORAGE_BUCKET?: string;
@@ -106,37 +112,32 @@ export function buildStorage(env: CoreEnv): StorageAdapter {
   });
 }
 
-/** Build the token verifier. HS256 or JWKS, never both. */
-export function buildVerifier(env: CoreEnv, allowlist: AllowlistEntry[]): TokenVerifier {
-  if (!present(env.SUPABASE_JWT_ISSUER)) throw new ConfigError('SUPABASE_JWT_ISSUER is required');
-  if (!present(env.SUPABASE_JWT_AUDIENCE)) throw new ConfigError('SUPABASE_JWT_AUDIENCE is required');
-  return selectVerifier({
-    jwksUri: env.SUPABASE_JWKS_URL,
-    secret: env.SUPABASE_JWT_SECRET,
-    issuer: env.SUPABASE_JWT_ISSUER,
-    audience: env.SUPABASE_JWT_AUDIENCE,
-    allowlist,
-  }, createHs256Verifier);
-}
-
-export function buildCoreDependencies(db: Database, env: CoreEnv = process.env as CoreEnv): CoreDependencies {
+/**
+ * Build the core dependency set, including the session authentication seam.
+ *
+ * The auth service is returned alongside the dependencies because the composition
+ * root needs it for `registerAuthRoutes`, while the core routes only need the
+ * narrower `authenticate` function.
+ */
+export function buildCoreDependencies(
+  db: Database,
+  env: CoreEnv = process.env as CoreEnv,
+): CoreDependencies & { auth: ReturnType<typeof buildAuthDependencies> } {
   const allowlist = parseAllowlist(env.APP_ALLOWLIST);
+  const auth = buildAuthDependencies(db, env);
   return {
     db,
-    verifier: buildVerifier(env, allowlist),
+    authenticate: auth.authenticate,
     storage: buildStorage(env),
     allowlist: allowlist.map((entry) => ({ ...entry, avatarUrl: null })),
+    auth,
   };
 }
 
 /** Startup summary with no secret values. */
 export function describeConfig(env: CoreEnv = process.env as CoreEnv) {
   return {
-    verification: present(env.SUPABASE_JWKS_URL)
-      ? 'asymmetric_jwks'
-      : present(env.SUPABASE_JWT_SECRET) ? 'hs256_shared_secret' : 'unconfigured',
-    issuerConfigured: present(env.SUPABASE_JWT_ISSUER),
-    audienceConfigured: present(env.SUPABASE_JWT_AUDIENCE),
+    authentication: describeAuthConfig(env),
     storage: env.STORAGE_DRIVER === 'memory'
       ? 'memory'
       : present(env.SUPABASE_URL) && present(env.SUPABASE_SERVICE_ROLE_KEY) && present(env.SUPABASE_STORAGE_BUCKET)

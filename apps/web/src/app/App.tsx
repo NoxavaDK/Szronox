@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import './App.css';
 import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { Login } from '../auth/Login.js';
-import type { SupabaseBrowserSession } from '../auth/session.js';
+import type { BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
 import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
@@ -22,7 +22,7 @@ import {
   type VerificationViewState,
 } from '../ui/screen-contracts.js';
 
-export function App({ auth, api, store, queue }: { auth: SupabaseBrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue }) {
+export function App({ auth, api, store, queue }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue }) {
   const c = useAppController(auth, api, store, queue);
   const [publicationExpanded, setPublicationExpanded] = useState(false);
   const [openSelector, setOpenSelector] = useState<MetadataSelector | null>(null);
@@ -44,7 +44,24 @@ export function App({ auth, api, store, queue }: { auth: SupabaseBrowserSession;
     [c.capture],
   );
 
-  if (!c.user) return <Login auth={auth} onSignedIn={c.recover} />;
+  // 'unknown' is the state before the server has answered at all. Rendering the
+  // login form then would flash it at a user who is in fact still signed in, so the
+  // bootstrap is awaited instead.
+  if (c.authStatus === 'unknown') return <main className="auth-shell"><p>Ładowanie…</p></main>;
+  if (!c.user) {
+    // An unreachable server is not a logout. The distinction is shown, and the
+    // retry re-asks rather than silently leaving the user on a login form that
+    // cannot succeed. Local drafts are untouched either way.
+    return <>
+      <Login auth={auth} onSignedIn={c.recover} />
+      {c.authStatus === 'unreachable' ? (
+        <div className="app-notice" role="status">
+          <span>Brak połączenia z serwerem. Wersje robocze pozostają na tym urządzeniu.</span>
+          <button onClick={() => void c.recover()} aria-label="Ponów próbę">↻</button>
+        </div>
+      ) : null}
+    </>;
+  }
 
   const notice = c.message ? (
     <div className="app-notice" role="status">
@@ -298,5 +315,5 @@ export function App({ auth, api, store, queue }: { auth: SupabaseBrowserSession;
     onAddNew={c.startCapture}
     onRetry={() => void c.loadList()}
     onOpenDeleted={() => c.setRoute({ name: 'deleted' })}
-  /><button className="sign-out" onClick={c.signOut}>Wyloguj</button></>;
+  /><button className="sign-out" onClick={() => void c.signOut()}>Wyloguj</button></>;
 }

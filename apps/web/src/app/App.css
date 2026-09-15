@@ -6,6 +6,11 @@ button, input, textarea { font: inherit; }
 .auth-form input { min-height: 44px; border: 1px solid #aaa49a; background: transparent; padding: 0 12px; }
 .auth-form button { min-height: 46px; border: 0; background: #2155d9; color: white; font-weight: 700; }
 .auth-form p { color: #b42318; white-space: pre-wrap; }
+/* The account is one of two provisioned names, so it is a choice, not a text field. */
+.auth-accounts { display: grid; gap: 4px; border: 0; padding: 0; margin: 0; }
+.auth-accounts legend { padding: 0; font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+.auth-accounts label { display: flex; align-items: center; gap: 10px; min-height: 44px; text-transform: none; }
+.auth-accounts input { min-height: 0; width: auto; padding: 0; border: 0; }
 .app-notice { position: fixed; z-index: 30; left: 12px; right: 12px; bottom: 76px; max-width: 520px; margin: auto; display: flex; gap: 12px; justify-content: space-between; background: #171717; color: white; padding: 12px 14px; white-space: pre-wrap; font-size: 13px; }
 .app-notice button { border: 0; background: none; color: white; font-size: 20px; }
 .sign-out { position: fixed; top: 18px; right: 56px; border: 0; background: transparent; color: #625f59; font-size: 12px; }

@@ -2,16 +2,27 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import { App } from './app/App.js';
-import { SupabaseBrowserSession } from './auth/session.js';
+import { BrowserSession } from './auth/session.js';
+import { AuthTransport } from './auth/transport.js';
 import { CoreApiClient } from './data/api.js';
 import { DraftStore } from './drafts/store.js';
 import { SyncQueue } from './drafts/queue.js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
-const auth = new SupabaseBrowserSession(supabaseUrl, anonKey);
+/**
+ * Composition root.
+ *
+ * No authentication configuration reaches the browser bundle. The API is same-origin,
+ * so there is no URL to configure, and there is no anon key, project reference or
+ * signing secret to hold — which is why the former `VITE_SUPABASE_*` variables are
+ * gone rather than renamed.
+ */
+const auth = new BrowserSession(new AuthTransport());
 const api = new CoreApiClient(auth);
 const store = new DraftStore();
-const queue = new SyncQueue(store, api, () => auth.current()?.session.userId ?? null);
+// The queue's account comes from the server-confirmed session, so a flush cannot be
+// attributed to an account the server never acknowledged.
+const queue = new SyncQueue(store, api, () => auth.current()?.user.id ?? null);
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App auth={auth} api={api} store={store} queue={queue} /></StrictMode>);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode><App auth={auth} api={api} store={store} queue={queue} /></StrictMode>,
+);

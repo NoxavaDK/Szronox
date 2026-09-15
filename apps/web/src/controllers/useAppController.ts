@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CaptureImageDescriptor, Reel, ReelPatchRequest, ReelStatus, User } from '../../../../packages/contracts/src/index.js';
-import type { SupabaseBrowserSession } from '../auth/session.js';
+import type { AuthStatus, BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
-import { ClientApiError, polishError } from '../data/errors.js';
+import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { composePublicationText } from '../data/publication.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
@@ -29,9 +29,10 @@ export interface CaptureForm {
   draft: CaptureDraft; kind: 'image' | 'url' | 'text'; blobs: Map<string, Blob>; showAdditional: boolean; showHook: boolean;
 }
 
-export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClient, store: DraftStore, queue: SyncQueue) {
+export function useAppController(auth: BrowserSession, api: CoreApiClient, store: DraftStore, queue: SyncQueue) {
   const [user, setUser] = useState<User | null>(auth.current()?.user ?? null);
-  const [peer, setPeer] = useState<User | null>(null);
+  const [peer, setPeer] = useState<User | null>(auth.current()?.peer ?? null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(auth.state().status);
   const [route, setRoute] = useState<Route>({ name: 'list' });
   const [status, setStatus] = useState<ReelStatus>('idea');
   const [reels, setReels] = useState<Reel[]>([]);
@@ -47,37 +48,74 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
   const pendingPatch = useRef<{ reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | null>(null);
   useEffect(() => { currentRef.current = current; }, [current]);
 
+  /**
+   * Re-derive who we are from the server, then resume queued work.
+   *
+   * `restore()` asks the server; `api.me()` then confirms the identity through the
+   * domain surface, which is the value every account-scoped read and write uses. The
+   * queue is flushed only after that, so nothing pending is ever sent on the
+   * strength of a remembered account.
+   *
+   * A failure is not a logout. `restore()` distinguishes a confirmed anonymous state
+   * from an unreachable server, and only the former clears the session — so a draft
+   * made offline survives a failed reconnection instead of being dropped.
+   */
   const recover = useCallback(async () => {
-    if (!auth.current()) { setUser(null); return; }
+    await auth.restore();
+    const session = auth.current();
+    if (!session) { setUser(null); setPeer(null); return; }
     try {
-      const me = await api.me(); auth.setUser(me.user); setUser(me.user); setPeer(me.peer);
+      const me = await api.me();
+      setUser(me.user); setPeer(me.peer);
       await queue.flush();
-    } catch (error) { if (error instanceof ClientApiError && error.status === 401) auth.signOut(); setMessage(polishError(error)); }
+    } catch (error) {
+      if (isAbandonedRequest(error)) return;
+      setMessage(polishError(error));
+    }
   }, [api, auth, queue]);
-  useEffect(() => auth.subscribe((state) => setUser(state?.user ?? null)), [auth]);
+
+  useEffect(() => auth.subscribe((state) => {
+    setAuthStatus(state.status);
+    setUser(state.session?.user ?? null);
+    setPeer(state.session?.peer ?? null);
+  }), [auth]);
   useEffect(() => { void recover(); const online = () => { void recover(); }; window.addEventListener('online', online); return () => window.removeEventListener('online', online); }, [recover]);
+
+  /**
+   * A read that was abandoned because the account changed leaves no trace: no list,
+   * no error banner, no load state. Showing "could not load" for work the user
+   * cancelled by switching accounts would be wrong twice over.
+   */
+  const reportLoadFailure = useCallback((error: unknown) => {
+    if (isAbandonedRequest(error)) return;
+    setLoadState(navigator.onLine ? 'error' : 'offline');
+    setMessage(polishError(error));
+  }, []);
 
   const loadList = useCallback(async () => {
     if (!user) return; setLoadState('loading');
     try { const page = await api.list({ status }); setReels(page.items); setLoadState('loaded'); }
-    catch (error) { setLoadState(navigator.onLine ? 'error' : 'offline'); setMessage(polishError(error)); }
-  }, [api, status, user]);
+    catch (error) { reportLoadFailure(error); }
+  }, [api, reportLoadFailure, status, user]);
   useEffect(() => { if (route.name === 'list') void loadList(); }, [loadList, route.name]);
 
   const loadDeleted = useCallback(async () => {
     if (!user) return; setLoadState('loading');
     try { const page = await api.list({ visibility: 'deleted' }); setDeleted(page.items); setLoadState('loaded'); }
-    catch (error) { setLoadState(navigator.onLine ? 'error' : 'offline'); setMessage(polishError(error)); }
-  }, [api, user]);
+    catch (error) { reportLoadFailure(error); }
+  }, [api, reportLoadFailure, user]);
   useEffect(() => { if (route.name === 'deleted') void loadDeleted(); }, [loadDeleted, route.name]);
 
   const openDetail = useCallback(async (reelId: string) => {
     setRoute({ name: 'detail', reelId }); setLoadState('loading');
     try {
-      const reel = await api.reel(reelId, { includeDeleted: true }); const draft = user ? await store.reel(user.id, reelId) : undefined;
+      const reel = await api.reel(reelId, { includeDeleted: true });
+      // Drafts are read for the account that is active now, and the id is part of
+      // the key, so a draft can only ever be paired with its own account's Reel.
+      const draft = user ? await store.reel(user.id, reelId) : undefined;
       setCurrent(draft ? { ...reel, ...draft.changes } : reel); setSaveState(draft ? 'offline' : 'idle'); setLoadState('loaded');
-    } catch (error) { setLoadState(navigator.onLine ? 'error' : 'offline'); setMessage(polishError(error)); }
-  }, [api, store, user]);
+    } catch (error) { reportLoadFailure(error); }
+  }, [api, reportLoadFailure, store, user]);
 
   const startCapture = useCallback(() => {
     if (!user) return; const reelId = crypto.randomUUID();
@@ -104,7 +142,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
       await queue.flush(); const remaining = await store.queue(user.id); const item = remaining.find((x) => x.id === capture.draft.operationId);
       if (item) { setSaveState(item.state === 'conflict' ? 'conflict' : navigator.onLine ? 'error' : 'offline'); return; }
       setSaveState('saved'); setCapture(null); setRoute({ name: 'list' });
-    } catch (error) { setSaveState('error'); setMessage(polishError(error)); }
+    } catch (error) { if (isAbandonedRequest(error)) return; setSaveState('error'); setMessage(polishError(error)); }
   }, [capture, queue, store, user]);
 
   const changeReel = useCallback((changes: ReelPatchRequest['changes']) => {
@@ -122,6 +160,9 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
         const request = { operationId: crypto.randomUUID(), expectedVersion: sending.expectedVersion, changes: sending.changes };
         try { const saved = await api.patch(sending.reelId, request); currentRef.current = saved; setCurrent(saved); await store.deleteReel(user.id, sending.reelId); setSaveState('saved'); }
         catch (error) {
+          // Abandoned after an account switch: the draft stays in this account's
+          // partition untouched, and nothing is queued or shown against the new one.
+          if (isAbandonedRequest(error)) return;
           if (error instanceof ClientApiError && error.status === 409) {
             // Keep the draft, then read the authoritative value so the user is shown
             // a real comparison rather than "something changed".
@@ -153,7 +194,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
   const removeHook = useCallback(async (hookId: string) => {
     if (!current || !user) return; const request = { operationId: crypto.randomUUID(), expectedVersion: current.version }; setSaveState('saving');
     try { setCurrent(await api.removeHook(current.id, hookId, request)); setSaveState('saved'); }
-    catch (error) { await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'remove-hook', reelId: current.id, createdAt: Date.now(), state: error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'pending', payload: { hookId, request } }); setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'offline'); setMessage(polishError(error)); }
+    catch (error) { if (isAbandonedRequest(error)) return; await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'remove-hook', reelId: current.id, createdAt: Date.now(), state: error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'pending', payload: { hookId, request } }); setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'offline'); setMessage(polishError(error)); }
   }, [api, current, store, user]);
 
   const deleteCurrent = useCallback(async () => {
@@ -161,6 +202,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
     const request = { operationId: crypto.randomUUID(), expectedVersion: current.version }; setSaveState('saving');
     try { await api.remove(current.id, request); setCurrent(null); setRoute({ name: 'list' }); setSaveState('saved'); }
     catch (error) {
+      if (isAbandonedRequest(error)) return;
       const conflict = error instanceof ClientApiError && error.status === 409;
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'delete', reelId: current.id, createdAt: Date.now(), state: conflict ? 'conflict' : 'pending', payload: request });
       setSaveState(conflict ? 'conflict' : 'offline'); setMessage(polishError(error));
@@ -171,6 +213,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
     if (!user) return; const request = { operationId: crypto.randomUUID(), expectedVersion: reel.version };
     try { await api.restore(reel.id, request); setRoute({ name: 'list' }); }
     catch (error) {
+      if (isAbandonedRequest(error)) return;
       const conflict = error instanceof ClientApiError && error.status === 409;
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'restore', reelId: reel.id, createdAt: Date.now(), state: conflict ? 'conflict' : 'pending', payload: request }); setMessage(polishError(error));
     }
@@ -197,7 +240,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
       });
       currentRef.current = saved; setCurrent(saved);
       await store.deleteReel(user.id, saved.id); setSaveState('saved');
-    } catch (error) { setSaveState('error'); setMessage(polishError(error)); }
+    } catch (error) { if (isAbandonedRequest(error)) return; setSaveState('error'); setMessage(polishError(error)); }
   }, [api, conflict, store, user]);
 
   const replaceExport = useCallback(async (reference: { url: string; label: string }) => {
@@ -208,7 +251,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
         operationId: crypto.randomUUID(), expectedVersion: reel.version, export: reference,
       });
       currentRef.current = saved; setCurrent(saved); setSaveState('saved');
-    } catch (error) { setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
+    } catch (error) { if (isAbandonedRequest(error)) return; setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
   }, [api]);
 
   const verifyExport = useCallback(async () => {
@@ -221,7 +264,7 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
         exportRevision: reel.currentExport.revision,
       });
       currentRef.current = saved; setCurrent(saved); setSaveState('saved');
-    } catch (error) { setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
+    } catch (error) { if (isAbandonedRequest(error)) return; setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
   }, [api]);
 
   const copyPublication = useCallback(async () => {
@@ -232,7 +275,58 @@ export function useAppController(auth: SupabaseBrowserSession, api: CoreApiClien
     catch { setMessage(`Nie udało się skopiować. Zaznacz i skopiuj ręcznie:\n\n${value}`); }
   }, [current]);
 
+  /**
+   * Drop everything this account had on screen.
+   *
+   * Only in-memory view state is cleared. Drafts, queued operations and blobs stay in
+   * their own account's IndexedDB partition, so signing back in finds them exactly
+   * where they were — and the other account never sees them, because the partition
+   * key is the account id.
+   */
+  const clearAccountView = useCallback(() => {
+    window.clearTimeout(saveTimer.current);
+    pendingPatch.current = null;
+    currentRef.current = null;
+    setCurrent(null); setCapture(null); setReels([]); setDeleted([]); setConflict(null);
+    setSaveState('idle'); setLoadState('idle'); setRoute({ name: 'list' });
+  }, []);
+
+  /**
+   * Sign out, then clear.
+   *
+   * `auth.signOut()` increments the auth generation and aborts in-flight work before
+   * this resolves, so no response from the previous account can still land. It throws
+   * when the server revocation could not be confirmed; the local view is anonymous
+   * either way, and the failure is reported rather than hidden behind a clean logout.
+   */
+  const signOut = useCallback(async () => {
+    try {
+      await auth.signOut();
+    } catch (error) {
+      setMessage(
+        isAbandonedRequest(error)
+          ? 'Wylogowano lokalnie.'
+          : `Wylogowano lokalnie, ale serwer nie potwierdził zakończenia sesji. ${polishError(error)}`,
+      );
+    } finally {
+      clearAccountView();
+    }
+  }, [auth, clearAccountView]);
+
+  /**
+   * Switch to the other account.
+   *
+   * The sign-in rotates the generation first, so anything still in flight for the
+   * previous account is aborted and any response that arrives anyway is discarded.
+   * Only then is the view cleared and rebuilt from the new account's own data.
+   */
+  const signInAs = useCallback(async (name: User['name'], password: string) => {
+    await auth.signIn(name, password);
+    clearAccountView();
+    await recover();
+  }, [auth, clearAccountView, recover]);
+
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { user, peer, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
-    deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut: () => { auth.signOut(); setCurrent(null); setCapture(null); setReels([]); setRoute({ name: 'list' }); } };
+  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
+    deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs };
 }

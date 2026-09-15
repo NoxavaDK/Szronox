@@ -17,12 +17,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import { PGlite } from '@electric-sql/pglite';
 
-import { createHs256Verifier, signHs256 } from './auth/verify.js';
 import { type Database, pgliteDatabase } from './db/client.js';
 import { migrate, seedUsers } from './db/migrate.js';
 import { CoreRepository, DEFAULT_ATTACHMENT_LIMITS, payloadHash } from './core/repository.js';
@@ -30,13 +29,10 @@ import { CoreError } from './core/errors.js';
 import { deriveVerificationState } from './core/mapping.js';
 import { memoryStorageAdapter, supabaseStorageAdapter, StorageError } from './core/storage.js';
 import type { StorageAdapter } from './core/storage.js';
-import { createJwksVerifier, selectVerifier } from './auth/jwks.js';
+import { TEST_AUTH_ENV, sessionHarness } from './auth/test-support.js';
 
 const NOXAVA = { id: '11111111-1111-4111-8111-111111111111', name: 'NOXAVA' as const };
 const SZRON = { id: '22222222-2222-4222-8222-222222222222', name: 'SZRON' as const };
-const SECRET = 'diagnostic-only-jwt-secret-not-a-real-credential';
-const ISSUER = 'https://project.supabase.co/auth/v1';
-const AUDIENCE = 'authenticated';
 
 /** The in-memory adapter doubles as the "what is really stored" control. */
 type MemoryStorage = ReturnType<typeof memoryStorageAdapter>;
@@ -101,7 +97,8 @@ test('the committed migration applies to a bare database and is idempotent', asy
       `select table_name from information_schema.tables where table_schema = 'app' order by table_name`,
     );
     assert.deepEqual(tables.rows.map((r) => r.table_name), [
-      'attachments', 'memes', 'operations', 'reel_hooks', 'reel_memes', 'reels', 'users',
+      'attachments', 'auth_sessions', 'memes', 'operations', 'reel_hooks', 'reel_memes',
+      'reels', 'user_credentials', 'users',
     ]);
   } finally {
     await db.close();
@@ -142,50 +139,12 @@ test('schema constraints reject invalid domain values', async () => {
 });
 
 // ══════════════════════════ authentication boundary ═════════════════════════
-
-test('token verification enforces signature, issuer, audience, expiry and the allowlist', async () => {
-  const now = () => 1_800_000_000_000;
-  const seconds = Math.floor(now() / 1000);
-  const verifier = createHs256Verifier({
-    secret: SECRET, issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA, SZRON], now,
-  });
-  const base = { sub: NOXAVA.id, iss: ISSUER, aud: AUDIENCE, exp: seconds + 600 };
-
-  const valid = await verifier.verify(signHs256(base, SECRET));
-  assert.equal(valid.ok, true);
-  assert.deepEqual(valid.ok && valid.actor, { id: NOXAVA.id, name: 'NOXAVA' });
-
-  const cases: Array<[string, string]> = [
-    ['missing_token', ''],
-    ['malformed_token', 'not-a-jwt'],
-    ['bad_signature', signHs256(base, 'a-different-secret-entirely')],
-    ['expired', signHs256({ ...base, exp: seconds - 1 }, SECRET)],
-    ['not_yet_valid', signHs256({ ...base, nbf: seconds + 60 }, SECRET)],
-    ['wrong_issuer', signHs256({ ...base, iss: 'https://evil.example/auth/v1' }, SECRET)],
-    ['wrong_audience', signHs256({ ...base, aud: 'anon' }, SECRET)],
-    ['missing_subject', signHs256({ ...base, sub: undefined }, SECRET)],
-    // Correctly signed, but not one of the two product users.
-    ['not_allowlisted', signHs256({ ...base, sub: randomUUID() }, SECRET)],
-  ];
-  for (const [reason, token] of cases) {
-    const outcome = await verifier.verify(token);
-    assert.equal(outcome.ok, false, `${reason} must not verify`);
-    assert.equal(!outcome.ok && outcome.reason, reason);
-  }
-});
-
-test('an unsigned or asymmetric-algorithm token is refused, never verified with the wrong key', async () => {
-  const verifier = createHs256Verifier({
-    secret: SECRET, issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA],
-    now: () => 1_800_000_000_000,
-  });
-  const payload = { sub: NOXAVA.id, iss: ISSUER, aud: AUDIENCE, exp: 1_900_000_000 };
-  for (const alg of ['none', 'RS256', 'HS512']) {
-    const token = signHs256(payload, SECRET, { alg, typ: 'JWT' });
-    const outcome = await verifier.verify(token);
-    assert.equal(!outcome.ok && outcome.reason, 'unsupported_algorithm', `alg=${alg}`);
-  }
-});
+//
+// VPS-01 replaced Supabase JWT verification with application-owned opaque session
+// cookies, so the token-verifier and JWKS tests that used to live here have no
+// subject any more and were removed rather than adapted. The equivalent boundary
+// is now exercised end-to-end in `auth.test.ts`: login, `/me`, forged, expired and
+// revoked sessions, CSRF, Origin and login throttling.
 
 test('both allowlisted users reach the same shared Reel', async () => {
   const { db, repo } = await fixture();
@@ -837,27 +796,37 @@ async function server() {
   const { default: Fastify } = await import('fastify');
   const { registerCoreRoutes } = await import('./core/routes.js');
   const { db, storage } = await fixture();
+  const harness = sessionHarness(db);
   const app = Fastify({ logger: false });
   registerCoreRoutes(app, {
     db,
     storage,
-    verifier: createHs256Verifier({
-      secret: SECRET, issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA, SZRON],
-      now: () => 1_800_000_000_000,
-    }),
+    authenticate: harness.authenticate,
     allowlist: [{ ...NOXAVA, avatarUrl: null }, { ...SZRON, avatarUrl: null }],
   });
   await app.ready();
-  const token = (sub: string) => signHs256(
-    { sub, iss: ISSUER, aud: AUDIENCE, exp: Math.floor(1_800_000_000_000 / 1000) + 600 }, SECRET,
-  );
+
+  // One real session per provisioned user, issued through the same store the login
+  // route uses. `as` now selects a session rather than minting a token, so a value
+  // that is not one of the two users simply has no session to select.
+  const issued = new Map<string, Awaited<ReturnType<typeof harness.issue>>>();
+  for (const user of [NOXAVA, SZRON]) issued.set(user.id, await harness.issue(user.id));
+
   return {
-    app, db, storage,
+    app, db, storage, harness,
     async call(method: string, url: string, options: { as?: string; body?: unknown } = {}) {
+      const session = options.as === undefined ? undefined : issued.get(options.as);
+      const headers = options.as === undefined
+        ? {}
+        // An unknown `as` presents a cookie value with no matching session row,
+        // which is what a forged cookie looks like to the server.
+        : session
+          ? harness.headers(session, method)
+          : harness.headers({ secret: `forged-${options.as}`, csrfToken: 'forged', expiresAt: new Date() }, method);
       return app.inject({
         method: method as never,
         url,
-        headers: options.as ? { authorization: `Bearer ${token(options.as)}` } : {},
+        headers,
         ...(options.body === undefined ? {} : { payload: options.body as never }),
       });
     },
@@ -896,7 +865,7 @@ test('every core route refuses an unauthenticated caller with the shared envelop
   }
 });
 
-test('a validly signed token for a non-allowlisted subject is still refused', async () => {
+test('a cookie that matches no session row is refused, including for a plausible user id', async () => {
   const ctx = await server();
   try {
     const response = await ctx.call('GET', '/api/v1/me', { as: randomUUID() });
@@ -1199,225 +1168,33 @@ test('the Supabase storage adapter reports a missing object and refuses a sizele
   assert.ok(!JSON.stringify(upload.headers).includes('fake-service-key'), 'the signed URL carries the authority, not the key');
 });
 
-// ══════════════════════ T08 blocker: asymmetric JWKS ════════════════════════
+// ══════════════════ removed: asymmetric JWKS verification ══════════════════
 //
-// Real cryptography: keypairs are generated here, a JWKS document is served, and
-// tokens are signed with the private keys. `node:crypto` does the signing and
-// verification, so nothing about the crypto path is stubbed. What remains
-// unverified is only whether a SPECIFIC Supabase project's JWKS matches this shape.
-
-function b64url(input: Buffer | string): string {
-  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function rsaKeypair(kid: string) {
-  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const jwk = { ...(publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid, alg: 'RS256', use: 'sig' };
-  const sign = (payload: Record<string, unknown>, header: Record<string, unknown> = {}) => {
-    const h = b64url(JSON.stringify({ alg: 'RS256', kid, typ: 'JWT', ...header }));
-    const p = b64url(JSON.stringify(payload));
-    return `${h}.${p}.${b64url(createSign('RSA-SHA256').update(`${h}.${p}`).sign(privateKey))}`;
-  };
-  return { jwk, sign };
-}
-
-function ecKeypair(kid: string) {
-  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
-  const jwk = { ...(publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid, alg: 'ES256', use: 'sig' };
-  const sign = (payload: Record<string, unknown>) => {
-    const h = b64url(JSON.stringify({ alg: 'ES256', kid, typ: 'JWT' }));
-    const p = b64url(JSON.stringify(payload));
-    // JWT ES256 signatures are raw r||s, not DER.
-    const signature = createSign('SHA256').update(`${h}.${p}`).sign({ key: privateKey, dsaEncoding: 'ieee-p1363' });
-    return `${h}.${p}.${b64url(signature)}`;
-  };
-  return { jwk, sign };
-}
-
-function jwksServer(keys: Array<Record<string, unknown>>) {
-  let calls = 0;
-  const current = { keys: [...keys] };
-  const fetchImpl = (async () => {
-    calls += 1;
-    return { ok: true, status: 200, json: async () => current } as never;
-  }) as unknown as typeof fetch;
-  return {
-    fetchImpl,
-    calls: () => calls,
-    rotate(next: Array<Record<string, unknown>>) { current.keys = next; },
-  };
-}
-
-const NOW_MS = 1_800_000_000_000;
-const claims = (over: Record<string, unknown> = {}) => ({
-  sub: NOXAVA.id, iss: ISSUER, aud: AUDIENCE, exp: Math.floor(NOW_MS / 1000) + 600, ...over,
-});
-
-test('a genuine RS256 token verifies against the served JWKS', async () => {
-  const rsa = rsaKeypair('key-1');
-  const jwks = jwksServer([rsa.jwk]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://project.supabase.co/auth/v1/.well-known/jwks.json',
-    issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA, SZRON],
-    fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-  });
-
-  const outcome = await verifier.verify(rsa.sign(claims()));
-  assert.equal(outcome.ok, true);
-  assert.deepEqual(outcome.ok && outcome.actor, { id: NOXAVA.id, name: 'NOXAVA' });
-  assert.equal(verifier.cacheState().keyCount, 1);
-});
-
-test('a genuine ES256 token verifies, with raw r||s signature handling', async () => {
-  // Treating an ES256 signature as DER rejects every valid EC token, which would
-  // look like "asymmetric auth is broken".
-  const ec = ecKeypair('ec-1');
-  const jwks = jwksServer([ec.jwk]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://project.supabase.co/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-  });
-  assert.equal((await verifier.verify(ec.sign(claims()))).ok, true);
-});
-
-test('asymmetric verification refuses a tampered payload and a foreign key', async () => {
-  const rsa = rsaKeypair('key-1');
-  const other = rsaKeypair('key-1'); // same kid, different key material
-  const jwks = jwksServer([rsa.jwk]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-  });
-
-  // Signed by a key that is not the published one.
-  assert.equal((await verifier.verify(other.sign(claims()))).ok, false);
-
-  // Payload swapped after signing.
-  const token = rsa.sign(claims());
-  const [h, , s] = token.split('.');
-  const forged = `${h}.${b64url(JSON.stringify(claims({ sub: randomUUID() })))}.${s}`;
-  const outcome = await verifier.verify(forged);
-  assert.equal(!outcome.ok && outcome.reason, 'bad_signature');
-});
-
-test('an HS256 or alg:none token is never verified with a public key', async () => {
-  // Algorithm confusion: a symmetric token must not be accepted by the asymmetric
-  // verifier just because a key is available.
-  const rsa = rsaKeypair('key-1');
-  const jwks = jwksServer([rsa.jwk]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-  });
-  for (const alg of ['HS256', 'none', 'RS512']) {
-    const h = b64url(JSON.stringify({ alg, kid: 'key-1', typ: 'JWT' }));
-    const p = b64url(JSON.stringify(claims()));
-    const outcome = await verifier.verify(`${h}.${p}.${b64url('x')}`);
-    assert.equal(!outcome.ok && outcome.reason, 'unsupported_algorithm', `alg=${alg}`);
-  }
-});
-
-test('asymmetric verification enforces issuer, audience, expiry and the allowlist', async () => {
-  const rsa = rsaKeypair('key-1');
-  const jwks = jwksServer([rsa.jwk]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-  });
-  const seconds = Math.floor(NOW_MS / 1000);
-  const cases: Array<[string, string]> = [
-    ['wrong_issuer', rsa.sign(claims({ iss: 'https://evil.example' }))],
-    ['wrong_audience', rsa.sign(claims({ aud: 'anon' }))],
-    ['expired', rsa.sign(claims({ exp: seconds - 1 }))],
-    ['not_yet_valid', rsa.sign(claims({ nbf: seconds + 60 }))],
-    ['missing_subject', rsa.sign(claims({ sub: undefined }))],
-    // Correctly signed by the real key, but not a product user.
-    ['not_allowlisted', rsa.sign(claims({ sub: randomUUID() }))],
-  ];
-  for (const [reason, token] of cases) {
-    const outcome = await verifier.verify(token);
-    assert.equal(!outcome.ok && outcome.reason, reason);
-  }
-});
-
-test('key rotation is picked up, and an unknown kid cannot be used as a fetch amplifier', async () => {
-  const oldKey = rsaKeypair('old');
-  const newKey = rsaKeypair('new');
-  const jwks = jwksServer([oldKey.jwk]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-    minRefetchIntervalMs: 0,
-  });
-
-  assert.equal((await verifier.verify(oldKey.sign(claims()))).ok, true);
-  const afterFirst = jwks.calls();
-
-  // A token signed by a key the server has not published yet triggers one refetch.
-  assert.equal((await verifier.verify(newKey.sign(claims()))).ok, false);
-  jwks.rotate([newKey.jwk]);
-  assert.equal((await verifier.verify(newKey.sign(claims()))).ok, true, 'rotation is picked up');
-  assert.ok(jwks.calls() > afterFirst);
-
-  // With the floor engaged, repeated unknown-kid tokens do not each cause a fetch.
-  const throttled = createJwksVerifier({
-    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-    minRefetchIntervalMs: 60_000,
-  });
-  await throttled.verify(oldKey.sign(claims()));
-  const before = jwks.calls();
-  for (let i = 0; i < 5; i += 1) {
-    const stranger = rsaKeypair(`stranger-${i}`);
-    assert.equal((await throttled.verify(stranger.sign(claims()))).ok, false);
-  }
-  assert.equal(jwks.calls(), before, 'unknown kids must not each trigger a JWKS fetch');
-});
-
-test('a key published for one algorithm cannot be used to verify another', async () => {
-  const rsa = rsaKeypair('key-1');
-  const jwks = jwksServer([{ ...rsa.jwk, alg: 'RS256' }]);
-  const verifier = createJwksVerifier({
-    jwksUri: 'https://p/jwks', issuer: ISSUER, audience: AUDIENCE,
-    allowlist: [NOXAVA], fetchImpl: jwks.fetchImpl, now: () => NOW_MS,
-  });
-  // ES256 header against an RS256 key.
-  const h = b64url(JSON.stringify({ alg: 'ES256', kid: 'key-1', typ: 'JWT' }));
-  const p = b64url(JSON.stringify(claims()));
-  const outcome = await verifier.verify(`${h}.${p}.${b64url('x')}`);
-  assert.equal(!outcome.ok && outcome.reason, 'unsupported_algorithm');
-});
-
-test('verifier selection refuses an ambiguous or absent configuration', () => {
-  const base = { issuer: ISSUER, audience: AUDIENCE, allowlist: [NOXAVA] };
-  assert.throws(
-    () => selectVerifier({ ...base, jwksUri: 'https://p/jwks', secret: SECRET }, createHs256Verifier),
-    /not both/,
-  );
-  assert.throws(() => selectVerifier({ ...base }, createHs256Verifier), /No token verification is configured/);
-  assert.ok(selectVerifier({ ...base, secret: SECRET }, createHs256Verifier));
-  assert.ok(selectVerifier({ ...base, jwksUri: 'https://p/jwks' }, createHs256Verifier));
-});
+// VPS-01 removed RS256/ES256 JWKS verification with the rest of the JWT path.
+// Sessions are opaque and application-owned, so there is no external key set to
+// fetch, cache or rotate. The tests that generated keypairs and served a JWKS
+// document were deleted with the module they exercised rather than left asserting
+// behaviour nothing implements.
 
 // ══════════════════════ T08 blocker: app.ts registration ════════════════════
 
 test('buildApp registers the core routes when dependencies are supplied', async () => {
   const { buildApp } = await import('./app.js');
   const { db, storage } = await fixture();
+  const harness = sessionHarness(db);
   const app = buildApp({
     core: {
       db, storage,
-      verifier: createHs256Verifier({
-        secret: SECRET, issuer: ISSUER, audience: AUDIENCE,
-        allowlist: [NOXAVA, SZRON], now: () => NOW_MS,
-      }),
+      authenticate: harness.authenticate,
       allowlist: [{ ...NOXAVA, avatarUrl: null }, { ...SZRON, avatarUrl: null }],
     },
   });
   try {
     await app.ready();
-    const token = signHs256(claims(), SECRET);
-    const me = await app.inject({ method: 'GET', url: '/api/v1/me', headers: { authorization: `Bearer ${token}` } });
+    const session = await harness.issue(NOXAVA.id);
+    const me = await app.inject({
+      method: 'GET', url: '/api/v1/me', headers: harness.headers(session, 'GET'),
+    });
     assert.equal(me.statusCode, 200, 'core routes must be reachable through app.ts');
     assert.equal(me.json().user.name, 'NOXAVA');
 
@@ -1457,7 +1234,7 @@ test('buildApp without core dependencies serves the static app only', async () =
 // ══════════════════════ T08 blocker: storage configuration ══════════════════
 
 test('configuration refuses partial Supabase storage rather than silently using memory', async () => {
-  const { buildStorage, buildVerifier, parseAllowlist, describeConfig, ConfigError } =
+  const { buildStorage, parseAllowlist, describeConfig, ConfigError } =
     await import('./core/config.js');
 
   // A half-configured bucket would make uploads appear to work while storing nothing.
@@ -1470,20 +1247,6 @@ test('configuration refuses partial Supabase storage rather than silently using 
   assert.ok(buildStorage({
     SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_STORAGE_BUCKET: 'attachments',
   }));
-
-  // Verification: exactly one mechanism, and issuer/audience are mandatory.
-  const allowlist = [NOXAVA, SZRON];
-  assert.throws(() => buildVerifier({ SUPABASE_JWT_SECRET: SECRET }, allowlist), /ISSUER is required/);
-  assert.throws(
-    () => buildVerifier({
-      SUPABASE_JWT_SECRET: SECRET, SUPABASE_JWKS_URL: 'https://p/jwks',
-      SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
-    }, allowlist),
-    /not both/,
-  );
-  assert.ok(buildVerifier({
-    SUPABASE_JWKS_URL: 'https://p/jwks', SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
-  }, allowlist));
 
   // The allowlist is exactly two distinct product users.
   assert.deepEqual(
@@ -1498,31 +1261,38 @@ test('configuration refuses partial Supabase storage rather than silently using 
 
   // The startup summary names what is configured without exposing any value.
   const described = describeConfig({
-    SUPABASE_JWT_SECRET: SECRET, SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
+    ...TEST_AUTH_ENV,
     SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'super-secret-key',
     SUPABASE_STORAGE_BUCKET: 'attachments', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
   });
-  assert.equal(described.verification, 'hs256_shared_secret');
+  assert.equal(described.authentication.mechanism, 'opaque_session_cookie');
+  assert.equal(described.authentication.csrfSecretConfigured, true);
   assert.equal(described.storage, 'supabase');
   const serialised = JSON.stringify(described);
-  assert.ok(!serialised.includes(SECRET) && !serialised.includes('super-secret-key'), 'no secret may appear');
+  assert.ok(
+    !serialised.includes(TEST_AUTH_ENV.AUTH_CSRF_SECRET as string) && !serialised.includes('super-secret-key'),
+    'no secret may appear',
+  );
 });
 
 test('buildCoreDependencies composes a working dependency set from environment', async () => {
   const { buildCoreDependencies } = await import('./core/config.js');
   const { buildApp } = await import('./app.js');
   const { db } = await fixture();
-  const app = buildApp({
-    core: buildCoreDependencies(db, {
-      SUPABASE_JWT_SECRET: SECRET, SUPABASE_JWT_ISSUER: ISSUER, SUPABASE_JWT_AUDIENCE: AUDIENCE,
-      STORAGE_DRIVER: 'memory', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
-    }),
+  const core = buildCoreDependencies(db, {
+    ...TEST_AUTH_ENV,
+    STORAGE_DRIVER: 'memory', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
   });
+  const app = buildApp({ core });
   try {
     await app.ready();
+    assert.equal(typeof core.authenticate, 'function', 'the composed set must carry the session seam');
+    // The session is issued into the same database under the same configuration, so
+    // /me here is resolved by the authenticator `buildCoreDependencies` composed.
+    const harness = sessionHarness(db);
     const response = await app.inject({
       method: 'GET', url: '/api/v1/me',
-      headers: { authorization: `Bearer ${signHs256(claims(), SECRET)}` },
+      headers: harness.headers(await harness.issue(NOXAVA.id), 'GET'),
     });
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().peer.name, 'SZRON');
