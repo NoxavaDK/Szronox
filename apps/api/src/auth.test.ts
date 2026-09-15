@@ -28,7 +28,7 @@ import { clearedSessionCookie, serializeSessionCookie } from './auth/cookies.js'
 import { createPasswordHasher, ARGON2ID_PARAMETERS, PasswordInputError, assertUsablePassword } from './auth/passwords.js';
 import { registerAuthRoutes, AUTH_LOG_REDACT_PATHS } from './auth/routes.js';
 import { createAuthService, type AuthService } from './auth/service.js';
-import { createSessionStore, deriveCsrfToken, pruneDeadSessions } from './auth/sessions.js';
+import { createSessionStore, deriveCsrfToken, pruneDeadSessions } from './mes.js';
 import { createThrottle, DEFAULT_ACCOUNT_THROTTLE, DEFAULT_ADDRESS_THROTTLE } from './auth/throttle.js';
 import { assertProvisioned, ProvisioningError, setPassword } from './auth/users.js';
 import { passwordFromStdinText, provisionPassword } from './auth/provision.js';
@@ -319,7 +319,7 @@ test('stored hashes are Argon2id with the pinned parameters and a per-password s
 
 // ══════════════════════════ session lifecycle ═══════════════════════════════
 
-test('a session is recovered after a reload through GET /auth/session', async () => {
+test('a session is recovered after a reload through GET /me', async () => {
   const ctx = await fixture();
   try {
     const session = await loggedIn(ctx, 'SZRON');
@@ -327,7 +327,7 @@ test('a session is recovered after a reload through GET /auth/session', async ()
     // What a reloaded page does: it holds no state of its own, only the cookie the
     // browser resends.
     const restored = await ctx.app.inject({
-      method: 'GET', url: '/api/v1/auth/session', headers: { cookie: session.cookie },
+      method: 'GET', url: '/api/v1/me', headers: { cookie: session.cookie },
     });
     assert.equal(restored.statusCode, 200);
     const body = restored.json();
@@ -346,7 +346,7 @@ test('a session is recovered after a reload through GET /auth/session', async ()
 test('a bootstrap with no cookie is a clean anonymous 401 rather than an error', async () => {
   const ctx = await fixture();
   try {
-    const response = await ctx.app.inject({ method: 'GET', url: '/api/v1/auth/session' });
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/v1/me' });
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().error.code, 'UNAUTHENTICATED');
     assert.equal(response.headers['cache-control'], 'no-store');
@@ -373,7 +373,7 @@ test('a forged cookie is refused and clears itself, whatever shape it takes', as
       `szronox_session=${secret}`,
     ];
     for (const cookie of forged) {
-      const bootstrap = await ctx.app.inject({ method: 'GET', url: '/api/v1/auth/session', headers: { cookie } });
+      const bootstrap = await ctx.app.inject({ method: 'GET', url: '/api/v1/me', headers: { cookie } });
       assert.equal(bootstrap.statusCode, 401, cookie);
       assert.equal(setCookieOf(bootstrap), clearedSessionCookie(), 'an unusable cookie is cleared');
 
@@ -405,7 +405,7 @@ test('an expired session is refused, and expiry is absolute rather than extended
       200,
     );
     const stillSame = await ctx.app.inject({
-      method: 'GET', url: '/api/v1/auth/session', headers: { cookie: session.cookie },
+      method: 'GET', url: '/api/v1/me', headers: { cookie: session.cookie },
     });
     assert.equal(stillSame.json().expiresAt, session.body.expiresAt, 'expiry must not move');
 
@@ -448,7 +448,7 @@ test('logout revokes the session server-side and the cookie stops working', asyn
 
     // Replaying the same cookie — which an attacker who captured it would do —
     // fails, so logout is a server-side revocation and not a client-side gesture.
-    for (const url of ['/api/v1/me', '/api/v1/auth/session']) {
+    for (const url of ['/api/v1/me', '/api/v1/me']) {
       assert.equal(
         (await ctx.app.inject({ method: 'GET', url, headers: { cookie: session.cookie } })).statusCode,
         401,
@@ -641,7 +641,7 @@ test('no domain or auth response carries credential or session material', async 
       payload: { operationId: randomUUID(), reelId, input: { text: 'Notatka', images: [] } },
     });
 
-    for (const url of ['/api/v1/me', '/api/v1/reels', `/api/v1/reels/${reelId}`, '/api/v1/auth/session']) {
+    for (const url of ['/api/v1/me', '/api/v1/reels', `/api/v1/reels/${reelId}`, '/api/v1/me']) {
       const body = (await ctx.app.inject({ method: 'GET', url, headers: { cookie: session.cookie } })).body;
       for (const forbidden of [secret, hash, tokenHash, '$argon2id$', 'password_hash', 'token_hash']) {
         assert.ok(!body.includes(forbidden), `${url} must not expose ${forbidden.slice(0, 12)}`);
@@ -759,7 +759,7 @@ test('every unsafe domain method is CSRF-protected, while reads need no Origin',
     }
 
     // Reads carry no CSRF requirement, because they mutate nothing.
-    for (const url of ['/api/v1/me', '/api/v1/reels', '/api/v1/auth/session']) {
+    for (const url of ['/api/v1/me', '/api/v1/reels', '/api/v1/me']) {
       const response = await ctx.app.inject({ method: 'GET', url, headers: { cookie: session.cookie } });
       assert.equal(response.statusCode, 200, url);
     }

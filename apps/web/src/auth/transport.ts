@@ -54,7 +54,7 @@ export class AuthTransport implements AuthTransportPort {
   }
 
   async session(): Promise<AuthSessionResponse> {
-    const response = await this.fetchImpl(`${this.baseUrl}/auth/session`, {
+    const response = await this.fetchImpl(`${this.baseUrl}/me`, {
       method: 'GET',
       credentials: 'same-origin',
       // A cached bootstrap could hand one account's identity to the other.

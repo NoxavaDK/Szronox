@@ -84,7 +84,7 @@ function held() {
 function standardResponder(csrfToken = 'csrf-token-noxava'): Responder {
   return (call) => {
     if (call.url.endsWith('/auth/login')) return json(sessionFor(NOXAVA, SZRON, csrfToken));
-    if (call.url.endsWith('/auth/session')) return json(sessionFor(NOXAVA, SZRON, csrfToken));
+    if (call.url.endsWith('/me')) return json(sessionFor(NOXAVA, SZRON, csrfToken));
     if (call.url.endsWith('/auth/logout')) return new Response(null, { status: 204 });
     if (call.url.endsWith('/me')) return json({ user: NOXAVA, peer: SZRON });
     return json({ items: [], nextCursor: null });
@@ -263,7 +263,7 @@ test('a reload recovers the session from the cookie alone', async () => {
     assert.equal(auth.context().csrfToken, 'csrf-restored');
 
     assert.equal(fake.calls.length, 1);
-    assert.ok(fake.calls[0].url.endsWith('/auth/session'));
+    assert.ok(fake.calls[0].url.endsWith('/me'));
     assert.equal(fake.calls[0].credentials, 'same-origin');
   } finally {
     fake.restore();
@@ -274,7 +274,7 @@ test('a restore that cannot reach the server is not a logout', async () => {
   let mode: 'ok' | 'network' | 'anonymous' = 'ok';
   const fake = recorder((call) => {
     if (mode === 'network') throw new TypeError('Failed to fetch');
-    if (call.url.endsWith('/auth/session')) {
+    if (call.url.endsWith('/me')) {
       return mode === 'anonymous'
         ? errorBody('UNAUTHENTICATED', 401)
         : json(sessionFor(NOXAVA, SZRON, 'csrf'));

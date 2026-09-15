@@ -2,7 +2,7 @@
  * The three authentication endpoints, under /api/v1.
  *
  *   POST /auth/login    → 200 AuthSessionResponse + session cookie
- *   GET  /auth/session  → 200 AuthSessionResponse, 401 when there is no live session
+ *   GET  /me  → 200 AuthSessionResponse, 401 when there is no live session
  *   POST /auth/logout   → 204, session revoked and cookie cleared
  *
  * Registered as `registerAuthRoutes(app, { service })` for the composition root,
@@ -77,13 +77,13 @@ export function registerAuthRoutes(app: FastifyInstance, dependencies: AuthRoute
     };
   }
 
-  app.post('/api/v1/auth/login', handle(async (request, reply) => {
+  app.post('/api/v1/auth/login', { bodyLimit: 4096 }, handle(async (request, reply) => {
     const outcome = await service.login(request, request.body);
     reply.header('set-cookie', outcome.setCookie);
     return reply.code(200).send(outcome.response);
   }));
 
-  app.get('/api/v1/auth/session', handle(
+  app.get('/api/v1/me', handle(
     async (request, reply) => reply.code(200).send(await service.bootstrap(request)),
     { clearCookieOnUnauthenticated: true },
   ));

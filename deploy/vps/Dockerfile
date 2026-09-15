@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
+COPY database ./database
 RUN npm ci && npm run build && npm run typecheck && npm test
 RUN npm prune --omit=dev
 

@@ -106,5 +106,5 @@ export function createThrottle(options: ThrottleOptions): Throttle {
  * only on failure and cleared on success, so a user who eventually types the
  * right password is not locked out by their own typos.
  */
-export const DEFAULT_ADDRESS_THROTTLE = { limit: 10, windowMs: 5 * 60 * 1000 } as const;
+export const DEFAULT_ADDRESS_THROTTLE = { limit: 20, windowMs: 15 * 60 * 1000 } as const;
 export const DEFAULT_ACCOUNT_THROTTLE = { limit: 5, windowMs: 15 * 60 * 1000 } as const;

@@ -1,14 +1,97 @@
-name: szronox
+name: szronox-dev
+
+networks:
+  private:
+    name: szronox-dev_private
+    internal: true
+
+volumes:
+  postgres_data:
+    name: szronox-dev_postgres_data
+  app_storage:
+    name: szronox-dev_app_storage
+
+secrets:
+  postgres_password:
+    file: ${SZRONOX_DEV_POSTGRES_PASSWORD_FILE:?Set SZRONOX_DEV_POSTGRES_PASSWORD_FILE to a local development-only secret file}
+
 services:
-  app:
+  postgres:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: szronox_dev
+      POSTGRES_USER: szronox_dev
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U szronox_dev -d szronox_dev]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 60s
+
+  migrate:
     build:
       context: ../..
       dockerfile: deploy/vps/Dockerfile
-    image: szronox:${SZRONOX_RELEASE:?Set SZRONOX_RELEASE to the release identifier}
+    image: szronox-dev:${SZRONOX_RELEASE:-local}
+    command: [node, apps/api/dist/db/migration-cli.js]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: szronox_dev
+      DATABASE_USER: szronox_dev
+      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    networks: [private]
+
+  storage-init:
+    image: szronox-dev:${SZRONOX_RELEASE:-local}
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - >-
+        mkdir -p /var/lib/szronox/storage/staging /var/lib/szronox/storage/objects
+        && chown 1000:1000 /var/lib/szronox/storage /var/lib/szronox/storage/staging /var/lib/szronox/storage/objects
+        && chmod 700 /var/lib/szronox/storage /var/lib/szronox/storage/staging /var/lib/szronox/storage/objects
+    restart: "no"
+    volumes:
+      - app_storage:/var/lib/szronox/storage
+
+  api:
+    image: szronox-dev:${SZRONOX_RELEASE:-local}
     restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
     init: true
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "3000"
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3010}
+      APP_STORAGE_ROOT: /var/lib/szronox/storage
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: szronox_dev
+      DATABASE_USER: szronox_dev
+      APP_ALLOWLIST: NOXAVA:11111111-1111-4111-8111-111111111111,SZRON:22222222-2222-4222-8222-222222222222
     ports:
       - "127.0.0.1:3010:3000"
+    volumes:
+      - app_storage:/var/lib/szronox/storage
+    networks: [private]
     read_only: true
     tmpfs:
       - /tmp:size=32m,mode=1777
@@ -28,3 +111,42 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  worker:
+    image: szronox-dev:${SZRONOX_RELEASE:-local}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    command: [node, apps/worker/dist/index.js]
+    environment:
+      NODE_ENV: development
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: szronox_dev
+      DATABASE_USER: szronox_dev
+      WORKER_POLL_MS: "30000"
+    networks: [private]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 15s
+
+  real-pg-harness:
+    image: szronox-dev:${SZRONOX_RELEASE:-local}
+    command: [node, apps/api/test/postgres/real-pg-harness.mjs]
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: szronox_dev
+      DATABASE_USER: szronox_dev
+      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    networks: [private]

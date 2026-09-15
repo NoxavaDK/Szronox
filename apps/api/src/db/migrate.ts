@@ -1,12 +1,14 @@
 /**
  * Migration runner.
  *
- * Applies `supabase/migrations/*.sql` in filename order and records each one, so a
- * second run is a no-op. Deliberately minimal: the point is that the committed SQL
- * is what gets applied, with no ORM translating it into something else.
+ * Applies `database/migrations/*.sql` in filename order and records each one, so a
+ * second run is a no-op. The runner is deliberately independent from the API and
+ * worker startup paths: Compose invokes the migration CLI as a one-shot job.
  *
- * Statements are executed as one script per file, inside a transaction, so a
- * partially-applied migration cannot be recorded as done.
+ * A PostgreSQL advisory transaction lock serialises concurrent migration jobs. The
+ * ledger check, SQL script and ledger insert run in one transaction, so a failed
+ * file cannot be recorded as applied. The lock is intentionally on the same
+ * transaction as the ledger work, which also makes the PGlite fallback honest.
  */
 
 import { readFile, readdir } from 'node:fs/promises';
@@ -19,9 +21,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Repository-root-relative migrations directory, resolved from the compiled file. */
 export function defaultMigrationsDir(): string {
-  // dist/db -> apps/api -> apps -> repo root
-  return path.resolve(here, '../../../../supabase/migrations');
+  // dist/db -> apps/api -> apps -> repository root
+  return path.resolve(here, '../../../../database/migrations');
 }
+
+/** Stable lock key shared by every local/dev migration runner. */
+export const MIGRATION_ADVISORY_LOCK_KEY = '735000031';
 
 export interface AppliedMigration {
   name: string;
@@ -32,36 +37,36 @@ export async function migrate(
   db: Database,
   migrationsDir: string = defaultMigrationsDir(),
 ): Promise<AppliedMigration[]> {
-  // The ledger lives outside `app` on purpose: dropping the application schema
-  // during development should not silently make migrations look unapplied.
-  await db.query(`
-    create table if not exists public.schema_migrations (
-      name       text primary key,
-      applied_at timestamptz not null default now()
-    )
-  `);
-
   const files = (await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort();
   const applied: AppliedMigration[] = [];
-
   for (const name of files) {
-    const existing = await db.query<{ name: string }>(
-      'select name from public.schema_migrations where name = $1',
-      [name],
-    );
-    if (existing.rows.length > 0) {
-      applied.push({ name, alreadyApplied: true });
-      continue;
-    }
+    const result = await db.transaction(async (tx) => {
+      // The ledger lives outside `app` on purpose: dropping the application schema
+      // during development should not silently make migrations look unapplied.
+      // The lock is held for this file's transaction, keeping the SQL script and
+      // ledger insert atomic while serialising concurrent migration jobs.
+      await tx.query('select pg_advisory_xact_lock($1::bigint)', [MIGRATION_ADVISORY_LOCK_KEY]);
+      await tx.query(`
+        create table if not exists public.schema_migrations (
+          name       text primary key,
+          applied_at timestamptz not null default now()
+        )
+      `);
+      const existing = await tx.query<{ name: string }>(
+        'select name from public.schema_migrations where name = $1',
+        [name],
+      );
+      if (existing.rows.length > 0) {
+        return { name, alreadyApplied: true };
+      }
 
-    const sql = await readFile(path.join(migrationsDir, name), 'utf8');
-    await db.transaction(async (tx) => {
+      const sql = await readFile(path.join(migrationsDir, name), 'utf8');
       await tx.execScript(sql);
       await tx.query('insert into public.schema_migrations (name) values ($1)', [name]);
+      return { name, alreadyApplied: false };
     });
-    applied.push({ name, alreadyApplied: false });
+    applied.push(result);
   }
-
   return applied;
 }
 

@@ -87,20 +87,7 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     };
   }
 
-  // ── Identity ───────────────────────────────────────────────────────────────
-
-  app.get('/api/v1/me', handle(async (request) => {
-    const actor = await actorOf(request);
-    const peer = dependencies.allowlist.find((entry) => entry.id !== actor.id) ?? null;
-    return {
-      user: {
-        id: actor.id,
-        name: actor.name,
-        avatarUrl: dependencies.allowlist.find((entry) => entry.id === actor.id)?.avatarUrl ?? null,
-      },
-      peer: peer ? { id: peer.id, name: peer.name, avatarUrl: peer.avatarUrl ?? null } : null,
-    };
-  }));
+  // GET /me is registered by registerAuthRoutes with full session metadata.
 
   // ── List and detail ────────────────────────────────────────────────────────
 

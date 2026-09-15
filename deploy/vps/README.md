@@ -1,95 +1,115 @@
-# SzroNox VPS deployment
+# SzroNox isolated development environment
 
-This task owns VPS installation and deployment. The user explicitly selected the
-existing VPS instead of managed Supabase hosting and authorized deployment here.
-Application implementation and integration remain with the implementation task.
+This directory defines the disposable local `szronox-dev` Compose project used
+for VPS-03 preparation. It has a dedicated PostgreSQL instance, private Docker
+network and project-scoped volumes. It does not deploy to the VPS and it does
+not use Cutroom or any other existing project resource.
 
-## Server and isolation
+The PostgreSQL image is pinned to `postgres:17.6-bookworm`. The migration job
+uses the same image build as the API, runs `database/migrations/*.sql` once, and
+serializes concurrent runners with a PostgreSQL advisory transaction lock. API
+and worker startup never run migrations.
 
-- SSH: `ssh ubuntu@51.195.103.79` using the existing local key/agent.
-- Root: `/opt/szronox`; source releases: `/opt/szronox/releases/<release>`.
-- Compose project: `szronox`; private address: `127.0.0.1:3010`.
-- Docker and Compose were already installed. No host package installation needed.
-- Preserve `/opt/task-tracker`, `/opt/cutroom`, `/opt/rezyserka`, their containers,
-  databases, credentials, host services and Caddy configuration.
-- No borrowed credentials, shared application database, public port or Caddy route.
-- Do not use global Docker cleanup commands or remove other projects' resources.
+## Prepare a local disposable run
 
-## Initial release
-
-Release `f0e8e9b-infra-20260914` contains application commit `f0e8e9b` plus the
-Dockerfile and Compose configuration in this directory. Deployment files are
-currently uncommitted. The pre-existing edit to `docs/implementation/tasks.md`
-was not deployed or changed. No feature worktree was merged.
-
-This is the integrated scaffold: Polish placeholder page and health endpoint.
-It has no working persistence, authentication or feature API. The placeholder
-worker is not started. No database or auth service was installed speculatively.
-VPS PostgreSQL, authentication and private storage still need configuration
-against the integrated application interfaces; deploying here does not by itself
-replace Supabase-specific adapters or complete those application features.
-
-## Build, start and inspect
-
-Run on the VPS from the relevant release directory:
+Create a development-only password file outside the repository, with mode 600,
+then point Compose at it. The password is never committed or placed in a
+command-line argument:
 
 ```bash
-export SZRONOX_RELEASE=f0e8e9b-infra-20260914
+umask 077
+printf '%s\n' 'choose-a-local-only-password' > /private/tmp/szronox-dev-postgres-password
+export SZRONOX_DEV_POSTGRES_PASSWORD_FILE=/private/tmp/szronox-dev-postgres-password
 docker compose -f deploy/vps/compose.yaml build
-docker compose -f deploy/vps/compose.yaml up -d --no-build --wait --wait-timeout 60
+docker compose -f deploy/vps/compose.yaml up -d --wait postgres
+docker compose -f deploy/vps/compose.yaml run --rm migrate
+docker compose -f deploy/vps/compose.yaml run --rm storage-init
+docker compose -f deploy/vps/compose.yaml up -d --wait api worker
+docker compose -f deploy/vps/compose.yaml run --rm real-pg-harness
 docker compose -f deploy/vps/compose.yaml ps
 curl --fail http://127.0.0.1:3010/api/v1/health
-curl --fail http://127.0.0.1:3010/
-docker exec -i szronox-app-1 node --input-type=module < deploy/vps/smoke.mjs
 ```
 
-The image build runs `npm ci`, `npm run build`, `npm run typecheck`, and `npm test`.
-Build precedes typecheck because workspace imports require compiled contracts.
-Runtime uses an unprivileged user, read-only filesystem, bounded logs/resources,
-health checks and automatic restart. No application secrets are in the image.
+The `storage-init` service is the only root container. It initializes only the
+named `app_storage` volume, creates `staging` and `objects`, and assigns those
+directories to UID:GID `1000:1000` with mode 700. The API mounts the volume
+read/write at `/var/lib/szronox/storage`; the worker has no storage mount. The
+application root is supplied through `APP_STORAGE_ROOT` and is outside the
+served web tree.
 
-Local browser access without publishing:
+For a clean disposable run, stop the project and remove only its named volumes:
 
 ```bash
-ssh -N -L 3010:127.0.0.1:3010 ubuntu@51.195.103.79
+docker compose -f deploy/vps/compose.yaml down
+docker volume rm szronox-dev_postgres_data szronox-dev_app_storage
 ```
 
-Then open `http://localhost:3010`.
+## Migrations and real PostgreSQL harness
 
-## Subsequent releases and rollback
+Build the API first, then run the harness with the Compose database connection.
+It opens independent node-postgres pools and composes the existing
+`CoreRepository` through `pgPoolDatabase`; PGlite is not used by this harness:
 
-Deploy only the intended integrated revision, in a new release directory. Build
-before replacing the container. Set `SZRONOX_RELEASE` to that directory's unique
-release identifier, run the commands above and verify assets and API responses.
-Update `/opt/szronox/current` only after verification succeeds. Keep the preceding
-release directory and tagged image. Roll back by running its Compose file with
-its original `SZRONOX_RELEASE` and `up -d --no-build --wait --wait-timeout 60`, then
-restore the current symlink. The initial release has no earlier app to roll back to.
+```bash
+npm ci
+npm run build --workspace @szronox/contracts
+npm run build --workspace @szronox/api
+DATABASE_URL='postgres://szronox_dev:YOUR_LOCAL_PASSWORD@127.0.0.1:5432/szronox_dev' \
+  node apps/api/test/postgres/real-pg-harness.mjs
+```
 
-Before a release introduces persistence, define isolated volumes, backups,
-migration and restore procedures. Never assume container rollback reverses data
-migrations. Public routing requires the intended domain and functioning access
-control; both remain pending for this scaffold.
+The database has no published Compose port. For the harness, use a temporary
+local port-forward or run the harness in a disposable helper container on the
+`szronox-dev_private` network. If Docker/PostgreSQL is unavailable, the harness
+prints an explicit `UNVERIFIED` gate and does not claim race evidence.
 
-## Verified handoff — 2026-09-14
+The harness covers concurrent same-version writes (one winner and one
+`EDIT_CONFLICT`), concurrent same-operation retries (one effect), changed-payload
+idempotency rejection, rollback of domain and ledger writes, migration rerun,
+and independent API/worker pool coexistence. It cleans its uniquely identified
+test rows when the run completes.
 
-Owned files: `deploy/vps/Dockerfile`, `compose.yaml`, `smoke.mjs`, and this README.
-No application code, shared contracts, dependencies or lockfiles changed.
+## Development backup and restore
 
-- Build and typecheck PASS; `npm test`: 11/11 PASS on the VPS.
-- Compose startup with `--wait`: healthy.
-- `smoke.mjs`: health JSON, page, both generated assets, unknown API and missing
-  asset responses PASS. Host-loopback health request also PASS.
-- Existing containers retained their uptime; existing HTTP services on ports
-  3000 and 3001 returned 200 before and after deployment.
-- `/opt/szronox/current` points to `releases/f0e8e9b-infra-20260914`.
-- No Caddy, existing service/data, DNS, or firewall modifications.
-- Base image resolved to
-  `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5`.
-- Built application image ID:
-  `sha256:22f65d034e732ae78b75829f5d4e02a9e3282820efb57f2b6076543accca9473`.
+Pause API and worker briefly so the database and private files form a matching
+pair. Keep the archive and file snapshot under the same timestamped directory;
+never use a production backup as development input:
 
-The first clean build failed when typecheck ran before contracts were compiled;
-the corrected build-first order passed all checks. Public access, persistence,
-authentication, provider integrations and full product behavior remain unverified
-and unavailable in this scaffold. Deployment configuration has no commit yet.
+```bash
+BACKUP_DIR=/private/tmp/szronox-dev-backups/$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$BACKUP_DIR"
+docker compose -f deploy/vps/compose.yaml stop api worker
+docker compose -f deploy/vps/compose.yaml exec -T postgres \
+  pg_dump -U szronox_dev -d szronox_dev --format=custom \
+  > "$BACKUP_DIR/database.dump"
+docker run --rm \
+  -v szronox-dev_app_storage:/source:ro \
+  -v "$BACKUP_DIR":/backup \
+  alpine:3.20 tar -C /source -czf /backup/app-storage.tar.gz .
+sha256sum "$BACKUP_DIR/database.dump" "$BACKUP_DIR/app-storage.tar.gz" \
+  > "$BACKUP_DIR/SHA256SUMS"
+docker compose -f deploy/vps/compose.yaml start api worker
+```
+
+Restore only into disposable development volumes. For a timestamped backup,
+stop the project, restore the private files, start PostgreSQL, and load the
+custom archive with PostgreSQL 17.x-compatible tooling:
+
+```bash
+docker compose -f deploy/vps/compose.yaml down
+docker run --rm \
+  -v szronox-dev_app_storage:/target \
+  -v "$BACKUP_DIR":/backup:ro \
+  alpine:3.20 sh -ec 'rm -rf /target/staging /target/objects && tar -C /target -xzf /backup/app-storage.tar.gz'
+docker compose -f deploy/vps/compose.yaml up -d --wait postgres
+docker compose -f deploy/vps/compose.yaml exec -T postgres \
+  pg_restore -U szronox_dev -d szronox_dev --clean --if-exists < "$BACKUP_DIR/database.dump"
+docker compose -f deploy/vps/compose.yaml run --rm migrate
+docker compose -f deploy/vps/compose.yaml run --rm real-pg-harness
+```
+
+Container image rollback does not reverse database migrations.
+
+Production requires a separate approved project, volume, network, credentials,
+encrypted off-host backup policy and recovery objective. This task provides no
+production backup or deployment command.
