@@ -1,66 +1,71 @@
-/**
- * Private attachment storage.
- *
- * T05's first pass returned only a storage key, so a browser had nowhere to upload
- * to; T08 reported that as a blocker. This adds the transport.
- *
- * Honest scope, because it bounds what can be claimed:
- *
- *   - The Supabase adapter below is written against Supabase Storage's documented
- *     signed-upload flow, but **it has never been executed against a real project**.
- *     No Supabase URL, service-role key or bucket was available. Treat its exact
- *     request shapes as unverified configuration, not as observed behaviour.
- *   - The in-memory adapter IS fully exercised by the test suite, so the repository's
- *     use of the interface — initiate, probe, size mismatch, completion — is real
- *     evidence about this codebase even while the provider call is not.
- *
- * The service-role key never leaves the server: the browser receives only a
- * short-lived signed URL scoped to one object path.
- */
+import { createHash, randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 export interface StoredObject {
   exists: boolean;
   byteSize: number;
+  /** Present for filesystem objects that passed a real image decode. */
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  pixelCount?: number;
+  contentHash?: string;
+}
+
+export interface ValidatedStoredObject extends StoredObject {
+  exists: true;
+  mimeType: string;
+  width: number;
+  height: number;
+  pixelCount: number;
+  contentHash: string;
+}
+
+export interface UploadScope {
+  actorId: string;
+  reelId: string;
+  attachmentId: string;
 }
 
 export interface SignedUpload {
-  /** Absolute URL the browser PUTs the bytes to. */
   uploadUrl: string;
-  /** HTTP method the browser must use. */
   method: 'PUT' | 'POST';
-  /** Headers the browser must send, excluding Content-Type it sets itself. */
   headers: Record<string, string>;
-  /** Unix seconds after which the URL stops working. */
   expiresAt: number;
 }
 
+export interface StorageWriteOptions {
+  mimeType: string;
+  byteSize: number;
+  maxByteSize: number;
+  maxPixelCount: number;
+  maxDimension: number;
+}
+
+export interface OpenStoredObject {
+  object: ValidatedStoredObject;
+  stream: Readable;
+}
+
 export interface StorageAdapter {
-  /** Server-side existence/size probe used to validate completion. */
+  /** VPS-04 must await this before listen; operations await the same promise too. */
+  initialize(): Promise<void>;
   statObject(storageKey: string): Promise<StoredObject>;
-  /**
-   * Mint a short-lived, single-object upload URL. The caller has already validated
-   * the declared type and size against the configured bounds.
-   */
   createSignedUpload(storageKey: string, options: {
     mimeType: string;
     byteSize: number;
     expiresInSeconds?: number;
+    /** Required by the VPS adapter. Optional only for the retained legacy test double. */
+    scope?: UploadScope;
   }): Promise<SignedUpload>;
+  writeObject?(
+    storageKey: string,
+    source: AsyncIterable<Uint8Array> | Readable,
+    options: StorageWriteOptions,
+  ): Promise<ValidatedStoredObject>;
+  openObject?(storageKey: string): Promise<OpenStoredObject>;
 }
 
-export interface SupabaseStorageConfig {
-  /** e.g. https://<ref>.supabase.co */
-  url: string;
-  /** Service-role key. Server-side only; never sent to a browser. */
-  serviceRoleKey: string;
-  /** Private bucket name. */
-  bucket: string;
-  defaultExpiresInSeconds?: number;
-  fetchImpl?: typeof fetch;
-  now?: () => number;
-}
-
-/** Fail loudly rather than silently degrading to "no storage configured". */
 export class StorageError extends Error {
   readonly status: number | null;
   constructor(message: string, status: number | null = null) {
@@ -70,86 +75,34 @@ export class StorageError extends Error {
   }
 }
 
-/**
- * Supabase Storage adapter.
- *
- * UNVERIFIED against a live project. The endpoints follow Supabase Storage's
- * documented shapes:
- *   POST /storage/v1/object/upload/sign/{bucket}/{path}  -> { url: "/object/upload/sign/..." }
- *   POST /storage/v1/object/info/authenticated/{bucket}/{path} -> object metadata
- * If a live run disagrees, the disagreement belongs in a follow-up report rather
- * than being smoothed over here.
- */
-export function supabaseStorageAdapter(config: SupabaseStorageConfig): StorageAdapter {
-  const fetchImpl = config.fetchImpl ?? fetch;
-  const now = config.now ?? (() => Date.now());
-  const base = config.url.replace(/\/+$/, '');
-  const authHeaders = {
-    authorization: `Bearer ${config.serviceRoleKey}`,
-    apikey: config.serviceRoleKey,
-  };
+export class StorageInputError extends StorageError {
+  readonly reason: string;
+  constructor(message: string, reason: string) {
+    super(message, 422);
+    this.name = 'StorageInputError';
+    this.reason = reason;
+  }
+}
 
-  const encodePath = (storageKey: string) =>
-    storageKey.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+export class StorageConflictError extends StorageError {
+  readonly reason: string;
+  constructor(message: string, reason = 'immutable_object_conflict') {
+    super(message, 409);
+    this.name = 'StorageConflictError';
+    this.reason = reason;
+  }
+}
 
-  return {
-    async statObject(storageKey) {
-      const response = await fetchImpl(
-        `${base}/storage/v1/object/info/authenticated/${config.bucket}/${encodePath(storageKey)}`,
-        { method: 'GET', headers: { ...authHeaders, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) },
-      );
-      if (response.status === 404) return { exists: false, byteSize: 0 };
-      if (!response.ok) {
-        throw new StorageError(`Storage info request failed with status ${response.status}`, response.status);
-      }
-      const body = (await response.json()) as { size?: unknown; contentLength?: unknown; metadata?: { size?: unknown } };
-      // Size has appeared under more than one key across Storage versions; a
-      // missing size is an error rather than a silent zero, because zero would
-      // make a mismatch check pass by accident.
-      const raw = body.size ?? body.contentLength ?? body.metadata?.size;
-      const byteSize = typeof raw === 'number' ? raw : Number(raw);
-      if (!Number.isFinite(byteSize)) {
-        throw new StorageError('Storage info response did not report an object size');
-      }
-      return { exists: true, byteSize };
-    },
+export const UPLOAD_TOKEN_HEADER = 'X-Upload-Token';
 
-    async createSignedUpload(storageKey, options) {
-      const expiresIn = options.expiresInSeconds ?? config.defaultExpiresInSeconds ?? 300;
-      const response = await fetchImpl(
-        `${base}/storage/v1/object/upload/sign/${config.bucket}/${encodePath(storageKey)}`,
-        {
-          method: 'POST',
-          headers: { ...authHeaders, 'content-type': 'application/json' },
-          body: JSON.stringify({ expiresIn }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (!response.ok) {
-        throw new StorageError(`Signed upload request failed with status ${response.status}`, response.status);
-      }
-      const body = (await response.json()) as { url?: unknown };
-      if (typeof body.url !== 'string' || body.url === '') {
-        throw new StorageError('Signed upload response did not contain a url');
-      }
-      // Supabase returns a path relative to /storage/v1.
-      const uploadUrl = body.url.startsWith('http') ? body.url : `${base}/storage/v1${body.url}`;
-      return {
-        uploadUrl,
-        method: 'PUT',
-        // No service-role key here: the signed token in the URL is the authority.
-        headers: { 'x-upsert': 'false' },
-        expiresAt: Math.floor(now() / 1000) + expiresIn,
-      };
-    },
-  };
+export function digestUploadToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
 /**
- * In-memory adapter for tests and local development.
- *
- * Deliberately labelled: a green run against this proves the repository's
- * contract, not that Supabase Storage works.
+ * In-memory storage remains an injectable test double. It is never selected as a
+ * public production fallback and deliberately does not claim filesystem/image
+ * validation evidence.
  */
 export function memoryStorageAdapter(options: { now?: () => number } = {}): StorageAdapter & {
   put(storageKey: string, byteSize: number): void;
@@ -159,6 +112,7 @@ export function memoryStorageAdapter(options: { now?: () => number } = {}): Stor
   const issued: string[] = [];
   const now = options.now ?? (() => Date.now());
   return {
+    async initialize() {},
     put(storageKey, byteSize) { objects.set(storageKey, byteSize); },
     uploads: () => [...issued],
     async statObject(storageKey) {
@@ -168,11 +122,69 @@ export function memoryStorageAdapter(options: { now?: () => number } = {}): Stor
     async createSignedUpload(storageKey, opts) {
       issued.push(storageKey);
       const expiresIn = opts.expiresInSeconds ?? 300;
+      const token = randomBytes(32).toString('base64url');
       return {
-        uploadUrl: `memory://upload/${encodeURIComponent(storageKey)}`,
+        uploadUrl: opts.scope
+          ? `https://memory.invalid/api/v1/reels/${opts.scope.reelId}/attachments/${opts.scope.attachmentId}/content`
+          : `memory://upload/${encodeURIComponent(storageKey)}`,
         method: 'PUT',
-        headers: {},
+        headers: { [UPLOAD_TOKEN_HEADER]: token },
         expiresAt: Math.floor(now() / 1000) + expiresIn,
+      };
+    },
+  };
+}
+
+/**
+ * Retained only so accepted historical tests compile while VPS branches are
+ * integrated. Core configuration no longer selects this adapter; VPS storage is
+ * the filesystem implementation in ../storage/filesystem.ts.
+ */
+export interface SupabaseStorageConfig {
+  url: string;
+  serviceRoleKey: string;
+  bucket: string;
+  defaultExpiresInSeconds?: number;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+}
+
+export function supabaseStorageAdapter(config: SupabaseStorageConfig): StorageAdapter {
+  const fetchImpl = config.fetchImpl ?? fetch;
+  const now = config.now ?? (() => Date.now());
+  const base = config.url.replace(/\/+$/, '');
+  const authHeaders = { authorization: `Bearer ${config.serviceRoleKey}`, apikey: config.serviceRoleKey };
+  const encodePath = (key: string) => key.split('/').map(encodeURIComponent).join('/');
+  return {
+    async initialize() {},
+    async statObject(storageKey) {
+      const response = await fetchImpl(
+        `${base}/storage/v1/object/info/authenticated/${config.bucket}/${encodePath(storageKey)}`,
+        { method: 'GET', headers: { ...authHeaders, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) },
+      );
+      if (response.status === 404) return { exists: false, byteSize: 0 };
+      if (!response.ok) throw new StorageError(`Storage info request failed with status ${response.status}`, response.status);
+      const body = (await response.json()) as { size?: unknown; contentLength?: unknown; metadata?: { size?: unknown } };
+      const raw = body.size ?? body.contentLength ?? body.metadata?.size;
+      const byteSize = typeof raw === 'number' ? raw : Number(raw);
+      if (!Number.isFinite(byteSize)) throw new StorageError('Storage info response did not report an object size');
+      return { exists: true, byteSize };
+    },
+    async createSignedUpload(storageKey, options) {
+      const expiresIn = options.expiresInSeconds ?? config.defaultExpiresInSeconds ?? 300;
+      const response = await fetchImpl(
+        `${base}/storage/v1/object/upload/sign/${config.bucket}/${encodePath(storageKey)}`,
+        {
+          method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' },
+          body: JSON.stringify({ expiresIn }), signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!response.ok) throw new StorageError(`Signed upload request failed with status ${response.status}`, response.status);
+      const body = (await response.json()) as { url?: unknown };
+      if (typeof body.url !== 'string' || body.url === '') throw new StorageError('Signed upload response did not contain a url');
+      return {
+        uploadUrl: body.url.startsWith('http') ? body.url : `${base}/storage/v1${body.url}`,
+        method: 'PUT', headers: { 'x-upsert': 'false' }, expiresAt: Math.floor(now() / 1000) + expiresIn,
       };
     },
   };

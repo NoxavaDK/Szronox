@@ -26,6 +26,7 @@ import {
 } from './repository.js';
 import type { StorageAdapter } from './storage.js';
 import type { Database } from '../db/client.js';
+import { registerAttachmentRoutes } from '../storage/routes.js';
 
 export interface CoreDependencies {
   db: Database;
@@ -256,41 +257,12 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
   }));
 
   // ── Bounded private attachment lifecycle ───────────────────────────────────
-
-  app.post('/api/v1/reels/:id/attachments/initiate', handle(async (request, reply) => {
-    const actor = await actorOf(request);
-    const { id } = request.params as { id: string };
-    const body = (request.body ?? {}) as Record<string, unknown>;
-    const operationId = requireUuid(body.operationId, 'operationId');
-    const attachmentId = requireUuid(body.attachmentId, 'attachmentId');
-    if (typeof body.fileName !== 'string' || body.fileName === '') throw validationError('fileName is required');
-    if (typeof body.mimeType !== 'string') throw validationError('mimeType is required');
-    if (typeof body.byteSize !== 'number') throw validationError('byteSize must be a number');
-
-    const result = await repository.initiateAttachment(actor, requireUuid(id, 'id'), {
-      operationId,
-      attachmentId,
-      fileName: body.fileName,
-      mimeType: body.mimeType,
-      byteSize: body.byteSize,
-      purpose: body.purpose as never,
-    }, limits, dependencies.storage);
-    return reply.code(201).send(result);
-  }));
-
-  app.post('/api/v1/reels/:id/attachments/:attachmentId/complete', handle(async (request) => {
-    const actor = await actorOf(request);
-    const { id, attachmentId } = request.params as { id: string; attachmentId: string };
-    const body = (request.body ?? {}) as Record<string, unknown>;
-    const operationId = requireUuid(body.operationId, 'operationId');
-    return repository.completeAttachment(
-      actor,
-      requireUuid(id, 'id'),
-      requireUuid(attachmentId, 'attachmentId'),
-      { operationId },
-      dependencies.storage,
-    );
-  }));
+  registerAttachmentRoutes(app, {
+    db: dependencies.db,
+    storage: dependencies.storage,
+    attachmentLimits: limits,
+    authenticate: actorOf,
+  });
 }
 
 export type { VerifiedActor };

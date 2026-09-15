@@ -12,7 +12,7 @@
  *     change. There is no window in which a mutation is applied but unrecorded.
  */
 
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 
 import type {
   AttachmentReference,
@@ -28,6 +28,7 @@ import type {
 import type { Database, Queryable } from '../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../db/client.js';
 import {
+  CoreError,
   editConflict,
   editorRequired,
   exportChanged,
@@ -46,7 +47,13 @@ import {
   toHook,
   toReel,
 } from './mapping.js';
-import type { SignedUpload, StorageAdapter } from './storage.js';
+import {
+  digestUploadToken,
+  type SignedUpload,
+  type StorageAdapter,
+  UPLOAD_TOKEN_HEADER,
+  type ValidatedStoredObject,
+} from './storage.js';
 
 const REEL_COLUMNS = `
   id, version, title, status, priority, input_note, original_input, script, editing_notes,
@@ -704,10 +711,6 @@ export class CoreRepository {
 
   // ── Bounded private attachment lifecycle ───────────────────────────────────
 
-  /**
-   * Initiate an upload. Returns the storage key the transfer should target. The
-   * record stays `pending` until completion is validated server-side.
-   */
   async initiateAttachment(
     actor: Actor, reelId: string,
     request: {
@@ -720,42 +723,205 @@ export class CoreRepository {
     if (!limits.allowedMimeTypes.includes(request.mimeType)) {
       throw validationError(`Unsupported attachment type: ${request.mimeType}`, { mimeType: request.mimeType });
     }
-    if (typeof request.byteSize !== 'number' || request.byteSize <= 0 || request.byteSize > limits.maxByteSize) {
+    if (!Number.isSafeInteger(request.byteSize) || request.byteSize <= 0 || request.byteSize > limits.maxByteSize) {
       throw validationError('Attachment byteSize is outside the configured bound', {
         maxByteSize: limits.maxByteSize,
       });
+    }
+    if (request.fileName.length > 255 || request.fileName.includes('\0')) {
+      throw validationError('Attachment fileName is outside the configured bound');
+    }
+
+    if (request.purpose !== undefined && !['input', 'source', 'material'].includes(request.purpose)) {
+      throw validationError('Unsupported attachment purpose', { purpose: request.purpose });
     }
 
     const route = `POST /reels/${reelId}/attachments/initiate`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
       await this.loadReel(tx, reelId);
       const storageKey = `reels/${reelId}/${request.attachmentId}`;
-      const rows = await tx.query<AttachmentRow>(
-        `insert into app.attachments (id, reel_id, purpose, kind, label, state, file_name, mime_type, byte_size, storage_key)
-         values ($1, $2, $3, 'image', $4, 'pending', $4, $5, $6, $7)
-         on conflict (id) do update set storage_key = excluded.storage_key
-         returning id, reel_id, purpose, kind, label, url, storage_key, state`,
+      await tx.query(
+        `insert into app.attachments (id, reel_id, purpose, kind, label, state, file_name, mime_type, byte_size)
+         values ($1, $2, $3, 'image', $4, 'pending', $4, $5, $6)
+         on conflict (id) do nothing`,
         [
           request.attachmentId, reelId, request.purpose ?? 'input',
-          request.fileName, request.mimeType, request.byteSize, storageKey,
+          request.fileName, request.mimeType, request.byteSize,
         ],
       );
-      // The browser needs somewhere to PUT the bytes. Minting the signed URL inside
-      // the idempotent body means a replayed initiate returns the same recorded
-      // result rather than issuing a second URL.
+      const selected = await tx.query<AttachmentUploadRow>(
+        `select a.id, a.reel_id, a.purpose, a.kind, a.label, a.url, a.storage_key, a.state,
+                a.file_name, a.mime_type, a.byte_size, a.upload_actor_id,
+                a.upload_token_digest, a.upload_token_expires_at,
+                a.validated_mime_type, a.validated_width, a.validated_height,
+                a.validated_pixel_count
+         from app.attachments a where a.id = $1 for update`,
+        [request.attachmentId],
+      );
+      const row = selected.rows[0];
+      if (!row || row.reel_id !== reelId) throw validationError('Attachment id is already in use');
+      if (row.state !== 'pending') throw validationError('Attachment is not pending');
+      if (row.storage_key !== null) {
+        // Same-operation retries replay above. A new operation cannot silently
+        // mint another ticket; transport renewal has its own endpoint.
+        throw validationError('Attachment upload was already initiated');
+      }
+      const purpose = request.purpose ?? row.purpose;
+      if (row.kind !== 'image' || row.file_name !== request.fileName || row.mime_type !== request.mimeType
+          || Number(row.byte_size) !== request.byteSize || row.purpose !== purpose) {
+        throw validationError('Initiation metadata does not match the pending attachment');
+      }
+
       const upload = await storage.createSignedUpload(storageKey, {
         mimeType: request.mimeType,
         byteSize: request.byteSize,
+        scope: { actorId: actor.id, reelId, attachmentId: request.attachmentId },
       });
-      return { attachment: toAttachment(rows.rows[0]), storageKey, upload };
+      const token = upload.headers[UPLOAD_TOKEN_HEADER];
+      if (!token || token.length > 512 || !Number.isInteger(upload.expiresAt)) {
+        throw new Error('Storage adapter returned an invalid upload authorization');
+      }
+      await tx.query(
+        `update app.attachments
+         set storage_key = $1, upload_actor_id = $2, upload_token_digest = $3,
+             upload_token_expires_at = to_timestamp($4), upload_authorized_at = now()
+         where id = $5 and reel_id = $6`,
+        [storageKey, actor.id, digestUploadToken(token), upload.expiresAt, request.attachmentId, reelId],
+      );
+      return { attachment: toAttachment({ ...row, storage_key: storageKey }), storageKey, upload };
     });
   }
 
-  /**
-   * Complete an upload only once the storage backend confirms the object exists
-   * and its observed size matches what was declared. A client assertion alone never
-   * moves an attachment to `ready`.
-   */
+  async renewAttachmentUpload(
+    actor: Actor,
+    reelId: string,
+    attachmentId: string,
+    storage: StorageAdapter,
+  ): Promise<{ upload: SignedUpload }> {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.query<AttachmentUploadRow & { deleted_at: Date | string | null }>(
+        `select a.id, a.reel_id, a.purpose, a.kind, a.label, a.url, a.storage_key, a.state,
+                a.file_name, a.mime_type, a.byte_size, a.upload_actor_id,
+                a.upload_token_digest, a.upload_token_expires_at,
+                a.validated_mime_type, a.validated_width, a.validated_height,
+                a.validated_pixel_count, r.deleted_at
+         from app.attachments a join app.reels r on r.id = a.reel_id
+         where a.id = $1 and a.reel_id = $2 for update`,
+        [attachmentId, reelId],
+      );
+      const row = rows.rows[0];
+      if (!row || row.deleted_at !== null) throw notFound('Pending attachment not found');
+      if (row.state !== 'pending' || row.storage_key === null || row.mime_type === null || row.byte_size === null) {
+        throw uploadIncomplete('Attachment is not available for upload authorization renewal');
+      }
+      if (row.upload_actor_id !== actor.id) throw forbidden('Upload authorization belongs to another user');
+      const upload = await storage.createSignedUpload(row.storage_key, {
+        mimeType: row.mime_type,
+        byteSize: Number(row.byte_size),
+        scope: { actorId: actor.id, reelId, attachmentId },
+      });
+      const token = upload.headers[UPLOAD_TOKEN_HEADER];
+      if (!token || token.length > 512 || !Number.isInteger(upload.expiresAt)) {
+        throw new Error('Storage adapter returned an invalid upload authorization');
+      }
+      await tx.query(
+        `update app.attachments
+         set upload_token_digest = $1, upload_token_expires_at = to_timestamp($2),
+             upload_authorized_at = now()
+         where id = $3 and reel_id = $4`,
+        [digestUploadToken(token), upload.expiresAt, attachmentId, reelId],
+      );
+      return { upload };
+    });
+  }
+
+  async authorizeAttachmentUpload(
+    actor: Actor,
+    reelId: string,
+    attachmentId: string,
+    token: string,
+    now: Date = new Date(),
+  ): Promise<AttachmentUploadPlan> {
+    const rows = await this.db.query<AttachmentUploadRow & { deleted_at: Date | string | null }>(
+      `select a.id, a.reel_id, a.purpose, a.kind, a.label, a.url, a.storage_key, a.state,
+              a.file_name, a.mime_type, a.byte_size, a.upload_actor_id,
+              a.upload_token_digest, a.upload_token_expires_at,
+              a.validated_mime_type, a.validated_width, a.validated_height,
+              a.validated_pixel_count, r.deleted_at
+       from app.attachments a join app.reels r on r.id = a.reel_id
+       where a.id = $1 and a.reel_id = $2`,
+      [attachmentId, reelId],
+    );
+    const row = rows.rows[0];
+    if (!row || row.deleted_at !== null) throw notFound('Pending attachment not found');
+    if (row.state !== 'pending' || row.storage_key === null || row.mime_type === null || row.byte_size === null) {
+      throw uploadIncomplete('Attachment is not pending an upload');
+    }
+    if (row.upload_actor_id !== actor.id) throw forbidden('Upload authorization belongs to another user');
+    if (typeof token !== 'string' || token.length < 32 || token.length > 512 || row.upload_token_digest === null) {
+      throw forbidden('Upload authorization is invalid');
+    }
+    const supplied = Buffer.from(digestUploadToken(token), 'hex');
+    const expected = Buffer.from(row.upload_token_digest, 'hex');
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+      throw forbidden('Upload authorization is invalid');
+    }
+    const expiresAt = row.upload_token_expires_at === null
+      ? Number.NaN : new Date(row.upload_token_expires_at).getTime();
+    if (!Number.isFinite(expiresAt) || now.getTime() >= expiresAt) {
+      throw new CoreError({
+        status: 422,
+        code: 'UPLOAD_INCOMPLETE',
+        message: 'Upload authorization expired',
+        details: { reason: 'upload_authorization_expired' },
+      });
+    }
+    return {
+      actorId: actor.id,
+      reelId,
+      attachmentId,
+      storageKey: row.storage_key,
+      mimeType: row.mime_type,
+      byteSize: Number(row.byte_size),
+      expiresAt: new Date(expiresAt),
+    };
+  }
+
+  async recordValidatedAttachmentUpload(plan: AttachmentUploadPlan, object: ValidatedStoredObject): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const rows = await tx.query<AttachmentUploadRow & { deleted_at: Date | string | null }>(
+        `select a.id, a.reel_id, a.purpose, a.kind, a.label, a.url, a.storage_key, a.state,
+                a.file_name, a.mime_type, a.byte_size, a.upload_actor_id,
+                a.upload_token_digest, a.upload_token_expires_at,
+                a.validated_mime_type, a.validated_width, a.validated_height,
+                a.validated_pixel_count, r.deleted_at
+         from app.attachments a join app.reels r on r.id = a.reel_id
+         where a.id = $1 and a.reel_id = $2 for update`,
+        [plan.attachmentId, plan.reelId],
+      );
+      const row = rows.rows[0];
+      if (!row || row.deleted_at !== null || row.state !== 'pending' || row.storage_key !== plan.storageKey
+          || row.upload_actor_id !== plan.actorId) {
+        throw uploadIncomplete('Attachment changed while the upload was in progress');
+      }
+      if (row.mime_type !== object.mimeType || Number(row.byte_size) !== object.byteSize) {
+        throw uploadIncomplete('Validated object does not match declared attachment metadata');
+      }
+      if (row.validated_mime_type !== null
+          && (row.validated_mime_type !== object.mimeType || Number(row.validated_width) !== object.width
+            || Number(row.validated_height) !== object.height || Number(row.validated_pixel_count) !== object.pixelCount)) {
+        throw uploadIncomplete('A different validated object is already associated with this attachment');
+      }
+      await tx.query(
+        `update app.attachments
+         set validated_mime_type = $1, validated_width = $2, validated_height = $3,
+             validated_pixel_count = $4, validated_at = now()
+         where id = $5 and reel_id = $6`,
+        [object.mimeType, object.width, object.height, object.pixelCount, plan.attachmentId, plan.reelId],
+      );
+    });
+  }
+
   async completeAttachment(
     actor: Actor, reelId: string, attachmentId: string,
     request: { operationId: string },
@@ -763,9 +929,12 @@ export class CoreRepository {
   ): Promise<AttachmentReference> {
     const route = `POST /reels/${reelId}/attachments/${attachmentId}/complete`;
     return this.idempotent(actor, request.operationId, route, { ...request, attachmentId }, async (tx) => {
-      const rows = await tx.query<AttachmentRow & { storage_key: string | null; byte_size: string | null }>(
-        `select id, reel_id, purpose, kind, label, url, storage_key, state, byte_size
-         from app.attachments where id = $1 and reel_id = $2`,
+      const rows = await tx.query<AttachmentUploadRow>(
+        `select id, reel_id, purpose, kind, label, url, storage_key, state,
+                file_name, mime_type, byte_size, upload_actor_id, upload_token_digest,
+                upload_token_expires_at, validated_mime_type, validated_width,
+                validated_height, validated_pixel_count
+         from app.attachments where id = $1 and reel_id = $2 for update`,
         [attachmentId, reelId],
       );
       const row = rows.rows[0];
@@ -780,6 +949,15 @@ export class CoreRepository {
         // A size mismatch is surfaced, not accepted as close enough.
         throw uploadIncomplete('Stored object size does not match the declared byteSize');
       }
+      if (row.validated_mime_type === null) {
+        // Legacy doubles have size-only evidence. The VPS filesystem always sets
+        // validated metadata before complete; it cannot acknowledge a size-only file.
+        if (storage.writeObject && storage.openObject) {
+          throw uploadIncomplete('Uploaded object has not completed image validation');
+        }
+      } else if (observed.mimeType !== undefined && observed.mimeType !== row.validated_mime_type) {
+        throw uploadIncomplete('Stored object type changed after validation');
+      }
 
       const updated = await tx.query<AttachmentRow>(
         `update app.attachments
@@ -791,11 +969,69 @@ export class CoreRepository {
       return toAttachment(updated.rows[0]);
     });
   }
+
+  async resolveAttachmentDownload(
+    actor: Actor,
+    reelId: string,
+    attachmentId: string,
+  ): Promise<AttachmentDownloadPlan> {
+    void actor; // Both authenticated allowlisted users share Reel attachments.
+    const rows = await this.db.query<AttachmentUploadRow>(
+      `select id, reel_id, purpose, kind, label, url, storage_key, state,
+              file_name, mime_type, byte_size, upload_actor_id, upload_token_digest,
+              upload_token_expires_at, validated_mime_type, validated_width,
+              validated_height, validated_pixel_count
+       from app.attachments where id = $1 and reel_id = $2`,
+      [attachmentId, reelId],
+    );
+    const row = rows.rows[0];
+    if (!row || row.state !== 'ready' || row.storage_key === null || row.validated_mime_type === null) {
+      throw notFound('Ready attachment not found');
+    }
+    return {
+      storageKey: row.storage_key,
+      fileName: row.file_name ?? row.label,
+      mimeType: row.validated_mime_type,
+      byteSize: Number(row.byte_size),
+    };
+  }
+}
+
+interface AttachmentUploadRow extends AttachmentRow {
+  file_name: string | null;
+  mime_type: string | null;
+  byte_size: string | number | null;
+  upload_actor_id: string | null;
+  upload_token_digest: string | null;
+  upload_token_expires_at: Date | string | null;
+  validated_mime_type: string | null;
+  validated_width: number | null;
+  validated_height: number | null;
+  validated_pixel_count: string | number | null;
+}
+
+export interface AttachmentUploadPlan {
+  actorId: string;
+  reelId: string;
+  attachmentId: string;
+  storageKey: string;
+  mimeType: string;
+  byteSize: number;
+  expiresAt: Date;
+}
+
+export interface AttachmentDownloadPlan {
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
 }
 
 export interface AttachmentLimits {
   maxByteSize: number;
   allowedMimeTypes: string[];
+  maxPixelCount: number;
+  maxDimension: number;
 }
 
 /**
@@ -810,4 +1046,6 @@ export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
   // Lightweight input images only; large production media belongs to kDrive.
   maxByteSize: 8 * 1024 * 1024,
   allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  maxPixelCount: 40_000_000,
+  maxDimension: 20_000,
 };
