@@ -6,6 +6,7 @@ import type { ApiError, ErrorResponse } from '@szronox/contracts';
 
 import { registerAuthRoutes, type AuthRouteDependencies } from './auth/routes.js';
 import { type CoreDependencies, registerCoreRoutes } from './core/routes.js';
+import { type ReadinessTracker, unconfiguredReadiness } from './runtime/readiness.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,11 +31,40 @@ export interface BuildAppOptions {
    * half-registered against a missing database.
    */
   core?: CoreDependencies;
+  /**
+   * Application readiness. Omitting it means this app is a scaffold, and
+   * `/api/v1/ready` says so: a scaffold can never report ready, so a healthy
+   * liveness response cannot be mistaken for a working application.
+   */
+  readiness?: ReadinessTracker;
+  /**
+   * Fastify logger options. `false` — the default — keeps the historical silent app
+   * that the existing suites expect. The real process passes redacting options from
+   * `runtime/logging.ts`; a plain `true` here would log whole header sets, session
+   * cookie included.
+   */
+  logger?: BuildAppLoggerOptions;
 }
 
+/** Whatever Fastify accepts for `logger`. Narrowed only to keep app.ts driver-free. */
+export type BuildAppLoggerOptions = false | Record<string, unknown>;
+
 export function buildApp(options: BuildAppOptions = {}) {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: (options.logger ?? false) as never });
+
+  // Liveness. Answers only "this process is serving HTTP", which is all it has ever
+  // answered; the scaffold answers it too, which is why readiness is separate.
   app.get('/api/v1/health', async () => ({ status: 'ok' as const }));
+
+  // Readiness. 503 until the runtime composed successfully, and 503 again if a
+  // dependency stops answering afterwards. Deliberately unauthenticated: a probe
+  // cannot hold a session, and the body carries no identity, roster or secret —
+  // only a machine-readable reason and per-check outcomes.
+  const readiness = options.readiness ?? unconfiguredReadiness();
+  app.get('/api/v1/ready', async (_request, reply) => {
+    const report = await readiness.report();
+    return reply.code(report.status === 'ready' ? 200 : 503).header('cache-control', 'no-store').send(report);
+  });
 
   // Registered BEFORE the static plugins and the not-found handler, so a core route
   // is matched by its own handler rather than falling through to the SPA fallback.

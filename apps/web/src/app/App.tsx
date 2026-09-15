@@ -6,6 +6,7 @@ import type { BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
 import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
+import type { AttachmentRecovery } from '../data/attachment-recovery.js';
 import { useAppController } from '../controllers/useAppController.js';
 import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
@@ -22,8 +23,8 @@ import {
   type VerificationViewState,
 } from '../ui/screen-contracts.js';
 
-export function App({ auth, api, store, queue }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue }) {
-  const c = useAppController(auth, api, store, queue);
+export function App({ auth, api, store, queue, attachments }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue; attachments: AttachmentRecovery }) {
+  const c = useAppController(auth, api, store, queue, attachments);
   const [publicationExpanded, setPublicationExpanded] = useState(false);
   const [openSelector, setOpenSelector] = useState<MetadataSelector | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);

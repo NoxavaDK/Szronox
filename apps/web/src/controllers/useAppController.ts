@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CaptureImageDescriptor, Reel, ReelPatchRequest, ReelStatus, User } from '../../../../packages/contracts/src/index.js';
 import type { AuthStatus, BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
+import type { AttachmentRecovery, AttachmentProgress } from '../data/attachment-recovery.js';
 import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { composePublicationText } from '../data/publication.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
@@ -29,7 +30,7 @@ export interface CaptureForm {
   draft: CaptureDraft; kind: 'image' | 'url' | 'text'; blobs: Map<string, Blob>; showAdditional: boolean; showHook: boolean;
 }
 
-export function useAppController(auth: BrowserSession, api: CoreApiClient, store: DraftStore, queue: SyncQueue) {
+export function useAppController(auth: BrowserSession, api: CoreApiClient, store: DraftStore, queue: SyncQueue, attachments: AttachmentRecovery) {
   const [user, setUser] = useState<User | null>(auth.current()?.user ?? null);
   const [peer, setPeer] = useState<User | null>(auth.current()?.peer ?? null);
   const [authStatus, setAuthStatus] = useState<AuthStatus>(auth.state().status);
@@ -47,6 +48,25 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const currentRef = useRef<Reel | null>(null);
   const pendingPatch = useRef<{ reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | null>(null);
   useEffect(() => { currentRef.current = current; }, [current]);
+
+  /**
+   * Report attachment progress.
+   *
+   * Silence on an outstanding attachment would be the worst outcome: the user would
+   * believe their image was saved while the bytes are still only on this device. An
+   * abandoned run says nothing, because the account changed and the work belongs to
+   * the previous one.
+   */
+  const reportAttachments = useCallback((results: readonly AttachmentProgress[]) => {
+    const outstanding = results
+      .filter((result) => !result.abandoned)
+      .reduce((total, result) => total + result.outstanding.length, 0);
+    if (outstanding > 0) {
+      setMessage(outstanding === 1
+        ? 'Jedno zdjęcie czeka jeszcze na wysłanie. Zostało zapisane na tym urządzeniu.'
+        : `${outstanding} zdjęcia czekają jeszcze na wysłanie. Zostały zapisane na tym urządzeniu.`);
+    }
+  }, []);
 
   /**
    * Re-derive who we are from the server, then resume queued work.
@@ -68,11 +88,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       const me = await api.me();
       setUser(me.user); setPeer(me.peer);
       await queue.flush();
+      // Only after the queue: an image cannot be uploaded to a Reel the server has
+      // not created yet, and the create operation lives in the queue.
+      reportAttachments(await attachments.resume(me.user.id));
     } catch (error) {
       if (isAbandonedRequest(error)) return;
       setMessage(polishError(error));
     }
-  }, [api, auth, queue]);
+  }, [api, attachments, auth, queue, reportAttachments]);
 
   useEffect(() => auth.subscribe((state) => {
     setAuthStatus(state.status);
@@ -141,9 +164,17 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       await store.enqueue({ id: capture.draft.operationId, accountId: user.id, kind: 'create', reelId: capture.draft.reelId, createdAt: Date.now(), state: 'pending', payload: { operationId: capture.draft.operationId, reelId: capture.draft.reelId, input: capture.draft.input, initialHook: capture.draft.initialHook || undefined, priority: capture.draft.priority } });
       await queue.flush(); const remaining = await store.queue(user.id); const item = remaining.find((x) => x.id === capture.draft.operationId);
       if (item) { setSaveState(item.state === 'conflict' ? 'conflict' : navigator.onLine ? 'error' : 'offline'); return; }
+      // The Reel exists now, so the images can go. The draft and its blobs stay until
+      // the server acknowledges each attachment, so leaving this screen — or closing
+      // the tab mid-upload — loses nothing and the next recovery pass resumes with the
+      // same attachment and operation ids.
+      const progress = capture.draft.input.images.length === 0
+        ? []
+        : [await attachments.runCapture({ ...capture.draft, state: 'queued' })];
       setSaveState('saved'); setCapture(null); setRoute({ name: 'list' });
+      reportAttachments(progress);
     } catch (error) { if (isAbandonedRequest(error)) return; setSaveState('error'); setMessage(polishError(error)); }
-  }, [capture, queue, store, user]);
+  }, [attachments, capture, queue, reportAttachments, store, user]);
 
   const changeReel = useCallback((changes: ReelPatchRequest['changes']) => {
     const reel = currentRef.current;

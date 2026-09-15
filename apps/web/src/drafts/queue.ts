@@ -17,7 +17,12 @@ export class SyncQueue {
         try {
           await this.execute(running);
           await this.store.deleteQueue(item.id);
-          if (item.kind === 'create') await this.store.deleteCapture(accountId, item.reelId);
+          // A created Reel deliberately leaves its capture draft in place. The draft is
+          // the only index of the local image blobs, and those blobs are the only copy
+          // until the server acknowledges each attachment's completion. Deleting the
+          // draft here — as this queue previously did — discarded that index while the
+          // bytes had not been uploaded at all, which made recovery impossible. The
+          // controller removes the draft once every attachment is authoritatively ready.
           if (item.kind === 'patch') await this.store.deleteReel(accountId, item.reelId);
         } catch (error) {
           if (error instanceof ClientApiError && error.status === 401) { await this.store.updateQueue({ ...item, state: 'pending', error: error.api.code }); break; }

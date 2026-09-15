@@ -5,6 +5,7 @@ import { App } from './app/App.js';
 import { BrowserSession } from './auth/session.js';
 import { AuthTransport } from './auth/transport.js';
 import { CoreApiClient } from './data/api.js';
+import { AttachmentRecovery } from './data/attachment-recovery.js';
 import { DraftStore } from './drafts/store.js';
 import { SyncQueue } from './drafts/queue.js';
 
@@ -22,7 +23,16 @@ const store = new DraftStore();
 // The queue's account comes from the server-confirmed session, so a flush cannot be
 // attributed to an account the server never acknowledged.
 const queue = new SyncQueue(store, api, () => auth.current()?.user.id ?? null);
+// Attachment recovery reads the active account from the same confirmed session, so a
+// late upload result can never be acknowledged against the other account's partition.
+const attachments = new AttachmentRecovery({
+  api,
+  store,
+  activeAccountId: () => auth.current()?.user.id ?? null,
+});
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><App auth={auth} api={api} store={store} queue={queue} /></StrictMode>,
+  <StrictMode>
+    <App auth={auth} api={api} store={store} queue={queue} attachments={attachments} />
+  </StrictMode>,
 );

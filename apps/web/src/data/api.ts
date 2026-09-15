@@ -1,6 +1,8 @@
 import type {
-  AddHookRequest, CreateReelRequest, EditHookRequest, ErrorResponse, Reel, ReelListQuery,
-  ReelPatchRequest, RemoveHookRequest, ReplaceExportRequest, User, VerifyExportRequest,
+  AddHookRequest, AttachmentReference, CompleteAttachmentRequest, CreateReelRequest, EditHookRequest,
+  ErrorResponse, InitiateAttachmentRequest, InitiateAttachmentResponse, Reel, ReelListQuery,
+  ReelPatchRequest, RemoveHookRequest, RenewAttachmentUploadResponse, ReplaceExportRequest,
+  UploadTransport, User, VerifyExportRequest,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
 
@@ -43,7 +45,17 @@ const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 export class CoreApiClient {
   constructor(private readonly session: SessionSource, private readonly baseUrl = '/api/v1') {}
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  /**
+   * `absolutePath` is for the upload ticket's own path, which the server already
+   * issued complete with the `/api/v1` prefix. Prefixing it again would produce a
+   * doubled path, and rewriting the server's path would be worse: the ticket is bound
+   * to that exact reel and attachment.
+   */
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    options: { absolutePath?: boolean } = {},
+  ): Promise<T> {
     const context = this.session.context();
     // No confirmed identity means no request. This is what keeps queued work from
     // being flushed against whichever account happens to log in next.
@@ -63,7 +75,7 @@ export class CoreApiClient {
       headers['X-CSRF-Token'] = context.csrfToken;
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await fetch(options.absolutePath ? path : `${this.baseUrl}${path}`, {
       ...init,
       // The session cookie is attached by the browser. Nothing here reads it, and
       // no Authorization header is ever sent.
@@ -114,4 +126,53 @@ export class CoreApiClient {
   restore = (id: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/restore`, { method: 'POST', body: JSON.stringify(body) });
   replaceExport = (id: string, body: ReplaceExportRequest) => this.request<Reel>(`/reels/${id}/current-export`, { method: 'POST', body: JSON.stringify(body) });
   verifyExport = (id: string, body: VerifyExportRequest) => this.request<Reel>(`/reels/${id}/verification`, { method: 'POST', body: JSON.stringify(body) });
+
+  // ── Private attachment transport ───────────────────────────────────────────
+  //
+  // Three separate operations rather than one upload call, because the server treats
+  // them as three: initiation reserves an id and a ticket, the PUT moves bytes, and
+  // only completion acknowledges. Collapsing them would hide the one boundary the
+  // client must respect — a transferred byte is not an acknowledged attachment.
+
+  initiateAttachment = (reelId: string, body: InitiateAttachmentRequest) =>
+    this.request<InitiateAttachmentResponse>(
+      `/reels/${encodeURIComponent(reelId)}/attachments/initiate`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+
+  /** Renews transport only. It creates no attachment and changes no version history. */
+  renewAttachmentUpload = (reelId: string, attachmentId: string) =>
+    this.request<RenewAttachmentUploadResponse>(
+      `/reels/${encodeURIComponent(reelId)}/attachments/${encodeURIComponent(attachmentId)}/upload-authorization`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+
+  completeAttachment = (reelId: string, attachmentId: string, body: CompleteAttachmentRequest) =>
+    this.request<AttachmentReference>(
+      `/reels/${encodeURIComponent(reelId)}/attachments/${encodeURIComponent(attachmentId)}/complete`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+
+  /**
+   * Raw bytes, on the server's own upload path.
+   *
+   * `path` is an already-validated same-origin path, not a URL: the caller checks the
+   * origin before this method attaches the session cookie and the CSRF token. The
+   * blob is passed straight to `fetch` so the browser streams it rather than the page
+   * copying a large image into a string first.
+   *
+   * It goes through the same `request` funnel as every other call, so it inherits the
+   * CSRF header, the same-origin credential mode, the abort signal and the stale
+   * generation check, and returns nothing because the server answers 204.
+   */
+  uploadAttachmentContent = (
+    path: string,
+    blob: Blob,
+    options: { method: UploadTransport['method']; headers: Record<string, string> },
+  ) => this.request<void>(path, {
+    method: options.method,
+    // Not JSON: `request` only sets a JSON content type when it was not given one.
+    headers: options.headers,
+    body: blob,
+  }, { absolutePath: true });
 }

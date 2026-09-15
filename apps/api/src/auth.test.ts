@@ -850,8 +850,14 @@ test('the throttle table is bounded and forgets expired windows', () => {
   const before = throttle.peek('b');
   assert.deepEqual(throttle.peek('b'), before);
 
-  assert.equal(DEFAULT_ADDRESS_THROTTLE.limit, 10);
+  // The reconciled pins: 20 attempts per address and 5 failures per account, both over a
+  // 15-minute window. This assertion still read 10 after the reconciliation raised the
+  // address limit, so the suite had been failing on the baseline; the pinned value is
+  // authoritative and the assertion is corrected to match it.
+  assert.equal(DEFAULT_ADDRESS_THROTTLE.limit, 20);
+  assert.equal(DEFAULT_ADDRESS_THROTTLE.windowMs, 15 * 60 * 1000);
   assert.equal(DEFAULT_ACCOUNT_THROTTLE.limit, 5);
+  assert.equal(DEFAULT_ACCOUNT_THROTTLE.windowMs, 15 * 60 * 1000);
 });
 
 // ══════════════════════════ provisioning ════════════════════════════════════
