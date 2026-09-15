@@ -218,6 +218,64 @@ test('readiness stops reporting ready when a dependency it named goes away', asy
   }
 });
 
+test('readiness never returns a driver message to an unauthenticated caller', async () => {
+  // VPS-06 found this on the live deployment: with PostgreSQL stopped, the public
+  // /api/v1/ready returned {"reason":"getaddrinfo ENOTFOUND postgres"} — the driver's own
+  // message, naming an internal host, to anybody who asked. /ready is unauthenticated by
+  // design, so the body must carry a code and nothing else.
+  const context = await assemble();
+  const logged: Array<{ check: string; detail: string }> = [];
+  try {
+    context.readiness.markReady();
+    assert.equal((await context.app.inject({ method: 'GET', url: '/api/v1/ready' })).statusCode, 200);
+
+    // A tracker whose database is gone, with a sink for the detail.
+    const broken = runtimeReadiness({
+      db: {
+        query: () => Promise.reject(new Error('getaddrinfo ENOTFOUND postgres')),
+        execScript: () => Promise.reject(new Error('unused')),
+        transaction: () => Promise.reject(new Error('unused')),
+        close: () => Promise.resolve(),
+      },
+      expectedUsers: ALLOWLIST,
+      onFailure: (check, detail) => logged.push({ check, detail }),
+    });
+    broken.markReady();
+    const unreachable = await broken.report();
+    assert.equal(unreachable.status, 'not_ready');
+    assert.equal(unreachable.reason, 'roster_unavailable', 'a code, not the driver message');
+    assert.ok(!JSON.stringify(unreachable).includes('ENOTFOUND'), 'the driver message must not be in the body');
+    assert.ok(!JSON.stringify(unreachable).includes('postgres'), 'no internal hostname in the body');
+    // The operator still gets the cause, server-side.
+    assert.deepEqual(logged.map((entry) => entry.check), ['roster']);
+    assert.match(logged[0].detail, /ENOTFOUND postgres/);
+
+    // A failing probe names itself without describing the failure. The roster must still
+    // be intact here, or it would fail first and the probe would never run.
+    const probeFailure = runtimeReadiness({
+      db: context.db,
+      expectedUsers: ALLOWLIST,
+      probes: { storage: { check: () => Promise.reject(new Error('/var/lib/szronox/storage: EACCES')) } },
+    });
+    probeFailure.markReady();
+    const probeReport = await probeFailure.report();
+    assert.equal(probeReport.checks.roster, 'pass', 'the roster must pass so the probe is reached');
+    assert.equal(probeReport.reason, 'storage_unavailable');
+    assert.ok(!JSON.stringify(probeReport).includes('EACCES'));
+    assert.ok(!JSON.stringify(probeReport).includes('/var/lib'), 'no filesystem path in the body');
+
+    // A reachable database with a broken roster is a different code, because it needs a
+    // different response: provision, not restart. Done last, since it breaks the roster.
+    await context.db.query('delete from app.users where id = $1', [SZRON.id]);
+    const incomplete = await context.readiness.report();
+    assert.equal(incomplete.reason, 'roster_incomplete');
+    assert.equal(incomplete.checks.roster, 'fail');
+  } finally {
+    await context.close();
+    await rm(context.parent, { recursive: true, force: true });
+  }
+});
+
 test('a missing dependency fails truthfully instead of degrading', async () => {
   // Storage: no root at all, and no silent fallback to the memory adapter.
   assert.throws(() => buildStorage({ APP_ORIGIN: TEST_ORIGIN }), ConfigError);

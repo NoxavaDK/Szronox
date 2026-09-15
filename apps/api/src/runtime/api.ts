@@ -92,6 +92,12 @@ export async function composeApiRuntime(env: ApiRuntimeEnv): Promise<ApiRuntime>
       probes: env.STORAGE_DRIVER === 'memory' || !env.APP_STORAGE_ROOT
         ? {}
         : { storage: storageRootProbe(env.APP_STORAGE_ROOT) },
+      // The response carries only a code; the operator still needs the cause. VPS-06 found
+      // /ready returning the driver's own message to unauthenticated public callers, so the
+      // detail goes here instead of into the body.
+      onFailure(check, detail) {
+        process.stderr.write(`readiness check ${check} failed: ${detail}\n`);
+      },
     });
 
     let closed = false;

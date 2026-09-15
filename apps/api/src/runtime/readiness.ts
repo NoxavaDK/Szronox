@@ -20,13 +20,50 @@ import path from 'node:path';
 
 import type { Database } from '../db/client.js';
 
+/**
+ * The complete set of reasons `/api/v1/ready` will report.
+ *
+ * Closed on purpose. VPS-06 found the endpoint returning the driver's own message —
+ * `getaddrinfo ENOTFOUND postgres` — to unauthenticated callers, and `/ready` is
+ * publicly reachable through the reverse proxy. That told anyone who asked the internal
+ * hostname and the shape of the failure, which is exactly what this module's own
+ * documentation said it would never do.
+ *
+ * The distinction that matters operationally is kept: "we cannot reach the database" and
+ * "the database answered but the roster is wrong" are different codes, because they need
+ * different responses. The underlying message still exists — it goes to the server log
+ * through `onFailure`, where the operator can read it and a stranger cannot.
+ */
+export type ReadinessReason =
+  | 'starting'
+  | 'shutting_down'
+  | 'not_ready'
+  | 'runtime_not_configured'
+  /** The roster query did not complete: connection, permission or timeout. */
+  | 'roster_unavailable'
+  /** The database answered, but the two provisioned users are not both usable. */
+  | 'roster_incomplete'
+  /** A named probe did not complete. Suffixed with the probe's name. */
+  | `${string}_unavailable`;
+
+/** A roster problem that is about content rather than reachability. */
+export class RosterIncompleteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RosterIncompleteError';
+  }
+}
+
 export type ReadinessPhase = 'starting' | 'ready' | 'failed' | 'stopping';
 
 export interface ReadinessReport {
   status: 'ready' | 'not_ready';
   phase: ReadinessPhase;
-  /** Machine-readable cause when not ready. Never a driver message or a secret. */
-  reason: string | null;
+  /**
+   * Machine-readable cause when not ready, from a closed vocabulary. Never a driver
+   * message, a hostname or a secret: this body is returned to unauthenticated callers.
+   */
+  reason: ReadinessReason | null;
   checks: Record<string, 'pass' | 'fail' | 'skipped'>;
 }
 
@@ -38,7 +75,7 @@ export interface ReadinessProbe {
 export interface ReadinessTracker {
   phase(): ReadinessPhase;
   markReady(): void;
-  markFailed(reason: string): void;
+  markFailed(reason: ReadinessReason): void;
   markStopping(): void;
   report(): Promise<ReadinessReport>;
 }
@@ -49,7 +86,7 @@ export interface ReadinessTracker {
  * Used when `buildApp()` is called with no runtime, so a scaffold process cannot be
  * mistaken for a configured one by anything that asks the right question.
  */
-export function unconfiguredReadiness(reason = 'runtime_not_configured'): ReadinessTracker {
+export function unconfiguredReadiness(reason: ReadinessReason = 'runtime_not_configured'): ReadinessTracker {
   return {
     phase: () => 'failed',
     markReady() { throw new Error('the unconfigured readiness tracker cannot become ready'); },
@@ -68,6 +105,11 @@ export interface RuntimeReadinessOptions {
   probes?: Record<string, ReadinessProbe>;
   /** Upper bound for the whole probe set, so /ready cannot hang behind a stuck query. */
   timeoutMs?: number;
+  /**
+   * Where the detail goes instead of into the response. The operator needs the driver's
+   * message to fix the problem; a stranger asking /ready does not get to see it.
+   */
+  onFailure?(check: string, detail: string): void;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -83,7 +125,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export function runtimeReadiness(options: RuntimeReadinessOptions): ReadinessTracker {
   const timeoutMs = options.timeoutMs ?? 2_000;
   let phase: ReadinessPhase = 'starting';
-  let failureReason: string | null = null;
+  let failureReason: ReadinessReason | null = null;
 
   /**
    * One statement for both facts, so the roster and the connection are observed in
@@ -96,12 +138,17 @@ export function runtimeReadiness(options: RuntimeReadinessOptions): ReadinessTra
          left join app.user_credentials c on c.user_id = u.id
         order by u.name`,
     );
-    if (result.rows.length !== 2) throw new Error(`roster has ${result.rows.length} users`);
+    // Past this point the database answered, so anything wrong is about content. The
+    // distinction is what decides whether an operator restarts a database or runs the
+    // provisioning command.
+    if (result.rows.length !== 2) {
+      throw new RosterIncompleteError(`roster has ${result.rows.length} users, expected 2`);
+    }
     for (const expected of options.expectedUsers) {
       const row = result.rows.find((candidate) => candidate.name === expected.name);
-      if (!row) throw new Error(`${expected.name} is missing`);
-      if (row.id !== expected.id) throw new Error(`${expected.name} id does not match configuration`);
-      if (!row.has_credential) throw new Error(`${expected.name} has no credential`);
+      if (!row) throw new RosterIncompleteError(`${expected.name} is missing`);
+      if (row.id !== expected.id) throw new RosterIncompleteError(`${expected.name} id does not match configuration`);
+      if (!row.has_credential) throw new RosterIncompleteError(`${expected.name} has no credential`);
     }
   }
 
@@ -126,13 +173,17 @@ export function runtimeReadiness(options: RuntimeReadinessOptions): ReadinessTra
         };
       }
 
-      let reason: string | null = null;
+      const detailOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+      let reason: ReadinessReason | null = null;
       try {
         await withTimeout(rosterCheck(), timeoutMs, 'roster check');
         checks.roster = 'pass';
       } catch (error) {
         checks.roster = 'fail';
-        reason = error instanceof Error ? error.message : 'roster check failed';
+        // Reachability versus content. Only the code leaves the process.
+        reason = error instanceof RosterIncompleteError ? 'roster_incomplete' : 'roster_unavailable';
+        options.onFailure?.('roster', detailOf(error));
       }
       for (const [name, probe] of Object.entries(options.probes ?? {})) {
         if (reason !== null) { checks[name] = 'skipped'; continue; }
@@ -141,7 +192,8 @@ export function runtimeReadiness(options: RuntimeReadinessOptions): ReadinessTra
           checks[name] = 'pass';
         } catch (error) {
           checks[name] = 'fail';
-          reason = error instanceof Error ? error.message : `${name} check failed`;
+          reason = `${name}_unavailable`;
+          options.onFailure?.(name, detailOf(error));
         }
       }
       return reason === null
