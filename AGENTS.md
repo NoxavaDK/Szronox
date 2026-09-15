@@ -21,3 +21,110 @@
 - Never print secrets. Live provider tests require configured test credentials; absent access is an explicit unverified gate, not a passing result.
 - Do not provision paid resources, change real kDrive production data, deploy or send messages. Spikes may use explicitly designated disposable test resources only.
 - Every handoff includes owned files, acceptance results, exact verification commands, remaining limitations and its commit ID if available. Do not merge your own branch.
+
+
+# TESTING / REVIEW BUDGET POLICY
+
+Avoid duplicate verification work.
+
+The purpose of Astra review is to catch integration risk, not to independently reproduce every test already run by a bounded implementation agent.
+
+## 1. TASK-LEVEL TESTING
+
+The implementation agent owns testing its own task against the task acceptance criteria.
+
+Before handoff it must provide:
+
+- exact commands run;
+- exact results;
+- changed files;
+- known limitations;
+- explicit UNVERIFIED gates;
+- commit ID.
+
+Do not ask a second model to rerun the entire task suite merely for independent confirmation.
+
+## 2. ASTRA REVIEW
+
+For a completed task, Astra should normally:
+
+- inspect the handoff;
+- inspect the diff/architecture boundaries;
+- verify that scope and contracts were respected;
+- run only a SMALL number of targeted checks where there is a concrete integration or correctness risk.
+
+Do not rerun:
+
+- the full task test suite;
+- full build/typecheck repeatedly;
+- external documentation research already resolved;
+- adversarial testing already performed by the implementation agent;
+
+unless there is a specific reason.
+
+If no concrete concern exists, accept the agent's recorded evidence provisionally and move to integration.
+
+## 3. INTEGRATION TESTING
+
+After several parallel tasks are integrated, test the INTEGRATED behavior rather than repeating each child task's isolated tests.
+
+Focus on:
+
+- interfaces between tasks;
+- migration compatibility;
+- shared dependencies;
+- runtime composition;
+- regressions caused by integration.
+
+Do not redo isolated evidence that integration did not affect.
+
+## 4. REAL-ENVIRONMENT GATES
+
+Browser/device/VPS/provider checks should happen once at the milestone where they become meaningful.
+
+Examples:
+
+- real PostgreSQL concurrency → VPS-06
+- real HTTPS/browser acceptance → VPS-07
+- installed Android Share Target → dedicated Android gate
+- live Gemini/provider behavior → AI/provider gate
+- live kDrive → dedicated kDrive gate
+
+Do not repeatedly attempt these gates in earlier tasks.
+
+## 5. RE-TEST ONLY ON TRIGGER
+
+A previously accepted area should be retested only if:
+
+- code affecting it changed;
+- integration exposes a failure;
+- a dependency/version changed materially;
+- a previously UNVERIFIED real-environment gate is now being executed;
+- there is a concrete defect hypothesis.
+
+"Independent confirmation" alone is not enough reason for another broad review.
+
+## 6. MODEL BUDGET
+
+Do not launch a separate high-reasoning reviewer for work already:
+
+- implemented;
+- acceptance-tested;
+- corrected;
+- handed off with evidence.
+
+Use high-reasoning models for unresolved architecture, security-sensitive implementation, difficult integration defects or ambiguous failures.
+
+## 7. REPORTING
+
+For every review, classify findings as:
+
+- BLOCKER
+- CORRECTION NEEDED
+- OPEN REAL-WORLD GATE
+- ACCEPTED / NO FURTHER TESTING NOW
+
+Do not turn an open real-world gate into repeated local testing.
+
+Default behavior after a clean bounded handoff:
+INTEGRATE, THEN TEST AT THE NEXT MEANINGFUL BOUNDARY.
