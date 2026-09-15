@@ -26,6 +26,11 @@ blocked on it. If it cannot observe that, it fails instead of falling back to th
 
 Do not run anything here against the live VPS. VPS-04 authorises no deployment.
 
+The operator sequence is fixed: (1) PostgreSQL is available and its runtime roles exist;
+(2) migrations complete; (3) the operator provisions and verifies exactly NOXAVA and
+SZRON; (4) grants and storage prerequisites complete, then the API starts; (5) the worker
+starts; (6) application readiness is checked. The commands below keep that order.
+
 This directory defines the disposable local `szronox-dev` Compose project used
 for VPS-03 preparation. It has a dedicated PostgreSQL instance, private Docker
 network and project-scoped volumes. It does not deploy to the VPS and it does
@@ -76,7 +81,7 @@ Application configuration, identical here and in `compose.yaml`:
 
 | Variable | Value | Note |
 | --- | --- | --- |
-| `APP_ORIGIN` | exact browser origin | one origin, no path, HTTPS except localhost |
+| `APP_ORIGIN` | required exact browser origin | one origin, no path, HTTPS except an explicit localhost development fixture; no Compose default |
 | `APP_CSRF_SECRET_FILE` | `/run/secrets/app_csrf_secret` | ≥ 32 characters; rotating it invalidates live sessions |
 | `APP_SESSION_TTL_SECONDS` | `604800` | absolute maximum, never extended by use |
 | `APP_STORAGE_ROOT` | `/var/lib/szronox/storage` | outside the served web tree |
@@ -102,12 +107,12 @@ export SZRONOX_DEV_POSTGRES_PASSWORD_FILE="$d/postgres"
 export SZRONOX_DEV_API_DB_PASSWORD_FILE="$d/api"
 export SZRONOX_DEV_WORKER_DB_PASSWORD_FILE="$d/worker"
 export SZRONOX_DEV_CSRF_SECRET_FILE="$d/csrf"
+# Explicit local-only fixture. VPS-05 supplies the actual HTTPS deployment origin.
+export APP_ORIGIN=http://localhost:3010
 
 docker compose -f deploy/vps/compose.yaml build
 docker compose -f deploy/vps/compose.yaml up -d --wait postgres
 docker compose -f deploy/vps/compose.yaml run --rm migrate
-docker compose -f deploy/vps/compose.yaml run --rm grants
-docker compose -f deploy/vps/compose.yaml run --rm storage-init
 ```
 
 Provision the two accounts before starting the API. It will refuse to start otherwise —
@@ -122,6 +127,15 @@ printf '%s' '{"NOXAVA":"local-only-password-1","SZRON":"local-only-password-2"}'
 # SZRON: user_created, credential_created
 ```
 
+Verify the ordinary rerun before any application process starts. Exactly two configured
+accounts must be reported, both with `credential_unchanged`; any mismatch is a stop:
+
+```bash
+printf '' | docker compose -f deploy/vps/compose.yaml run --rm -T provision
+# NOXAVA: user_unchanged, credential_unchanged
+# SZRON: user_unchanged, credential_unchanged
+```
+
 Rerunning it with no stdin input changes nothing and reports
 `credential_unchanged` — it does not need, and will not rotate, a password it already has.
 Changing one deliberately requires naming the account, and revokes that account's live
@@ -132,10 +146,15 @@ printf '%s' '{"NOXAVA":"new-local-only-password"}' \
   | docker compose -f deploy/vps/compose.yaml run --rm -T provision --replace NOXAVA
 ```
 
-Then start the processes and check **readiness**, not liveness:
+Apply the runtime grants and initialize private storage after provisioning and before
+their consumers start. Then start the API, start the worker, and only then check
+application readiness. These commands deliberately spell out the required order:
 
 ```bash
-docker compose -f deploy/vps/compose.yaml up -d --wait api worker
+docker compose -f deploy/vps/compose.yaml run --rm grants
+docker compose -f deploy/vps/compose.yaml run --rm storage-init
+docker compose -f deploy/vps/compose.yaml up -d api
+docker compose -f deploy/vps/compose.yaml up -d worker
 docker compose -f deploy/vps/compose.yaml ps
 
 # Liveness: answered by a scaffold with no database at all. Never treat it as readiness.
@@ -146,7 +165,10 @@ curl --fail http://127.0.0.1:3010/api/v1/health
 curl --fail http://127.0.0.1:3010/api/v1/ready
 ```
 
-The Compose healthcheck watches `/api/v1/ready` for the same reason.
+The Compose API healthcheck watches `/api/v1/ready` for the same reason. The worker also
+depends on the API container reaching its started state, so a combined Compose request
+cannot launch the worker before the API container has started. The operator still performs
+the readiness check only after both application processes have been started.
 
 The `storage-init` service is the only root container. It initializes only the
 named `app_storage` volume, creates `staging` and `objects`, and assigns those

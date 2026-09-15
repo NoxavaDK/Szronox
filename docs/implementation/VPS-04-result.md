@@ -249,3 +249,88 @@ adds 11 API tests and 10 browser tests and corrects that assertion.
 Root performs a bounded integration review and adjudicates the two shared-change items
 above. VPS-04 authorises no deployment, no DNS/TLS change, no VPS mutation, no paid
 resource, no kDrive access and no AI execution. VPS-05 remains a separate approval.
+
+---
+
+## Sol follow-up — approved clarification completion (2026-09-15)
+
+This section is the bounded `gpt-5.6-sol`/high follow-up approved after the Opus handoff.
+The original implementation and evidence above are preserved. No unaffected suite was
+rerun, no live service was contacted, and no VPS-05 work was started.
+
+### Corrections completed
+
+- **CORRECTION NEEDED — resolved:** Compose supplied an invented
+  `http://localhost:3010` default for `APP_ORIGIN`. It now requires an explicit value;
+  the runbook names localhost only as an explicit disposable-local fixture and leaves the
+  future HTTPS deployment hostname to VPS-05.
+- **CORRECTION NEEDED — resolved:** `composeApiRuntime` reached database setup before
+  validating `APP_ORIGIN`. It now rejects a missing or malformed exact origin before
+  opening the database pool. Authentication remains the authority that consumes the
+  validated exact origin for Origin/CSRF enforcement.
+- **CORRECTION NEEDED — resolved:** the runbook applied grants and storage setup before
+  provisioning, then requested API and worker startup together. It now explicitly orders
+  PostgreSQL availability, migrations, provision-and-rerun verification for exactly
+  NOXAVA/SZRON, grants and storage prerequisites, API startup, worker startup, then
+  readiness checks. Compose also requires the API container to have started before the
+  worker starts.
+
+### Follow-up owned files
+
+- `apps/api/src/runtime/api.ts`
+- `apps/api/src/runtime.test.ts`
+- `deploy/vps/compose.yaml`
+- `deploy/vps/README.md`
+- `docs/implementation/VPS-04-result.md`
+
+### Focused verification
+
+Run from `/Users/kubabilski/Desktop/SzroNox/.worktrees/vps-04-runtime`:
+
+```sh
+npm run typecheck --workspace @szronox/api
+# PASS
+
+npm run build --workspace @szronox/api
+# PASS
+
+node --test --test-name-pattern='runtime rejects missing or malformed APP_ORIGIN' \
+  apps/api/dist/runtime.test.js
+# PASS: 1/1
+
+git diff --check
+# PASS
+```
+
+A Ruby/Psych syntax probe was attempted but is not evidence: the macOS Ruby 2.6 parser
+rejects the pre-existing Compose flow scalar `security_opt: [no-new-privileges:true]`.
+PyYAML is not installed. Per the approved gate, Compose-model validation remains for
+VPS-05 rather than installing tooling or starting Docker here.
+
+```sh
+ruby -e 'require "yaml"; YAML.safe_load(File.read("deploy/vps/compose.yaml"), aliases: true); puts "compose.yaml YAML parse: PASS"'
+# NOT EVIDENCE: Psych::SyntaxError at the pre-existing security_opt flow scalar
+
+python3 -c 'import yaml; yaml.safe_load(open("deploy/vps/compose.yaml")); print("compose.yaml YAML parse: PASS")'
+# NOT RUN: ModuleNotFoundError: No module named 'yaml'
+```
+
+### Classified handoff
+
+- **BLOCKER:** none in the approved VPS-04 source-preparation scope.
+- **CORRECTION NEEDED:** none remaining from the approved APP_ORIGIN and startup-order
+  clarifications. The original blob-reclamation and API/worker runtime-duplication items
+  remain root-owned adjudications; this follow-up did not expand scope into either.
+- **OPEN REAL-WORLD GATE:** Linux image and Compose model/runtime; actual HTTPS
+  `APP_ORIGIN`; secret mounts; runtime role/grant behavior; filesystem UID/GID and
+  readiness healthcheck; operator CLI against server PostgreSQL; real PostgreSQL overlap;
+  browser HTTPS/cookie/upload/recovery; backup/restore. These stay at their already named
+  VPS-05, VPS-06 and VPS-07 boundaries.
+- **ACCEPTED / NO FURTHER TESTING NOW:** the unaffected Opus evidence above, including
+  runtime assembly, provisioning semantics, attachment transport/recovery and overlap
+  harness source, is accepted as recorded under the testing budget. No broad suite rerun
+  or early real-environment attempt is justified.
+
+The scaffold-only development mode remains live but permanently not ready. It is explicitly
+not an application runtime; every configured API runtime now requires and validates
+`APP_ORIGIN`, and Compose cannot supply or default it silently.

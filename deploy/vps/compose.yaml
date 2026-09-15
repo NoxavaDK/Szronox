@@ -159,8 +159,9 @@ services:
       PORT: "3000"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Must be the exact browser origin. The session cookie carries the __Host- prefix,
-      # so a real deployment is HTTPS; the localhost default exists for a local run only.
-      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3010}
+      # so a real deployment is HTTPS. There is deliberately no deployment hostname or
+      # localhost default here: the operator must supply the actual origin explicitly.
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the exact browser origin; VPS-05 supplies the HTTPS hostname}
       APP_STORAGE_ROOT: /var/lib/szronox/storage
       APP_CSRF_SECRET_FILE: /run/secrets/app_csrf_secret
       APP_SESSION_TTL_SECONDS: ${APP_SESSION_TTL_SECONDS:-604800}
@@ -205,6 +206,8 @@ services:
     depends_on:
       grants:
         condition: service_completed_successfully
+      api:
+        condition: service_started
     init: true
     command: [node, apps/worker/dist/index.js]
     environment:

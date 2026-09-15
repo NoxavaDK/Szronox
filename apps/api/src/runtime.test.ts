@@ -40,6 +40,7 @@ import { registerCoreRoutes } from './core/routes.js';
 import { type Database, pgliteDatabase } from './db/client.js';
 import { migrate } from './db/migrate.js';
 import { filesystemStorageAdapter, initializeDisposableStorageRoot } from './storage/filesystem.js';
+import { composeApiRuntime } from './runtime/api.js';
 import { buildLoggerOptions, parseLogLevel, REDACT_PATHS } from './runtime/logging.js';
 import { apiPrivilegeViolations, workerPrivilegeViolations, type RoleFacts } from './runtime/privileges.js';
 import { runtimeReadiness, storageRootProbe, unconfiguredReadiness } from './runtime/readiness.js';
@@ -141,6 +142,13 @@ const writeHeaders = (session: Session) => ({
 });
 
 // ══════════════════════ readiness versus liveness ═══════════════════════════
+
+test('runtime rejects missing or malformed APP_ORIGIN before database configuration', async () => {
+  const env = { APP_ALLOWLIST: 'NOXAVA:11111111-1111-4111-8111-111111111111,SZRON:22222222-2222-4222-8222-222222222222' };
+
+  await assert.rejects(composeApiRuntime(env), /APP_ORIGIN is required/);
+  await assert.rejects(composeApiRuntime({ ...env, APP_ORIGIN: 'https://example.test/path' }), /no path/);
+});
 
 test('a scaffold app is live but never ready, and a composed app is both', async () => {
   const scaffold = buildApp();

@@ -25,6 +25,7 @@
  */
 
 import { buildCoreDependencies, parseAllowlist, type CoreEnv } from '../core/config.js';
+import { parseOrigins } from '../auth/config.js';
 import { assertProvisioned } from '../auth/users.js';
 import type { BuildAppOptions } from '../app.js';
 import { openDatabase, type DatabaseEnv, type OpenDatabase, describeDatabase } from './database.js';
@@ -59,9 +60,11 @@ function enforcePrivileges(env: ApiRuntimeEnv): boolean {
 }
 
 export async function composeApiRuntime(env: ApiRuntimeEnv): Promise<ApiRuntime> {
-  // Parsed before anything is opened, so a bad origin or a missing secret file costs
-  // no connection and leaves nothing to clean up.
+  // Parse the security boundary before opening a pool. APP_ORIGIN is required even
+  // though storage and authentication both consume it later: a missing or malformed
+  // value is a startup error, never something discovered after contacting PostgreSQL.
   const allowlist = parseAllowlist(env.APP_ALLOWLIST);
+  parseOrigins(env.APP_ORIGIN);
   const database = await openDatabase(env, { poolMax: 6, applicationName: 'szronox-api' });
 
   try {
