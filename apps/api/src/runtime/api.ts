@@ -30,9 +30,10 @@ import { assertProvisioned } from '../auth/users.js';
 import type { BuildAppOptions } from '../app.js';
 import { openDatabase, type DatabaseEnv, type OpenDatabase, describeDatabase } from './database.js';
 import { assertRolePrivileges, type RoleFacts } from './privileges.js';
+import type { ProxyEnv } from './proxy.js';
 import { runtimeReadiness, storageRootProbe, type ReadinessTracker } from './readiness.js';
 
-export interface ApiRuntimeEnv extends CoreEnv, DatabaseEnv {
+export interface ApiRuntimeEnv extends CoreEnv, DatabaseEnv, ProxyEnv {
   /**
    * Refuse to start as an over-privileged database role. Defaults to on; the only
    * reason to turn it off is a single-role local run that has not created separate

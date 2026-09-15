@@ -88,6 +88,98 @@ Application configuration, identical here and in `compose.yaml`:
 | `APP_ALLOWLIST` | `NOXAVA:<uuid>,SZRON:<uuid>` | compared against the database, never written by the API |
 | `LOG_LEVEL` | `info` | redacting options are applied; `silent` disables logging |
 
+One more host variable, not application configuration:
+
+| Variable | Default | Note |
+| --- | --- | --- |
+| `SZRONOX_RELEASE` | `local` | image tag. Every service — `migrate`, `grants`, `provision`, `api`, `worker`, the harness — resolves `szronox-dev:${SZRONOX_RELEASE}`, so it must hold the **same** value for the build and for every later command in a session. Exporting it for `up` but not for `build` runs one tag and starts another. |
+
+## Preflight
+
+Run this first, from the repository root, before building anything. It reads and reports
+and changes nothing, so a failure leaves the host untouched:
+
+```bash
+node deploy/vps/preflight.mjs
+```
+
+It reports `PASS`, `FAIL` or `UNVERIFIED` per check and exits non-zero on any `FAIL`.
+`UNVERIFIED` is **not** a pass — it means the check could not run here (no container
+runtime, for instance) and the question is still open. It checks the container runtime and
+Compose v2, lets `docker compose config` parse the project, looks for resource collisions
+and running project containers, verifies each secret file's existence/mode/length/
+uniqueness and that none live inside the repository, validates `APP_ORIGIN`,
+`APP_ALLOWLIST`, `APP_SESSION_TTL_SECONDS` and `APP_TRUSTED_PROXIES`, confirms the
+deployment files exist with the initdb script executable, and checks the published port and
+free disk space.
+
+## HTTPS in front of the application
+
+**Required input, not supplied yet: the exact hostname.** The session cookie carries the
+`__Host-` prefix, which a browser only accepts when the cookie is `Secure`, `Path=/` and
+has no `Domain`. So plaintext HTTP cannot carry a login at all, and the hostname is not a
+detail to fill in later: `APP_ORIGIN` must be the exact browser origin, and every deployment
+file deliberately refuses to guess it — `compose.yaml` uses the required
+`${APP_ORIGIN:?...}` form and contains no default.
+
+The architecture is browser → existing Caddy (TLS) → `127.0.0.1:3010` → Fastify. Caddy
+already runs on the host for other projects, so a **new site block** is added and nothing
+existing is edited:
+
+```caddyfile
+# Replace REPLACE_ME_HOSTNAME with the actual hostname before applying.
+REPLACE_ME_HOSTNAME {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3010
+}
+```
+
+Caddy sets `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` on
+`reverse_proxy` by default, which is what the API needs. Nothing about TLS termination
+needs to reach the application: origin checking compares the browser's `Origin` header
+against `APP_ORIGIN`, and the session cookie is emitted with `Secure` regardless of the
+internal hop, so the application never has to infer the external scheme.
+
+Then set `APP_ORIGIN=https://REPLACE_ME_HOSTNAME` and, if DNS is not yet pointing at the
+host, do not start: a certificate request for a name that does not resolve fails, and
+`APP_ORIGIN` pointing at a name the browser cannot reach produces a login that can never
+succeed.
+
+### The proxy address, and why it matters
+
+`APP_TRUSTED_PROXIES` tells the API which addresses may speak for a client. Behind a proxy
+this is not cosmetic:
+
+- **Unset.** `request.ip` is the proxy's own address for every request, so the
+  per-address login throttle becomes **one global counter** — twenty failed attempts from
+  anyone locks out both NOXAVA and SZRON.
+- **Set to the proxy.** `request.ip` is the real client, and the throttle works per client.
+- **Set to `true`, `*` or `0.0.0.0/0`.** Refused at startup. Any client could then choose
+  its own throttle bucket by sending a header, which removes the limit entirely.
+
+Unset is the default because it fails safely — a shared limit is an availability problem,
+a spoofable limit is a security one. Determine the address the API container actually
+observes for a proxied request, then set it:
+
+```bash
+# With the project running, make one proxied request and read the address the API saw.
+docker compose -f deploy/vps/compose.yaml logs api | tail -5
+# Or inspect the network the container is attached to:
+docker network inspect szronox-dev_private -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+export APP_TRUSTED_PROXIES=172.18.0.1   # example only; use the observed value
+```
+
+Two provisioning questions cannot be answered without a running Docker and must be checked
+at that point rather than assumed:
+
+1. **Whether a published port works on an `internal: true` network.** The `api` service is
+   attached only to `szronox-dev_private`, which is internal, and also publishes
+   `127.0.0.1:3010`. If publishing does not work there, the API is unreachable and the
+   network configuration needs a second, non-internal network for the API alone — not a
+   change to the private one.
+2. **What source address the container sees** for a request arriving through the published
+   port, which is the value `APP_TRUSTED_PROXIES` needs.
+
 ## Prepare a local disposable run
 
 Create development-only secret files outside the repository, with mode 600. No password

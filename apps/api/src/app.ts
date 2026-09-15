@@ -44,13 +44,22 @@ export interface BuildAppOptions {
    * cookie included.
    */
   logger?: BuildAppLoggerOptions;
+  /**
+   * Addresses this process believes about a client's real address, or `false` to trust
+   * nothing. Never `true`: see runtime/proxy.ts for why both extremes are wrong.
+   */
+  trustProxy?: false | string[];
 }
 
 /** Whatever Fastify accepts for `logger`. Narrowed only to keep app.ts driver-free. */
 export type BuildAppLoggerOptions = false | Record<string, unknown>;
 
 export function buildApp(options: BuildAppOptions = {}) {
-  const app = Fastify({ logger: (options.logger ?? false) as never });
+  const app = Fastify({
+    logger: (options.logger ?? false) as never,
+    // Decides what `request.ip` means, and therefore what the login throttle keys on.
+    trustProxy: options.trustProxy ?? false,
+  });
 
   // Liveness. Answers only "this process is serving HTTP", which is all it has ever
   // answered; the scaffold answers it too, which is why readiness is separate.

@@ -26,6 +26,7 @@ import { buildApp } from './app.js';
 import { composeApiRuntime, type ApiRuntime, type ApiRuntimeEnv } from './runtime/api.js';
 import { databaseConfigured } from './runtime/database.js';
 import { buildLoggerOptions, parseLogLevel } from './runtime/logging.js';
+import { describeTrustedProxies, parseTrustedProxies, type TrustProxySetting } from './runtime/proxy.js';
 import { isTestSeamMode, registerTestSeam } from './test-seam.js';
 
 const env = process.env as ApiRuntimeEnv & { NODE_ENV?: string; LOG_LEVEL?: string };
@@ -67,9 +68,19 @@ try {
   fail(`invalid logging configuration: ${error instanceof Error ? error.message : String(error)}`);
 }
 
+let trustProxy: TrustProxySetting = false;
+try {
+  trustProxy = parseTrustedProxies(env);
+} catch (error) {
+  // A malformed proxy list is refused rather than silently downgraded to trusting
+  // nothing: the operator asked for proxy awareness and must be told it was not applied.
+  fail(`invalid proxy configuration: ${error instanceof Error ? error.message : String(error)}`);
+}
+
 const app = buildApp({
   ...(runtime?.options ?? {}),
   logger: buildLoggerOptions(logLevel),
+  trustProxy,
 });
 
 // Test-only seam for the shutdown suite. Nothing in production sets API_TEST_SEAM,
@@ -83,7 +94,10 @@ try {
   // ready, whatever its dependencies say.
   runtime?.readiness.markReady();
   if (runtime) {
-    process.stdout.write(`API ready ${JSON.stringify(runtime.describe())}\n`);
+    process.stdout.write(`API ready ${JSON.stringify({
+      ...runtime.describe(),
+      ...describeTrustedProxies(trustProxy),
+    })}\n`);
     for (const violation of runtime.privileges.violations) {
       // Reached only when enforcement was explicitly disabled. Said out loud, so a
       // single-role local run cannot be mistaken for verified role separation.
