@@ -15,3 +15,8 @@ Pinned before launch: auth 0003_vps_auth.sql; storage 0004_vps_storage.sql; hist
 Prepared baseline merge required only combining the PGlite dev dependency with VPS dependencies in apps/api/package.json and reconciling lockfile. Initial build used ancestor dependencies and failed with missing PGlite TS2307. Isolated `npm ci --no-audit --no-fund` in .worktrees/vps-batch-base installed 187 locked packages; `npm run build && npm run typecheck` then passed across all four workspaces. `git diff --check` passed. No correction implementation was changed or broadly re-audited. These are local baseline composition checks, not auth/storage/real-PG acceptance.
 
 No VPS mutation. No VPS-04 dispatch. Each child stops with scoped commit/results; root reconciles once after all three finish and returns the next proposal for approval.
+
+
+## Completed and reconciled — 2026-09-15
+
+All three tasks completed: Opus b289569, Sol 5568699, Luna d2b5e9c. No agents remain active for these tasks. Combined branch codex/vps-reconcile at b478100 preserves their histories and contains the bounded integration report and VPS-04 proposal. Its worktree is .worktrees/vps-reconcile. Earlier "running" rows above are dispatch history, not current status. No VPS changes; VPS-04 awaits explicit approval.

@@ -1,6 +1,6 @@
 # Authorized delegation
 
-Current authorization: VPS-00–03 approved with amendments; see [dispatch contract](VPS-batch-dispatch.md). VPS-01 manual Opus only, VPS-02 Sol/high, VPS-03 Luna. Separate worktrees and exact ownership are pinned before launch. No VPS mutation or VPS-04 dispatch. Historical entries below describe earlier authorization, not the current batch.
+Current authorization: VPS-01–03 finished and were reconciled once on codex/vps-reconcile at b478100. VPS-04 is proposed only (Sol/high); no agent dispatch or live VPS mutation is authorized. The testing/review budget policy in AGENTS.md applies. Historical entries below retain their original context.
 
 | Task | Status | Ownership | Acceptance |
 | --- | --- | --- | --- |
@@ -44,3 +44,10 @@ T04 user report: 064dcf9, 6/6 live probes and 30/30 local tests; duplicate-name 
 VPS-00: root gpt-6-astra, current root worktree, infrastructure contracts/shared transport types/central dependencies only. Explicit user approval: "go for T0", then "go now" overriding the original Opus-baseline prerequisite for this task alone. No agents or VPS changes authorized. Result and exact verification: [VPS-00-result.md](VPS-00-result.md).
 
 VPS-01 auth, VPS-02 storage and VPS-03 environment are proposed parallel tasks, not dispatched; gpt-5.6-sol/high was proposed for each. VPS-04 integration, VPS-05 dev deployment, VPS-06 real-PG gates and VPS-07 browser acceptance require later proposals. Opus integration must be reconciled before feature dispatch. No automatic task/model substitution or next-task start.
+
+
+## VPS-01–03 reconciliation — 2026-09-15
+
+Completed agents: Opus VPS-01 b289569, Sol VPS-02 5568699, Luna VPS-03 d2b5e9c. Preserved together on codex/vps-reconcile, final reconciliation b478100af553dcdbab67c08502a34fbb8157e2fe; original task worktrees remain intact. Root master remains separate, with pre-existing untracked deploy/ untouched.
+
+Result: `.worktrees/vps-reconcile/docs/implementation/VPS-integration-result.md`. Next eight-part proposal: `.worktrees/vps-reconcile/docs/implementation/VPS-04-proposal.md`. Reconciliation corrected /me, auth migration identity, shared configuration and throttling pins. Fourteen targeted integration/changed-boundary checks passed; no broad independent rerun. Remaining startup/provisioning/credential wiring blocks deployment, and real-PG/browser/VPS evidence remains deferred. VPS-04 is not dispatched.
