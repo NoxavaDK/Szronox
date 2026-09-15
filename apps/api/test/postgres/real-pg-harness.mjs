@@ -87,9 +87,9 @@ async function main() {
   // safe even when both pools are connected at the same time.
   const migrationResults = await Promise.all([migrate(dbA), migrate(dbB)]);
   assert.equal(migrationResults.length, 2);
-  assert.deepEqual(migrationResults[0].map(({ name }) => name), ['0001_core_schema.sql', '0002_script_revision.sql']);
-  assert.deepEqual(migrationResults[1].map(({ name }) => name), ['0001_core_schema.sql', '0002_script_revision.sql']);
-  assert.deepEqual((await migrate(dbA)).map(({ alreadyApplied }) => alreadyApplied), [true, true]);
+  assert.deepEqual(migrationResults[0].map(({ name }) => name), ['0001_core_schema.sql', '0002_script_revision.sql', '0003_vps_auth.sql', '0004_vps_storage.sql']);
+  assert.deepEqual(migrationResults[1].map(({ name }) => name), ['0001_core_schema.sql', '0002_script_revision.sql', '0003_vps_auth.sql', '0004_vps_storage.sql']);
+  assert.deepEqual((await migrate(dbA)).map(({ alreadyApplied }) => alreadyApplied), [true, true, true, true]);
 
   await seedUsers(dbA, [NOXAVA, SZRON]);
   const pids = await Promise.all([

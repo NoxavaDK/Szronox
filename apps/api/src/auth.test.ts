@@ -28,11 +28,11 @@ import { clearedSessionCookie, serializeSessionCookie } from './auth/cookies.js'
 import { createPasswordHasher, ARGON2ID_PARAMETERS, PasswordInputError, assertUsablePassword } from './auth/passwords.js';
 import { registerAuthRoutes, AUTH_LOG_REDACT_PATHS } from './auth/routes.js';
 import { createAuthService, type AuthService } from './auth/service.js';
-import { createSessionStore, deriveCsrfToken, pruneDeadSessions } from './mes.js';
+import { createSessionStore, deriveCsrfToken, pruneDeadSessions } from './auth/sessions.js';
 import { createThrottle, DEFAULT_ACCOUNT_THROTTLE, DEFAULT_ADDRESS_THROTTLE } from './auth/throttle.js';
 import { assertProvisioned, ProvisioningError, setPassword } from './auth/users.js';
 import { passwordFromStdinText, provisionPassword } from './auth/provision.js';
-import { TEST_AUTH_ENV, TEST_ORIGIN, FOREIGN_ORIGIN, TEST_PASSWORDS, testPasswordHash } from './auth/test-support.js';
+import { TEST_AUTH_ENV, TEST_CSRF_SECRET, testSecretFile, TEST_ORIGIN, FOREIGN_ORIGIN, TEST_PASSWORDS, testPasswordHash } from './auth/test-support.js';
 import { registerCoreRoutes } from './core/routes.js';
 import { memoryStorageAdapter } from './core/storage.js';
 import { type Database, pgliteDatabase } from './db/client.js';
@@ -75,8 +75,8 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
   const now = () => clock.ms;
   const config = buildAuthConfig({
     ...TEST_AUTH_ENV,
-    ...(options.csrfSecret === undefined ? {} : { AUTH_CSRF_SECRET: options.csrfSecret }),
-    ...(options.lifetimeSeconds === undefined ? {} : { AUTH_SESSION_LIFETIME_SECONDS: String(options.lifetimeSeconds) }),
+    ...(options.csrfSecret === undefined ? {} : { APP_CSRF_SECRET_FILE: testSecretFile(options.csrfSecret) }),
+    ...(options.lifetimeSeconds === undefined ? {} : { APP_SESSION_TTL_SECONDS: String(options.lifetimeSeconds) }),
   });
   const service = createAuthService({
     db,
@@ -214,10 +214,10 @@ test('the session secret is stored only as a digest, and the CSRF token only as 
     // The CSRF token is session-bound: the same secret and a different session
     // secret derive different tokens.
     assert.notEqual(
-      deriveCsrfToken(TEST_AUTH_ENV.AUTH_CSRF_SECRET as string, secret),
-      deriveCsrfToken(TEST_AUTH_ENV.AUTH_CSRF_SECRET as string, `${secret}x`),
+      deriveCsrfToken(TEST_CSRF_SECRET, secret),
+      deriveCsrfToken(TEST_CSRF_SECRET, `${secret}x`),
     );
-    assert.equal(deriveCsrfToken(TEST_AUTH_ENV.AUTH_CSRF_SECRET as string, secret), session.csrfToken);
+    assert.equal(deriveCsrfToken(TEST_CSRF_SECRET, secret), session.csrfToken);
   } finally {
     await ctx.close();
   }
@@ -521,7 +521,7 @@ test('rotating the CSRF secret invalidates every live session', async () => {
     // derivation no longer matches the stored digest.
     const rotated = createAuthService({
       db: ctx.db,
-      config: buildAuthConfig({ ...TEST_AUTH_ENV, AUTH_CSRF_SECRET: 'a-completely-different-csrf-secret-value' }),
+      config: buildAuthConfig({ ...TEST_AUTH_ENV, APP_CSRF_SECRET_FILE: testSecretFile('a-completely-different-csrf-secret-value') }),
       hasher: createPasswordHasher(1),
       now: () => ctx.clock.ms,
     });
@@ -596,6 +596,8 @@ test('/me reports the identity the server resolved, not anything the client stat
     assert.deepEqual(me.json(), {
       user: { id: SZRON.id, name: 'SZRON', avatarUrl: null },
       peer: { id: NOXAVA.id, name: 'NOXAVA', avatarUrl: null },
+      expiresAt: me.json().expiresAt,
+      csrfToken: session.csrfToken,
     });
 
     // A mutation carrying an actor claim in its body is still attributed to the
@@ -769,14 +771,14 @@ test('every unsafe domain method is CSRF-protected, while reads need no Origin',
 });
 
 test('origin parsing refuses anything that is not an exact https origin', () => {
-  assert.deepEqual(parseOrigins('https://a.test, https://b.test'), ['https://a.test', 'https://b.test']);
+  assert.throws(() => parseOrigins('https://a.test, https://b.test'), /one exact origin/);
   assert.deepEqual(parseOrigins('http://localhost:5173'), ['http://localhost:5173']);
   for (const bad of ['', 'a.test', 'https://a.test/path', 'http://a.test', '*', 'https://', 'https://a.test?x=1']) {
     assert.throws(() => parseOrigins(bad), AuthConfigError, bad);
   }
-  assert.throws(() => buildAuthConfig({ APP_ORIGIN: 'https://a.test' }), /AUTH_CSRF_SECRET is required/);
-  assert.throws(() => buildAuthConfig({ APP_ORIGIN: 'https://a.test', AUTH_CSRF_SECRET: 'short' }), /at least 32/);
-  assert.throws(() => buildAuthConfig({ AUTH_CSRF_SECRET: 'x'.repeat(40) }), /APP_ORIGIN is required/);
+  assert.throws(() => buildAuthConfig({ APP_ORIGIN: 'https://a.test' }), /APP_CSRF_SECRET_FILE is required/);
+  assert.throws(() => buildAuthConfig({ APP_ORIGIN: 'https://a.test', APP_CSRF_SECRET_FILE: testSecretFile('short') }), /at least 32/);
+  assert.throws(() => buildAuthConfig({ APP_CSRF_SECRET_FILE: testSecretFile('x'.repeat(40)) }), /APP_ORIGIN is required/);
 });
 
 // ══════════════════════════ throttling ══════════════════════════════════════
@@ -809,7 +811,7 @@ test('login throttling bounds attempts per address and reports Retry-After', asy
   }
 });
 
-test('account throttling counts failures across addresses and clears on success', async () => {
+test('account throttling counts all attempts across addresses', async () => {
   const ctx = await fixture({ accountLimit: 2 });
   try {
     // Distinct addresses, so only the account counter can be what stops this.
@@ -824,10 +826,9 @@ test('account throttling counts failures across addresses and clears on success'
 
     ctx.clock.ms += 61_000;
     assert.equal((await login(ctx, 'NOXAVA', TEST_PASSWORDS.NOXAVA, { ip: '198.51.100.5' })).statusCode, 200);
-    // A success clears the account's failures, so earlier typos do not accumulate
-    // toward a later lockout.
+    // A successful login also counts toward the approved attempt limit.
     assert.equal((await login(ctx, 'NOXAVA', 'wrong', { ip: '198.51.100.6' })).statusCode, 401);
-    assert.equal((await login(ctx, 'NOXAVA', 'wrong', { ip: '198.51.100.6' })).statusCode, 401);
+    assert.equal((await login(ctx, 'NOXAVA', 'wrong', { ip: '198.51.100.6' })).statusCode, 429);
   } finally {
     await ctx.close();
   }

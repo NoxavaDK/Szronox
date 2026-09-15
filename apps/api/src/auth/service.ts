@@ -180,27 +180,33 @@ export function createAuthService(options: AuthServiceOptions): AuthService {
       const address = byAddress.consume(clientKey(request));
       if (!address.allowed) throw rateLimited(address.retryAfterSeconds);
 
-      const credentials = parseLoginBody(body);
-
-      const accountState = byAccount.peek(`account:${credentials.name}`);
+      const candidate = body && typeof body === 'object' ? (body as Record<string, unknown>).name : undefined;
+      const accountKey = candidate === 'NOXAVA' || candidate === 'SZRON' ? `account:${candidate}` : 'account:unknown';
+      const accountState = byAccount.consume(accountKey);
       if (!accountState.allowed) throw rateLimited(accountState.retryAfterSeconds);
+      let credentials: ReturnType<typeof parseLoginBody>;
+      try { credentials = parseLoginBody(body); }
+      catch (error) {
+        if (error instanceof CoreError && error.status === 401) {
+          const raw = (body as Record<string, unknown>).password;
+          const password = typeof raw === 'string' && Buffer.byteLength(raw) <= MAX_PASSWORD_BYTES ? raw : 'invalid';
+          await options.hasher.verifyDummy(password || 'invalid');
+        }
+        throw error;
+      }
 
       const account = await findUserByName(options.db, credentials.name);
       if (account === null || account.passwordHash === null) {
         // Not provisioned, or provisioned without a credential. The same work is
         // still done, so this path is not faster than a wrong password.
         await options.hasher.verifyDummy(credentials.password);
-        byAccount.consume(`account:${credentials.name}`);
         throw unauthenticatedError(GENERIC_LOGIN_FAILURE);
       }
 
       const matches = await options.hasher.verify(account.passwordHash, credentials.password);
       if (!matches) {
-        const failed = byAccount.consume(`account:${credentials.name}`);
-        if (!failed.allowed) throw rateLimited(failed.retryAfterSeconds);
         throw unauthenticatedError(GENERIC_LOGIN_FAILURE);
       }
-      byAccount.reset(`account:${credentials.name}`);
 
       // A valid old session on this browser is invalidated rather than left live,
       // so logging in again does not accumulate usable cookies.

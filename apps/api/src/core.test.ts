@@ -29,7 +29,7 @@ import { CoreError } from './core/errors.js';
 import { deriveVerificationState } from './core/mapping.js';
 import { memoryStorageAdapter, supabaseStorageAdapter, StorageError } from './core/storage.js';
 import type { StorageAdapter } from './core/storage.js';
-import { TEST_AUTH_ENV, sessionHarness } from './auth/test-support.js';
+import { TEST_AUTH_ENV, TEST_CSRF_SECRET, sessionHarness } from './auth/test-support.js';
 
 const NOXAVA = { id: '11111111-1111-4111-8111-111111111111', name: 'NOXAVA' as const };
 const SZRON = { id: '22222222-2222-4222-8222-222222222222', name: 'SZRON' as const };
@@ -798,6 +798,7 @@ async function server() {
   const { db, storage } = await fixture();
   const harness = sessionHarness(db);
   const app = Fastify({ logger: false });
+  harness.register(app);
   registerCoreRoutes(app, {
     db,
     storage,
@@ -884,6 +885,8 @@ test('/me reports the signed-in user and the peer identity', async () => {
     assert.deepEqual(response.json(), {
       user: { id: NOXAVA.id, name: 'NOXAVA', avatarUrl: null },
       peer: { id: SZRON.id, name: 'SZRON', avatarUrl: null },
+      expiresAt: response.json().expiresAt,
+      csrfToken: response.json().csrfToken,
     });
   } finally {
     await ctx.app.close();
@@ -1183,6 +1186,7 @@ test('buildApp registers the core routes when dependencies are supplied', async 
   const { db, storage } = await fixture();
   const harness = sessionHarness(db);
   const app = buildApp({
+    auth: { service: harness.service },
     core: {
       db, storage,
       authenticate: harness.authenticate,
@@ -1233,20 +1237,13 @@ test('buildApp without core dependencies serves the static app only', async () =
 
 // ══════════════════════ T08 blocker: storage configuration ══════════════════
 
-test('configuration refuses partial Supabase storage rather than silently using memory', async () => {
+test('configuration requires private filesystem settings without a memory fallback', async () => {
   const { buildStorage, parseAllowlist, describeConfig, ConfigError } =
     await import('./core/config.js');
-
-  // A half-configured bucket would make uploads appear to work while storing nothing.
-  assert.throws(
-    () => buildStorage({ SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' }),
-    ConfigError,
-  );
-  assert.throws(() => buildStorage({}), /No storage is configured/);
+  assert.throws(() => buildStorage({ APP_ORIGIN: 'https://szronox.test' }), ConfigError);
+  assert.throws(() => buildStorage({}), /APP_STORAGE_ROOT is required/);
   assert.ok(buildStorage({ STORAGE_DRIVER: 'memory' }));
-  assert.ok(buildStorage({
-    SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_STORAGE_BUCKET: 'attachments',
-  }));
+  assert.ok(buildStorage({ APP_STORAGE_ROOT: '/var/lib/szronox/storage', APP_ORIGIN: 'https://szronox.test' }));
 
   // The allowlist is exactly two distinct product users.
   assert.deepEqual(
@@ -1262,15 +1259,14 @@ test('configuration refuses partial Supabase storage rather than silently using 
   // The startup summary names what is configured without exposing any value.
   const described = describeConfig({
     ...TEST_AUTH_ENV,
-    SUPABASE_URL: 'https://p.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'super-secret-key',
-    SUPABASE_STORAGE_BUCKET: 'attachments', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
+    APP_STORAGE_ROOT: '/var/lib/szronox/storage', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
   });
   assert.equal(described.authentication.mechanism, 'opaque_session_cookie');
   assert.equal(described.authentication.csrfSecretConfigured, true);
-  assert.equal(described.storage, 'supabase');
+  assert.equal(described.storage, 'filesystem');
   const serialised = JSON.stringify(described);
   assert.ok(
-    !serialised.includes(TEST_AUTH_ENV.AUTH_CSRF_SECRET as string) && !serialised.includes('super-secret-key'),
+    !serialised.includes(TEST_CSRF_SECRET) && !serialised.includes('super-secret-key'),
     'no secret may appear',
   );
 });
@@ -1283,7 +1279,7 @@ test('buildCoreDependencies composes a working dependency set from environment',
     ...TEST_AUTH_ENV,
     STORAGE_DRIVER: 'memory', APP_ALLOWLIST: `NOXAVA:${NOXAVA.id},SZRON:${SZRON.id}`,
   });
-  const app = buildApp({ core });
+  const app = buildApp({ core, auth: core.auth });
   try {
     await app.ready();
     assert.equal(typeof core.authenticate, 'function', 'the composed set must carry the session seam');

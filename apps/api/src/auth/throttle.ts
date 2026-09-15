@@ -102,9 +102,8 @@ export function createThrottle(options: ThrottleOptions): Throttle {
 
 /**
  * VPS-00 defaults. Address attempts are counted whether or not they succeed, so a
- * flood cannot be laundered through valid logins; account failures are counted
- * only on failure and cleared on success, so a user who eventually types the
- * right password is not locked out by their own typos.
+ * flood cannot be laundered through valid logins; account attempts are counted
+ * on success and failure, as required by the approved dispatch limits.
  */
 export const DEFAULT_ADDRESS_THROTTLE = { limit: 20, windowMs: 15 * 60 * 1000 } as const;
 export const DEFAULT_ACCOUNT_THROTTLE = { limit: 5, windowMs: 15 * 60 * 1000 } as const;

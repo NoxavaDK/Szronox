@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 /**
  * Test-only helpers for session authentication.
  *
@@ -28,9 +31,18 @@ export const FOREIGN_ORIGIN = 'https://not-szronox.test';
 /** Minimum length is enforced by `buildAuthConfig`; this is deliberately over it. */
 export const TEST_CSRF_SECRET = 'test-only-csrf-secret-0123456789abcdefghij';
 
+const secretDirectory = mkdtempSync(path.join(tmpdir(), 'szronox-auth-test-'));
+let secretSequence = 0;
+process.once('exit', () => rmSync(secretDirectory, { recursive: true, force: true }));
+export function testSecretFile(value: string): string {
+  const file = path.join(secretDirectory, String(secretSequence++));
+  writeFileSync(file, value, { mode: 0o600 });
+  return file;
+}
+
 export const TEST_AUTH_ENV: AuthEnv = {
   APP_ORIGIN: TEST_ORIGIN,
-  AUTH_CSRF_SECRET: TEST_CSRF_SECRET,
+  APP_CSRF_SECRET_FILE: testSecretFile(TEST_CSRF_SECRET),
 };
 
 export const TEST_PASSWORDS = {

@@ -1,5 +1,15 @@
 # SzroNox isolated development environment
 
+Integration status: VPS-03 preparation only; not ready for application deployment.
+VPS-04 must finish API/worker process composition, separate runtime/migration database
+roles and secret mounts, APP_CSRF_SECRET_FILE/APP_SESSION_TTL_SECONDS configuration,
+and operator two-user provisioning. Current Compose API/worker settings are incomplete;
+a healthy scaffold response does not prove authenticated application readiness.
+Real PostgreSQL concurrency evidence is deferred to VPS-06, and HTTPS/browser evidence
+to VPS-07. The harness migration expectations now include all four combined migrations;
+it still needs controlled overlap evidence before it can certify races. Do not run
+these commands on the live VPS under the VPS-00–03 approval.
+
 This directory defines the disposable local `szronox-dev` Compose project used
 for VPS-03 preparation. It has a dedicated PostgreSQL instance, private Docker
 network and project-scoped volumes. It does not deploy to the VPS and it does

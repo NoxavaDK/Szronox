@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 /**
  * Authentication configuration from environment.
  *
@@ -39,11 +40,11 @@ export const DEFAULT_SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 export const MAX_PASSWORD_BYTES = 1024;
 
 export interface AuthEnv {
-  /** Comma-separated exact origins allowed to send credentialed requests. */
+  /** The single exact application origin allowed to send credentialed requests. */
   APP_ORIGIN?: string;
   /** Separate from any other secret; rotating it invalidates live sessions. */
-  AUTH_CSRF_SECRET?: string;
-  AUTH_SESSION_LIFETIME_SECONDS?: string;
+  APP_CSRF_SECRET_FILE?: string;
+  APP_SESSION_TTL_SECONDS?: string;
   /** Concurrent Argon2id verifications. Bounded so login cannot exhaust memory. */
   AUTH_PASSWORD_CONCURRENCY?: string;
 }
@@ -95,31 +96,36 @@ export function parseOrigins(raw: string | undefined): string[] {
     if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
       throw new AuthConfigError(`APP_ORIGIN entry must use https: ${candidate}`);
     }
+    if (candidate !== url.origin || url.username || url.password) throw new AuthConfigError('APP_ORIGIN must be one exact origin');
     if (!parsed.includes(url.origin)) parsed.push(url.origin);
   }
   if (parsed.length === 0) throw new AuthConfigError('APP_ORIGIN listed no usable origin');
+  if (parsed.length !== 1) throw new AuthConfigError('APP_ORIGIN must be one exact origin');
   return parsed;
 }
 
 export function buildAuthConfig(env: AuthEnv = process.env as AuthEnv): AuthConfig {
-  if (!present(env.AUTH_CSRF_SECRET)) {
-    throw new AuthConfigError('AUTH_CSRF_SECRET is required and must be environment-specific');
+  if (!present(env.APP_CSRF_SECRET_FILE)) {
+    throw new AuthConfigError('APP_CSRF_SECRET_FILE is required and must be environment-specific');
   }
+  let csrfSecret: string;
+  try { csrfSecret = readFileSync(env.APP_CSRF_SECRET_FILE, 'utf8').replace(/\r?\n$/, ''); }
+  catch { throw new AuthConfigError('APP_CSRF_SECRET_FILE could not be read'); }
   // A short secret would make the derived CSRF token guessable, which is the one
   // property CSRF protection depends on.
-  if (env.AUTH_CSRF_SECRET.length < 32) {
-    throw new AuthConfigError('AUTH_CSRF_SECRET must be at least 32 characters');
+  if (csrfSecret.length < 32) {
+    throw new AuthConfigError('APP_CSRF_SECRET_FILE must be at least 32 characters');
   }
+  const lifetime = positiveInteger(env.APP_SESSION_TTL_SECONDS, 'APP_SESSION_TTL_SECONDS', DEFAULT_SESSION_LIFETIME_SECONDS);
+  if (lifetime > DEFAULT_SESSION_LIFETIME_SECONDS) throw new AuthConfigError('APP_SESSION_TTL_SECONDS must not exceed 604800');
+  const concurrency = positiveInteger(env.AUTH_PASSWORD_CONCURRENCY, 'AUTH_PASSWORD_CONCURRENCY', 2);
+  if (concurrency > 2) throw new AuthConfigError('AUTH_PASSWORD_CONCURRENCY must not exceed 2');
   return {
     cookieName: SESSION_COOKIE_NAME,
-    csrfSecret: env.AUTH_CSRF_SECRET,
-    sessionLifetimeMs: positiveInteger(
-      env.AUTH_SESSION_LIFETIME_SECONDS,
-      'AUTH_SESSION_LIFETIME_SECONDS',
-      DEFAULT_SESSION_LIFETIME_SECONDS,
-    ) * 1000,
+    csrfSecret,
+    sessionLifetimeMs: lifetime * 1000,
     allowedOrigins: parseOrigins(env.APP_ORIGIN),
-    passwordConcurrency: positiveInteger(env.AUTH_PASSWORD_CONCURRENCY, 'AUTH_PASSWORD_CONCURRENCY', 2),
+    passwordConcurrency: concurrency,
   };
 }
 
@@ -142,15 +148,15 @@ export function describeAuthConfig(env: AuthEnv = process.env as AuthEnv) {
   let sessionLifetimeSeconds: number | null = null;
   try {
     sessionLifetimeSeconds = positiveInteger(
-      env.AUTH_SESSION_LIFETIME_SECONDS,
-      'AUTH_SESSION_LIFETIME_SECONDS',
+      env.APP_SESSION_TTL_SECONDS,
+      'APP_SESSION_TTL_SECONDS',
       DEFAULT_SESSION_LIFETIME_SECONDS,
     );
   } catch { /* null means "not a usable value", not a default */ }
   return {
     mechanism: 'opaque_session_cookie' as const,
     cookieName: SESSION_COOKIE_NAME,
-    csrfSecretConfigured: present(env.AUTH_CSRF_SECRET),
+    csrfSecretConfigured: present(env.APP_CSRF_SECRET_FILE),
     originsConfigured,
     originsValid,
     sessionLifetimeSeconds,
