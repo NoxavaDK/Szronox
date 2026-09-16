@@ -1,0 +1,35 @@
+{
+  "id": "/",
+  "name": "SzroNox",
+  "short_name": "SzroNox",
+  "description": "Produkcja Reelsów dla dwóch osób: przechwytywanie, redakcja i publikacja.",
+  "lang": "pl",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#141414",
+  "theme_color": "#141414",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "images",
+          "accept": ["image/jpeg", "image/png", "image/webp", ".jpg", ".jpeg", ".png", ".webp"]
+        }
+      ]
+    }
+  }
+}

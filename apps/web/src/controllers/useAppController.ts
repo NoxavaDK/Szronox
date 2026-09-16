@@ -7,6 +7,7 @@ import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.
 import { composePublicationText } from '../data/publication.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
+import { claimIncomingShare, clearIncomingSignal, readIncomingSignal, shareFailureMessage } from '../share/pending.js';
 
 export type Route =
   | { name: 'list' }
@@ -28,6 +29,20 @@ export interface ConflictState {
 }
 export interface CaptureForm {
   draft: CaptureDraft; kind: 'image' | 'url' | 'text'; blobs: Map<string, Blob>; showAdditional: boolean; showHook: boolean;
+  /**
+   * What an incoming share turned out to contain, or `null` for a capture the user started.
+   *
+   * Drives the compact chip in Quick Add (frozen visual spec sec. 3): a detected payload
+   * starts collapsed, a manual one shows the full selector. It is a record of what arrived,
+   * so it does not change when the user picks a different type afterwards.
+   */
+  detectedKind: 'image' | 'url' | 'text' | null;
+}
+
+/** What the share actually carried, for the detected-type chip. */
+function detectedKindOf(input: CaptureDraft['input']): 'image' | 'url' | 'text' {
+  if (input.images.length > 0) return 'image';
+  return input.url !== undefined && input.url !== '' ? 'url' : 'text';
 }
 
 export function useAppController(auth: BrowserSession, api: CoreApiClient, store: DraftStore, queue: SyncQueue, attachments: AttachmentRecovery) {
@@ -105,6 +120,64 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   useEffect(() => { void recover(); const online = () => { void recover(); }; window.addEventListener('online', online); return () => window.removeEventListener('online', online); }, [recover]);
 
   /**
+   * An Android share that the service worker put in quarantine.
+   *
+   * Read once, from this document's own URL, and held in a ref rather than in state: the
+   * address bar is cleaned up as soon as the share is dealt with, so state derived from it
+   * would be re-derived as empty on the next render.
+   *
+   * Binding waits for `user`, which is only set after `/me` has confirmed the session. That
+   * is the whole point of quarantine — the worker cannot know who is signed in, so a share
+   * received while signed out or offline stays unattributed until the server says who this
+   * is. It is never consumed automatically into whichever account happens to be remembered.
+   */
+  const incoming = useRef(readIncomingSignal(typeof location === 'undefined' ? '' : location.search));
+  useEffect(() => {
+    const failure = incoming.current.failure;
+    if (failure === null) return;
+    // A receipt that failed has nothing in quarantine; say so and clear it.
+    incoming.current = { ...incoming.current, failure: null };
+    setMessage(shareFailureMessage(failure));
+    if (incoming.current.shareId === null) clearIncomingSignal();
+  }, []);
+
+  const captureOpen = capture !== null;
+  useEffect(() => {
+    const shareId = incoming.current.shareId;
+    if (!user || shareId === null) return;
+    // An unsaved capture is never replaced. The share keeps waiting in quarantine, and this
+    // effect runs again when that capture closes, because `captureOpen` is a dependency.
+    if (captureOpen) { setMessage('Udostępniona treść czeka. Zapisz lub zamknij bieżący pomysł, aby ją otworzyć.'); return; }
+    const accountId = user.id;
+    void (async () => {
+      try {
+        const outcome = await claimIncomingShare(store, shareId, accountId, { hasUnsavedCapture: false });
+        if (outcome.status === 'deferred') return;
+        incoming.current = { shareId: null, failure: null };
+        clearIncomingSignal();
+        // Already consumed: the share was bound on an earlier visit, or by the other
+        // account on this device. Which of the two is never disclosed — but silence would
+        // look like a failure, so the fact that it is gone is stated plainly.
+        if (outcome.status === 'already_consumed') {
+          setMessage('Ta udostępniona treść została już odebrana.');
+          return;
+        }
+        const draft = outcome.draft;
+        const blobs = new Map<string, Blob>();
+        for (const image of draft.input.images) {
+          const blob = await store.blob(accountId, image.attachmentId);
+          if (blob) blobs.set(image.attachmentId, blob);
+        }
+        setCapture({ draft, kind: detectedKindOf(draft.input), blobs, showAdditional: false, showHook: false, detectedKind: detectedKindOf(draft.input) });
+        setRoute({ name: 'capture', draftId: draft.reelId });
+      } catch (error) {
+        if (isAbandonedRequest(error)) return;
+        setMessage(polishError(error));
+      }
+    })();
+  }, [captureOpen, store, user]);
+
+  /**
    * A read that was abandoned because the account changed leaves no trace: no list,
    * no error banner, no load state. Showing "could not load" for work the user
    * cancelled by switching accounts would be wrong twice over.
@@ -143,7 +216,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const startCapture = useCallback(() => {
     if (!user) return; const reelId = crypto.randomUUID();
     const draft: CaptureDraft = { id: `${user.id}:${reelId}`, accountId: user.id, reelId, operationId: crypto.randomUUID(), input: { images: [] }, priority: 'normal', fileNames: {}, updatedAt: Date.now(), state: 'draft' };
-    setCapture({ draft, kind: 'text', blobs: new Map(), showAdditional: false, showHook: false }); setRoute({ name: 'capture', draftId: reelId });
+    setCapture({ draft, kind: 'text', blobs: new Map(), showAdditional: false, showHook: false, detectedKind: null }); setRoute({ name: 'capture', draftId: reelId });
     void store.saveCapture(draft, new Map()).catch((e) => { setSaveState('error'); setMessage(polishError(e)); });
   }, [store, user]);
   const updateCapture = useCallback((change: (form: CaptureForm) => CaptureForm) => {

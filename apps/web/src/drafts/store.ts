@@ -94,17 +94,95 @@ export class DraftStore {
     await transactionDone(tx);
   }
   quarantined = () => this.all<QuarantinedShare>('quarantine');
-  async bindQuarantine(shareId: string, accountId: string): Promise<CaptureDraft> {
-    const share = await this.get<QuarantinedShare>('quarantine', shareId); if (!share) throw new Error('SHARE_NOT_FOUND');
-    const reelId = crypto.randomUUID();
-    const draft: CaptureDraft = { id: `${accountId}:${reelId}`, accountId, reelId, operationId: crypto.randomUUID(), input: share.input, fileNames: share.fileNames, priority: 'normal', updatedAt: Date.now(), state: 'draft' };
-    const db = await this.db(); const tx = db.transaction(['quarantine', 'captureDrafts', 'blobs'], 'readwrite');
-    tx.objectStore('captureDrafts').put(draft); tx.objectStore('quarantine').delete(shareId);
-    for (const image of share.input.images) {
-      const sourceId = `quarantine:${share.id}:${image.attachmentId}`;
-      const stored = await request(tx.objectStore('blobs').get(sourceId)) as { blob: Blob } | undefined;
-      if (stored) { tx.objectStore('blobs').put({ id: `${accountId}:${image.attachmentId}`, accountId, attachmentId: image.attachmentId, blob: stored.blob }); tx.objectStore('blobs').delete(sourceId); }
+  /**
+   * Consume a quarantined share into one account, atomically.
+   *
+   * Replaces the previous `bindQuarantine`, which had two defects found in PWA-01. It read the
+   * share in one transaction and consumed it in another, so two tabs — or the OS reopening the
+   * app twice — could both bind the same share; and it minted a fresh `reelId`/`operationId` on
+   * every call, so a replay produced a different capture the server could not deduplicate.
+   *
+   * Both are fixed here. The identifiers are derived by the caller *before* this runs, because
+   * they come from an async hash and awaiting crypto inside an IndexedDB write transaction
+   * would deactivate it. The quarantine record is read and deleted inside the same readwrite
+   * transaction, so it acts as the lock: whichever account's transaction commits first wins,
+   * and the loser finds nothing.
+   *
+   * There is deliberately **no `await` inside the transaction**. Every write is issued
+   * synchronously from the `onsuccess` handler of the authoritative read, where the spec
+   * guarantees the transaction is still active. Awaiting an IndexedDB request there is the one
+   * form IndexedDB tolerates, but it depends on microtask timing; this does not.
+   *
+   * Outcomes are deliberately narrow, so a replay cannot disclose another account's payload:
+   *
+   *   `bound`            this call consumed the share, or this same account already had it
+   *   `already_consumed` the share is gone and this account has no capture for it
+   *
+   * `already_consumed` carries no payload and is identical whichever account asks, so an
+   * account replaying someone else's share id learns only that it is no longer available.
+   */
+  async consumeQuarantine(
+    shareId: string,
+    accountId: string,
+    ids: { reelId: string; operationId: string },
+  ): Promise<{ outcome: 'bound'; draft: CaptureDraft } | { outcome: 'already_consumed' }> {
+    const draftId = `${accountId}:${ids.reelId}`;
+
+    // Read-only preparation. The blobs are written once at receipt and never mutated, so
+    // reading them here cannot go stale; doing it now keeps the write transaction free of
+    // any await at all.
+    const share = await this.get<QuarantinedShare>('quarantine', shareId);
+    const carried: Array<{ attachmentId: string; blob: Blob }> = [];
+    if (share) {
+      for (const image of share.input.images) {
+        const stored = await this.get<{ blob: Blob }>('blobs', `quarantine:${shareId}:${image.attachmentId}`);
+        if (stored) carried.push({ attachmentId: image.attachmentId, blob: stored.blob });
+      }
     }
-    await transactionDone(tx); return draft;
+
+    const db = await this.db();
+    const tx = db.transaction(['quarantine', 'captureDrafts', 'blobs'], 'readwrite');
+    let bound: CaptureDraft | undefined;
+    let existing: CaptureDraft | undefined;
+
+    const authoritative = tx.objectStore('quarantine').get(shareId);
+    authoritative.onsuccess = () => {
+      const record = authoritative.result as QuarantinedShare | undefined;
+      if (record === undefined) {
+        // Already consumed by someone. Was it this account? Its own draft key is the only
+        // thing this account is allowed to learn about.
+        const own = tx.objectStore('captureDrafts').get(draftId);
+        own.onsuccess = () => { existing = own.result as CaptureDraft | undefined; };
+        return;
+      }
+      const draft: CaptureDraft = {
+        id: draftId,
+        accountId,
+        reelId: ids.reelId,
+        operationId: ids.operationId,
+        input: record.input,
+        fileNames: record.fileNames,
+        priority: 'normal',
+        updatedAt: Date.now(),
+        state: 'draft',
+      };
+      tx.objectStore('captureDrafts').put(draft);
+      tx.objectStore('quarantine').delete(shareId);
+      for (const entry of carried) {
+        tx.objectStore('blobs').put({
+          id: `${accountId}:${entry.attachmentId}`,
+          accountId,
+          attachmentId: entry.attachmentId,
+          blob: entry.blob,
+        });
+        tx.objectStore('blobs').delete(`quarantine:${shareId}:${entry.attachmentId}`);
+      }
+      bound = draft;
+    };
+
+    await transactionDone(tx);
+    if (bound) return { outcome: 'bound', draft: bound };
+    if (existing) return { outcome: 'bound', draft: existing };
+    return { outcome: 'already_consumed' };
   }
 }

@@ -31,6 +31,24 @@ const attachments = new AttachmentRecovery({
   activeAccountId: () => auth.current()?.user.id ?? null,
 });
 
+/**
+ * Register the service worker.
+ *
+ * Classic, because that is what it is built as, and registered after load so it never
+ * competes with the first render for bandwidth. A browser without service workers — or a
+ * context without a secure origin — simply keeps running as an ordinary web app; the worker
+ * adds installability and share receipt, and nothing the app already does depends on it.
+ *
+ * A failure here is logged and otherwise ignored. It must not take the application down.
+ */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { type: 'classic', scope: '/' }).catch((error: unknown) => {
+      console.warn('Nie udało się zarejestrować service workera.', error);
+    });
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App auth={auth} api={api} store={store} queue={queue} attachments={attachments} />

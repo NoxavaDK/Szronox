@@ -110,7 +110,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     };
     return <>{notice}<QuickAddScreen
       onBack={() => c.setRoute({ name: 'list' })}
-      detectedKind={null}
+      detectedKind={form.detectedKind}
       selectedKind={form.kind}
       onChangeKind={(kind) => c.updateCapture((x) => ({ ...x, kind }))}
       url={form.draft.input.url ?? ''}

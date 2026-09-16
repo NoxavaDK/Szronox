@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The worker runs in a ServiceWorkerGlobalScope, not in a document: `FetchEvent` and
+  // `ExtendableEvent` exist only in the WebWorker lib, and `window`/`document` must not.
+  // Checking the worker under DOM types would type-check code against globals it will not have.
+  "compilerOptions": { "lib": ["ES2022", "WebWorker", "WebWorker.Iterable"], "noEmit": true, "types": [] },
+  "include": ["src/sw.ts"]
+}
