@@ -65,7 +65,11 @@ function ReelRow({ item, showFeedCover, onOpen }: { item: ReelListItemView; show
       {isUrgent ? <span className={styles.urgentRail} aria-hidden /> : null}
       <div className={styles.rowMain}>
         <div className={styles.titleLine}>
-          <span className={styles.rowTitle}>{item.title}</span>
+          {/* A derived label sits in the same slot at the same size — only quieter, so it
+              does not read as a title someone wrote. Layout and row height are unchanged. */}
+          <span className={item.titleIsDerived ? `${styles.rowTitle} ${styles.rowTitleDerived}` : styles.rowTitle}>
+            {item.title}
+          </span>
           {item.priority !== 'normal' ? <PriorityGlyph priority={item.priority} /> : null}
         </div>
         <div className={styles.metaLine}>

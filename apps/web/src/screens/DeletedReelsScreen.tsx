@@ -34,7 +34,11 @@ export function DeletedReelsScreen({ onBack, loadState, items, onOpenReel, onRet
           <li key={item.id} className={styles.row}>
             <button type="button" className={styles.rowMain} onClick={() => onOpenReel(item.id)}>
               <span className={styles.titleLine}>
-                <span className={styles.rowTitle}>{item.title}</span>
+                {/* Same treatment as the active list: an untitled Reel is labelled from its
+                    capture, quietly, rather than rendering an empty row. */}
+                <span className={item.titleIsDerived ? `${styles.rowTitle} ${styles.rowTitleDerived}` : styles.rowTitle}>
+                  {item.title}
+                </span>
               </span>
             </button>
           </li>

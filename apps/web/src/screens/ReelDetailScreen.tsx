@@ -23,7 +23,7 @@ import styles from './ReelDetailScreen.module.css';
  */
 export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
-    onBack, title, onChangeTitle,
+    onBack, title, onChangeTitle, titlePlaceholder,
     metadata, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook,
     script, onChangeScript, scriptConflict,
@@ -42,6 +42,9 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           className={styles.titleField}
           aria-label="Tytuł"
           value={title}
+          // The derived label, when there is no title. A placeholder keeps the field empty,
+          // so nothing here can be saved as a title the user did not write.
+          placeholder={titlePlaceholder}
           onChange={(event) => onChangeTitle(event.target.value)}
         />
         <CoverIndicator done={metadata.feedCoverDone} onClick={onOpenFeedCover} />

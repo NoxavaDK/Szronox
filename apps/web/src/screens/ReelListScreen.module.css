@@ -90,6 +90,18 @@
   min-width: 0;
 }
 
+/*
+ * A label derived from the capture, shown when no title has been written yet.
+ *
+ * Colour only. Size, weight, line height and layout stay exactly as `.rowTitle`, so the row
+ * keeps its 56–64 px height and the title remains first under width pressure (frozen visual
+ * spec sec. 2). The quieter colour is what distinguishes a derived label from an authored
+ * title; nothing else about the row changes.
+ */
+.rowTitleDerived {
+  color: var(--sz-color-text-secondary);
+}
+
 .metaLine {
   display: flex;
   align-items: center;

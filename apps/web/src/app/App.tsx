@@ -7,6 +7,7 @@ import type { CoreApiClient } from '../data/api.js';
 import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import type { AttachmentRecovery } from '../data/attachment-recovery.js';
+import { reelLabel } from '../data/reel-label.js';
 import { useAppController } from '../controllers/useAppController.js';
 import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
@@ -75,18 +76,24 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const editorOf = (editorId: string | null): EditorView | null =>
     editorId === c.user?.id ? c.user : editorId === c.peer?.id ? c.peer : null;
 
-  const toListItem = (reel: Reel): ReelListItemView => ({
-    id: reel.id,
-    title: reel.title,
-    priority: reel.priority,
-    editor: editorOf(reel.editorId),
-    isOverdue: false,
-    elapsedLabel: null,
-    verificationState: reel.verificationState,
-    programmeState: reel.programmeState,
-    memeName: null,
-    feedCoverDone: reel.feedCoverDone,
-  });
+  const toListItem = (reel: Reel): ReelListItemView => {
+    // Capture never writes a title, so an untitled Reel is labelled from the capture it
+    // already carries. Derived labels are flagged, not disguised as authored ones.
+    const label = reelLabel(reel);
+    return {
+      id: reel.id,
+      title: label.text,
+      titleIsDerived: label.derived,
+      priority: reel.priority,
+      editor: editorOf(reel.editorId),
+      isOverdue: false,
+      elapsedLabel: null,
+      verificationState: reel.verificationState,
+      programmeState: reel.programmeState,
+      memeName: null,
+      feedCoverDone: reel.feedCoverDone,
+    };
+  };
 
   /** Build the conflict-recovery view. Rendering it never resolves anything. */
   const conflictView = (): ConflictRecoveryView | undefined => (c.conflict ? {
@@ -156,6 +163,15 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     const peerName = c.peer?.name ?? '';
 
     /**
+     * A derived label reaches the title field as a placeholder, never as its value.
+     *
+     * The field stays genuinely empty, so opening an untitled Reel and editing something else
+     * cannot turn a guess into an authored title — and the user still sees what the Reel is
+     * instead of an empty box.
+     */
+    const label = reelLabel(reel);
+
+    /**
      * Verification is derived, never chosen: the verifier is the peer of the
      * selected editor. No export means no verification section at all.
      */
@@ -180,6 +196,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onBack={() => c.setRoute({ name: 'list' })}
       title={reel.title}
       onChangeTitle={(title) => c.changeReel({ title })}
+      titlePlaceholder={label.derived ? label.text : undefined}
       metadata={{
         status: reel.status,
         statusLabel: STATUS_LABELS[reel.status],

@@ -54,6 +54,15 @@
   padding: var(--sz-space-1) 0;
 }
 
+/*
+ * The derived label, when there is no authored title. Set explicitly rather than left to the
+ * browser's default placeholder grey, which is too faint to read as the Reel's identity.
+ */
+.titleField::placeholder {
+  color: var(--sz-color-text-secondary);
+  opacity: 1;
+}
+
 .titleField:focus {
   outline: none;
   border-bottom: 1px solid var(--sz-color-cobalt);

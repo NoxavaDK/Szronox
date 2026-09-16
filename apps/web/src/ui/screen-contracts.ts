@@ -332,7 +332,16 @@ export interface StatusTabView {
 
 export interface ReelListItemView {
   id: Id;
+  /**
+   * What to show in the title slot — an authored title, or a label derived from the capture
+   * when there is none. Never empty: a blank row is not a state the list can render.
+   */
   title: string;
+  /**
+   * True when `title` was derived rather than typed. Presented more quietly, so a derived
+   * label does not read as a title someone wrote. Optional: absent means authored.
+   */
+  titleIsDerived?: boolean;
   priority: Priority;
   editor: EditorView | null;
   /** True when the item has crossed its priority's attention threshold (T08-computed). */
@@ -484,6 +493,11 @@ export interface ReelDetailScreenProps {
   onBack: () => void;
   title: string;
   onChangeTitle: (value: string) => void;
+  /**
+   * Label to show while there is no authored title. A placeholder, so the field stays empty
+   * and a derived label can never be saved as a title by accident. Absent when one exists.
+   */
+  titlePlaceholder?: string;
 
   metadata: ReelDetailMetadataView;
   /** Controlled status/priority/MONTUJE selection (sec. 3). */

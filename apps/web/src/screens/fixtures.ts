@@ -51,6 +51,21 @@ export const fixtureListItems: ReelListItemView[] = [
     feedCoverDone: true,
   },
   {
+    // An untitled capture — the case that used to render a blank but tappable row. The label
+    // is derived from the shared link by `data/reel-label.ts` and shown more quietly.
+    id: 'r-4',
+    title: 'instagram.com/reel/ABC123',
+    titleIsDerived: true,
+    priority: 'normal',
+    editor: null,
+    isOverdue: false,
+    elapsedLabel: null,
+    verificationState: null,
+    programmeState: 'unchecked',
+    memeName: null,
+    feedCoverDone: false,
+  },
+  {
     id: 'r-3',
     title: 'Rozmowa z rolnikami o dopłatach',
     priority: 'evergreen',
