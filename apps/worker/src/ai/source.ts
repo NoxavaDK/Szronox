@@ -67,7 +67,15 @@ async function oneFetch(url: URL): Promise<{ status: number; location?: string; 
     const request = driver.request(url, {
       method: 'GET', timeout: 6_000,
       headers: { accept: 'text/html, text/plain', 'accept-encoding': 'identity', 'user-agent': 'SzroNoxSourceReader/1.0' },
-      lookup: (_hostname, _options, callback) => callback(null, pinned.address, pinned.family),
+      // Node calls this with `all: true` whenever it is choosing between address
+      // families, and then expects an array. Answering with the scalar form there
+      // leaves the socket with `addresses === undefined`, which surfaces as
+      // ERR_INVALID_IP_ADDRESS before any request is sent — so both shapes are
+      // honoured rather than assuming the scalar one.
+      lookup: (_hostname, options, callback) => (options as { all?: boolean } | undefined)?.all
+        ? (callback as unknown as (error: null, addresses: Array<{ address: string; family: number }>) => void)(
+          null, [{ address: pinned.address, family: pinned.family }])
+        : callback(null, pinned.address, pinned.family),
       maxHeaderSize: 16_384,
     }, (response) => {
       const status = response.statusCode ?? 0;
