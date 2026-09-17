@@ -168,21 +168,35 @@ async function privilegeViolations(pool: Pool): Promise<{ role: string; violatio
   );
   if (users.rows[0].writes) violations.push('it may write app.users');
 
-  const ai = await pool.query<{ can_read: boolean; can_update: boolean; can_insert: boolean; can_delete: boolean }>(
+  const ai = await pool.query<{ can_read: boolean; can_update_required: boolean; can_update_all: boolean;
+    can_update_input: boolean; can_insert: boolean; can_delete: boolean }>(
     `select has_table_privilege('app.ai_runs','SELECT') as can_read,
-            has_table_privilege('app.ai_runs','UPDATE') as can_update,
+            (select bool_and(has_column_privilege('app.ai_runs', column_name, 'UPDATE'))
+               from unnest(array['state','lease_token','lease_expires_at','attempt_count',
+                 'next_attempt_at','result','provenance','warnings','error',
+                 'applied_hook_ids','completed_at']) as column_name) as can_update_required,
+            has_table_privilege('app.ai_runs','UPDATE') as can_update_all,
+            (has_column_privilege('app.ai_runs','input_snapshot','UPDATE')
+              or has_column_privilege('app.ai_runs','application_history','UPDATE')) as can_update_input,
             has_table_privilege('app.ai_runs','INSERT') as can_insert,
             has_table_privilege('app.ai_runs','DELETE') as can_delete`);
-  if (!ai.rows[0].can_read || !ai.rows[0].can_update) violations.push('it cannot process app.ai_runs');
+  if (!ai.rows[0].can_read || !ai.rows[0].can_update_required) violations.push('it cannot process app.ai_runs');
+  if (ai.rows[0].can_update_all || ai.rows[0].can_update_input) violations.push('it may rewrite AI input or application history');
   if (ai.rows[0].can_insert || ai.rows[0].can_delete) violations.push('it may create or delete AI runs');
-  const domain = await pool.query<{ reels_unrelated_write: boolean; hooks_unrelated_write: boolean; programme_write: boolean }>(
-    `select (has_column_privilege('app.reels','script','UPDATE')
+  const domain = await pool.query<{ reels_required_write: boolean; reels_unrelated_write: boolean;
+    hooks_required_insert: boolean; hooks_unrelated_write: boolean; programme_write: boolean }>(
+    `select (has_column_privilege('app.reels','version','UPDATE')
+             and has_column_privilege('app.reels','updated_at','UPDATE')) as reels_required_write,
+            (has_column_privilege('app.reels','script','UPDATE')
              or has_column_privilege('app.reels','publication_description','UPDATE')
              or has_column_privilege('app.reels','original_input','UPDATE')) as reels_unrelated_write,
+            (select bool_and(has_column_privilege('app.reel_hooks', column_name, 'INSERT'))
+               from unnest(array['id','reel_id','text','source','position']) as column_name) as hooks_required_insert,
             (has_table_privilege('app.reel_hooks','UPDATE') or has_table_privilege('app.reel_hooks','DELETE')) as hooks_unrelated_write,
             (has_table_privilege('app.programme_versions','INSERT')
              or has_table_privilege('app.programme_proposals','UPDATE')
              or has_table_privilege('app.programme_chunks','DELETE')) as programme_write`);
+  if (!domain.rows[0].reels_required_write || !domain.rows[0].hooks_required_insert) violations.push('it cannot append hooks');
   if (domain.rows[0].reels_unrelated_write) violations.push('it may rewrite Reel content');
   if (domain.rows[0].hooks_unrelated_write) violations.push('it may edit or delete hooks');
   if (domain.rows[0].programme_write) violations.push('it may alter approved programme evidence');
@@ -226,10 +240,8 @@ export async function composeWorkerRuntime(env: WorkerEnv): Promise<WorkerRuntim
     /**
      * Development-only transactional probe.
      *
-     * A real transaction, so grants and transaction handling are exercised rather
-     * than assumed, and a read only, so a poll tick can never mutate application
-     * data. This is not a job claim: proving exactly-once work needs the AI
-     * lifecycle, which is not implemented.
+     * A real read-only transaction checks connectivity without consuming a job.
+     * The AI tick then uses its separately fenced claim/finalization path.
      */
     async function probe(): Promise<void> {
       const client = await pool.connect();
