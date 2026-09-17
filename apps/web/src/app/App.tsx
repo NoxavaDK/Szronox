@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { Login } from '../auth/Login.js';
@@ -13,6 +13,8 @@ import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
 import { ReelListScreen } from '../screens/ReelListScreen.js';
 import { DeletedReelsScreen } from '../screens/DeletedReelsScreen.js';
+import { AiWorkspace } from '../screens/AiWorkspace.js';
+import { MemePicker } from '../screens/MemePicker.js';
 import {
   COPY,
   STATUS_LABELS,
@@ -34,6 +36,23 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
+  const [aiCapability, setAiCapability] = useState({ enabled: false, programmeIndexed: false });
+  const [aiView, setAiView] = useState<{ view: 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'attached_programme'; autoStart: boolean } | null>(null);
+  const [memeOpen, setMemeOpen] = useState(false);
+  const [memeNames, setMemeNames] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    if (!c.user) { setAiView(null); setMemeOpen(false); setAiCapability({ enabled: false, programmeIndexed: false }); return; }
+    let live = true;
+    void api.aiCapabilities().then((value) => { if (live) setAiCapability(value); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [api, c.user?.id]);
+  useEffect(() => {
+    if (!c.current) { setMemeNames([]); return; }
+    let live = true;
+    void api.memes().then(({ items }) => { if (live) setMemeNames(items.filter((item) => c.current?.memeIds.includes(item.id)).map(({ id, name }) => ({ id, name }))); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [api, c.current?.id, c.current?.memeIds.join(',')]);
 
   const previews = useMemo(
     () => c.capture?.draft.input.images.map((image) => ({
@@ -142,7 +161,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onChangePriority={(priority) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, priority } }))}
       canSave={Boolean(form.draft.input.text || form.draft.input.url || form.draft.input.images.length)}
       onSave={() => void c.submitCapture()}
-      onOpracuj={() => c.setMessage('Opracuj będzie dostępne w kolejnym etapie.')}
+      onOpracuj={() => { void c.submitCapture(true).then((saved) => {
+        if (!saved) return;
+        if (aiCapability.enabled) setAiView({ view: 'develop', autoStart: true });
+        else c.setMessage('Opracuj jest teraz niedostępne. Pomysł został zapisany.');
+      }); }}
       saveState={c.saveState}
     /></>;
   }
@@ -159,6 +182,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
 
   if (c.route.name === 'detail' && c.current) {
     const reel = c.current;
+    if (memeOpen) return <>{notice}<MemePicker api={api} reel={reel} onClose={() => setMemeOpen(false)} onReel={c.acceptReel} /></>;
+    if (aiView) return <>{notice}<AiWorkspace key={aiView.view} api={api} reel={reel}
+      initialView={aiView.view} autoStart={aiView.autoStart} programmeIndexed={aiCapability.programmeIndexed}
+      onClose={() => setAiView(null)} onReel={c.acceptReel} onRefresh={() => c.openDetail(reel.id)}
+      onSwitch={(view, autoStart = false) => setAiView({ view, autoStart })} /></>;
     const editor = editorOf(reel.editorId);
     const peerName = c.peer?.name ?? '';
 
@@ -203,7 +231,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         priority: reel.priority,
         editor,
         programmeState: reel.programmeState,
-        memeName: null,
+        memeName: memeNames[0]?.name ?? null,
         feedCoverDone: reel.feedCoverDone,
         verificationState: reel.verificationState,
       }}
@@ -243,7 +271,13 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       script={reel.script}
       onChangeScript={(script) => c.changeReel({ script })}
       scriptConflict={c.conflict?.field === 'script' ? conflictView() : undefined}
-      aiRowEnabled={false}
+      aiRowEnabled={aiCapability.enabled && !['saving', 'conflict', 'offline'].includes(c.saveState)}
+      onAiAction={(action) => setAiView({ view: action, autoStart: false })}
+      onOpenMeme={() => setMemeOpen(true)}
+      attachedMemes={memeNames}
+      onDetachMeme={(memeId) => { void api.detachMeme(reel.id, memeId, { operationId: crypto.randomUUID(), expectedVersion: reel.version })
+        .then(c.acceptReel).catch((error) => c.setMessage(String(error))); }}
+      onOpenProgramme={() => setAiView({ view: reel.programmeAttachment ? 'attached_programme' : 'find_programme', autoStart: false })}
       sources={{
         expanded: sourcesExpanded,
         onToggle: () => setSourcesExpanded((value) => !value),

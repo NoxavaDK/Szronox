@@ -515,8 +515,13 @@ export interface ReelDetailScreenProps {
   onChangeScript: (value: string) => void;
   scriptConflict?: ConflictRecoveryView;
 
-  /** The compact Fakty / Aa Język / ✦ Opracuj row; capability-disabled for this milestone. */
-  aiRowEnabled: false;
+  /** The compact Fakty / Aa Język / ✦ Opracuj row. */
+  aiRowEnabled: boolean;
+  onAiAction?: (action: 'fact_check' | 'language_check' | 'develop') => void;
+  onOpenMeme?: () => void;
+  onDetachMeme?: (memeId: Id) => void;
+  attachedMemes?: Array<{ id: Id; name: string }>;
+  onOpenProgramme?: () => void;
 
   /** Expanded inline sections, in the frozen order. */
   sources: SourcesSectionProps;

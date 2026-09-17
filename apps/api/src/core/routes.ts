@@ -36,6 +36,7 @@ export interface CoreDependencies {
   attachmentLimits?: AttachmentLimits;
   /** The two allowlisted users, for /me peer identity. */
   allowlist: Array<{ id: string; name: 'NOXAVA' | 'SZRON'; avatarUrl?: string | null }>;
+  aiEnabled?: boolean;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

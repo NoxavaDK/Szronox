@@ -182,7 +182,7 @@ export class CoreRepository {
         [row.id],
       ),
       tx.query<{ meme_id: string }>(
-        'select meme_id from app.reel_memes where reel_id = $1 order by attached_at asc',
+        'select meme_id from app.reel_memes where reel_id = $1 order by position asc',
         [row.id],
       ),
     ]);

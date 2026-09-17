@@ -230,13 +230,13 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     for (const file of Array.from(files)) { const attachmentId = crypto.randomUUID(); images.push({ attachmentId, fileName: file.name, mimeType: file.type, byteSize: file.size }); blobs.set(attachmentId, file); fileNames[attachmentId] = file.name; }
     return { ...form, kind: 'image', blobs, draft: { ...form.draft, input: { ...form.draft.input, images: [...form.draft.input.images, ...images] }, fileNames } };
   }), [updateCapture]);
-  const submitCapture = useCallback(async () => {
-    if (!capture || !user) return; setSaveState('saving');
+  const submitCapture = useCallback(async (withAi = false): Promise<Reel | null> => {
+    if (!capture || !user) return null; setSaveState('saving');
     try {
       await store.saveCapture({ ...capture.draft, state: 'queued' }, capture.blobs);
       await store.enqueue({ id: capture.draft.operationId, accountId: user.id, kind: 'create', reelId: capture.draft.reelId, createdAt: Date.now(), state: 'pending', payload: { operationId: capture.draft.operationId, reelId: capture.draft.reelId, input: capture.draft.input, initialHook: capture.draft.initialHook || undefined, priority: capture.draft.priority } });
       await queue.flush(); const remaining = await store.queue(user.id); const item = remaining.find((x) => x.id === capture.draft.operationId);
-      if (item) { setSaveState(item.state === 'conflict' ? 'conflict' : navigator.onLine ? 'error' : 'offline'); return; }
+      if (item) { setSaveState(item.state === 'conflict' ? 'conflict' : navigator.onLine ? 'error' : 'offline'); return null; }
       // The Reel exists now, so the images can go. The draft and its blobs stay until
       // the server acknowledges each attachment, so leaving this screen — or closing
       // the tab mid-upload — loses nothing and the next recovery pass resumes with the
@@ -244,10 +244,18 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       const progress = capture.draft.input.images.length === 0
         ? []
         : [await attachments.runCapture({ ...capture.draft, state: 'queued' })];
-      setSaveState('saved'); setCapture(null); setRoute({ name: 'list' });
+      const complete = progress.every((item) => item.complete && !item.abandoned);
+      setSaveState(complete ? 'saved' : 'error'); setCapture(null);
+      if (withAi && complete) {
+        const reel = await api.reel(capture.draft.reelId);
+        currentRef.current = reel; setCurrent(reel); setRoute({ name: 'detail', reelId: reel.id });
+        return reel;
+      }
+      setRoute({ name: 'list' });
       reportAttachments(progress);
-    } catch (error) { if (isAbandonedRequest(error)) return; setSaveState('error'); setMessage(polishError(error)); }
-  }, [attachments, capture, queue, reportAttachments, store, user]);
+      return null;
+    } catch (error) { if (isAbandonedRequest(error)) return null; setSaveState('error'); setMessage(polishError(error)); return null; }
+  }, [api, attachments, capture, queue, reportAttachments, store, user]);
 
   const changeReel = useCallback((changes: ReelPatchRequest['changes']) => {
     const reel = currentRef.current;
@@ -294,6 +302,11 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       }, 600);
     }).catch((error) => { setSaveState('error'); setMessage(polishError(error)); });
   }, [api, store, user]);
+
+  const acceptReel = useCallback((reel: Reel) => {
+    currentRef.current = reel;
+    setCurrent(reel);
+  }, []);
 
   const removeHook = useCallback(async (hookId: string) => {
     if (!current || !user) return; const request = { operationId: crypto.randomUUID(), expectedVersion: current.version }; setSaveState('saving');
@@ -431,6 +444,6 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, [auth, clearAccountView, recover]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
+  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs };
 }

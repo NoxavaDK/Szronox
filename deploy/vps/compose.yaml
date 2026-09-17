@@ -8,8 +8,9 @@ name: szronox-dev
 #   szronox_dev     database owner. Migrations, grants and provisioning only.
 #   szronox_api     the API process. Reads the roster and credential hashes, reads and
 #                   writes sessions and domain data. Cannot manage users or the schema.
-#   szronox_worker  the worker process. Reads domain data. No access to credentials or
-#                   sessions at all.
+#   szronox_worker  the AI worker process. Reads domain data and writes only fenced AI
+#                   job lifecycle, additive hooks and the Reel version. No access to
+#                   credentials or sessions at all.
 #   postgres        never used by the application.
 #
 # Each service mounts only the secrets its own identity needs. The API and worker refuse
@@ -19,6 +20,8 @@ networks:
   private:
     name: szronox-dev_private
     internal: true
+  worker_egress:
+    name: szronox-dev_worker_egress
 
 volumes:
   postgres_data:
@@ -163,6 +166,7 @@ services:
       # localhost default here: the operator must supply the actual origin explicitly.
       APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the exact browser origin; VPS-05 supplies the HTTPS hostname}
       APP_STORAGE_ROOT: /var/lib/szronox/storage
+      AI_ENABLED: ${AI_ENABLED:-false}
       # The addresses of the reverse proxy, so request.ip is the real client and the
       # login throttle keys per client. Empty means trust nothing, which behind a proxy
       # makes that throttle one global counter. Never "true": any client could then
@@ -223,11 +227,14 @@ services:
       DATABASE_USER: szronox_worker
       DATABASE_PASSWORD_FILE: /run/secrets/worker_db_password
       DATABASE_POOL_MAX: "2"
-      WORKER_POLL_MS: "30000"
-    # No CSRF secret and no storage volume: the worker authenticates nobody and handles
-    # no attachment bytes.
+      WORKER_POLL_MS: "5000"
+      AI_ENABLED: ${AI_ENABLED:-false}
+      APP_STORAGE_ROOT: /var/lib/szronox/storage
+    # The worker has no CSRF secret; it reads validated image objects only.
     secrets: [worker_db_password]
-    networks: [private]
+    networks: [private, worker_egress]
+    volumes:
+      - app_storage:/var/lib/szronox/storage:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777

@@ -22,6 +22,10 @@ const messages: Partial<Record<ErrorCode, string>> = {
   PROVIDER_UNAVAILABLE: 'Usługa jest chwilowo niedostępna.',
   PROVIDER_ACCESS_DENIED: 'Brak dostępu do pliku.',
   PROVIDER_RESOURCE_MISSING: 'Plik nie jest już dostępny.',
+  INVALID_AI_RESULT: 'Nie udało się przygotować poprawnej propozycji. Spróbuj ponownie.',
+  INSUFFICIENT_EVIDENCE: 'Brak zatwierdzonego źródła do sprawdzenia postulatu.',
+  STALE_FACT_CLAIM: 'Ten fragment zmienił się od sprawdzenia. Sprawdź fakty ponownie.',
+  STALE_LANGUAGE_RESULT: 'Skrypt zmienił się od sprawdzenia języka. Sprawdź ponownie.',
   INTERNAL_ERROR: 'Wystąpił błąd. Spróbuj ponownie.',
 };
 
@@ -37,7 +41,10 @@ export function isAbandonedRequest(error: unknown): boolean {
 }
 
 export function polishError(error: unknown): string {
-  if (error instanceof ClientApiError) return messages[error.api.code] ?? error.api.message;
+  if (error instanceof ClientApiError) {
+    if (error.api.details?.reason === 'programme_attached') return 'Przypięty postulat pozostaje. Odłącz go osobno, jeśli chcesz usunąć powiązanie.';
+    return messages[error.api.code] ?? error.api.message;
+  }
   if (error instanceof DOMException && error.name === 'QuotaExceededError') return 'Brak miejsca na zapis lokalny.';
   // Aborted work has no user-facing meaning, but a message is still required by the
   // signature; callers are expected to filter it with `isAbandonedRequest` first.

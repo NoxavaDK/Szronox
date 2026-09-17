@@ -74,6 +74,18 @@ export async function composeApiRuntime(env: ApiRuntimeEnv): Promise<ApiRuntime>
     await database.db.query('select 1 as ok');
 
     const privileges = await assertRolePrivileges(database.db, 'api', { enforce: enforcePrivileges(env) });
+    if (env.AI_ENABLED === 'true' && enforcePrivileges(env)) {
+      const ai = await database.db.query<{ runs_select: boolean; runs_insert: boolean; runs_update: boolean; programme_select: boolean; programme_write: boolean }>(
+        `select has_table_privilege('app.ai_runs','SELECT') as runs_select,
+                has_table_privilege('app.ai_runs','INSERT') as runs_insert,
+                has_table_privilege('app.ai_runs','UPDATE') as runs_update,
+                has_table_privilege('app.programme_versions','SELECT') as programme_select,
+                has_table_privilege('app.programme_versions','INSERT') as programme_write`);
+      const grant = ai.rows[0];
+      if (!grant.runs_select || !grant.runs_insert || !grant.runs_update || !grant.programme_select || grant.programme_write) {
+        throw new Error('API AI grants are missing or programme write access is too wide');
+      }
+    }
 
     const core = buildCoreDependencies(database.db, env);
     // Awaited before listening, per the runtime contract: ownership, modes, the

@@ -14,9 +14,8 @@
 --                   domain data. It cannot add, rename or remove a user, and it cannot
 --                   write a credential — so a compromised API cannot create an identity,
 --                   change a password, or lock either account out.
---   szronox_worker  reads domain data. It has no access whatsoever to credentials or
---                   sessions, so compromising background processing does not hand over
---                   either account's login.
+--   szronox_worker  reads domain data and writes only fenced AI jobs, additive hooks
+--                   and Reel version bumps. It has no access to credentials or sessions.
 --
 -- Neither role owns anything, neither may CREATE in `app`, and both are refused at
 -- startup by the application if these grants are ever widened.
@@ -27,9 +26,8 @@ grant usage on schema app to szronox_api, szronox_worker;
 revoke create on schema app from szronox_api, szronox_worker;
 
 -- ── Domain tables ───────────────────────────────────────────────────────────────
--- Both processes work with the shared Reel data. The API writes it; the worker reads it,
--- because nothing in VPS-04 gives the worker a write path — T12/T16 are not implemented,
--- and granting writes for work that does not exist would be granting them on faith.
+-- Both processes work with shared Reel data. The API owns ordinary edits; GEMINI-02
+-- gives the worker only the narrow writes listed below.
 grant select, insert, update, delete on
   app.reels, app.reel_hooks, app.attachments, app.reel_memes, app.operations
   to szronox_api;
@@ -37,6 +35,20 @@ grant select, insert, update, delete on app.memes to szronox_api;
 grant select on
   app.reels, app.reel_hooks, app.attachments, app.reel_memes, app.memes, app.operations
   to szronox_worker;
+
+-- GEMINI-02: worker writes only its job lifecycle and additive hooks. It can
+-- advance the Reel version after hook append, but cannot edit any Reel content.
+grant select, insert, update on app.ai_runs to szronox_api;
+grant select on app.ai_runs to szronox_worker;
+grant update (state, lease_token, lease_expires_at, attempt_count, next_attempt_at,
+  result, provenance, warnings, error, applied_hook_ids, completed_at)
+  on app.ai_runs to szronox_worker;
+grant insert (id, reel_id, text, source, position) on app.reel_hooks to szronox_worker;
+grant update (version, updated_at) on app.reels to szronox_worker;
+grant select on app.programme_versions, app.programme_proposals, app.programme_chunks
+  to szronox_api, szronox_worker;
+revoke insert, update, delete on app.programme_versions, app.programme_proposals,
+  app.programme_chunks from szronox_api, szronox_worker;
 
 -- ── Roster ──────────────────────────────────────────────────────────────────────
 -- Read-only for both. The roster is an operator decision applied by the provisioning

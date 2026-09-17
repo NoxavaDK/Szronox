@@ -1,5 +1,6 @@
 import type {
   AddHookRequest, AttachmentReference, CompleteAttachmentRequest, CreateReelRequest, EditHookRequest,
+  AiAction, AiRun, ApplyAiRequest, AttachMemeRequest, CreateMemeRequest, Meme, StartAiRunRequest,
   ErrorResponse, InitiateAttachmentRequest, InitiateAttachmentResponse, Reel, ReelListQuery,
   ReelPatchRequest, RemoveHookRequest, RenewAttachmentUploadResponse, ReplaceExportRequest,
   UploadTransport, User, VerifyExportRequest,
@@ -126,6 +127,17 @@ export class CoreApiClient {
   restore = (id: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/restore`, { method: 'POST', body: JSON.stringify(body) });
   replaceExport = (id: string, body: ReplaceExportRequest) => this.request<Reel>(`/reels/${id}/current-export`, { method: 'POST', body: JSON.stringify(body) });
   verifyExport = (id: string, body: VerifyExportRequest) => this.request<Reel>(`/reels/${id}/verification`, { method: 'POST', body: JSON.stringify(body) });
+
+  aiCapabilities = () => this.request<{ enabled: boolean; programmeIndexed: boolean }>('/ai/capabilities');
+  startAi = (id: string, body: StartAiRunRequest) => this.request<{ id: string; state: 'queued' }>(`/reels/${id}/ai-runs`, { method: 'POST', body: JSON.stringify(body) });
+  latestAi = (id: string, action?: AiAction) => this.request<{ run: AiRun | null }>(`/reels/${id}/ai-runs/latest${action ? `?action=${action}` : ''}`);
+  aiRun = (id: string) => this.request<AiRun>(`/ai-runs/${id}`);
+  applyAi = (id: string, body: ApplyAiRequest) => this.request<Reel>(`/ai-runs/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
+  memes = (query = '') => this.request<{ items: Meme[] }>(`/memes?q=${encodeURIComponent(query)}`);
+  createMeme = (body: CreateMemeRequest) => this.request<{ meme: Meme; reel: Reel | null }>('/memes', { method: 'POST', body: JSON.stringify(body) });
+  attachMeme = (reelId: string, body: AttachMemeRequest) => this.request<Reel>(`/reels/${reelId}/memes`, { method: 'POST', body: JSON.stringify(body) });
+  detachMeme = (reelId: string, memeId: string, body: { operationId: string; expectedVersion: number }) => this.request<Reel>(`/reels/${reelId}/memes/${memeId}`, { method: 'DELETE', body: JSON.stringify(body) });
+  detachProgramme = (reelId: string, body: { operationId: string; expectedVersion: number }) => this.request<Reel>(`/reels/${reelId}/programme-association`, { method: 'DELETE', body: JSON.stringify(body) });
 
   // ── Private attachment transport ───────────────────────────────────────────
   //

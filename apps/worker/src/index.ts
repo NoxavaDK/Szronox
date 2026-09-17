@@ -5,10 +5,8 @@
  * and the role's grants must be narrow enough, or the process exits 1; unconfigured
  * outside production means the previous idle scaffold, announced as such.
  *
- * Each tick runs a read-only transactional probe and nothing else. There is no AI
- * lifecycle, no job claim and no model call — implementing those is T12/T16, and a
- * tick that pretended to claim work would make the next task's exactly-once problem
- * look solved when it is not.
+ * Each tick probes the database, then processes at most one durable AI run when
+ * AI_ENABLED is set. Job ownership and finalization are fenced in the AI module.
  *
  * Shutdown mirrors the API: repeat-safe, one bounded deadline, exit 0 on a clean
  * drain and exit 1 when the deadline passes or draining fails.
@@ -56,11 +54,10 @@ const timer = setInterval(() => {
   // Overlap-safe: a slow probe must not stack ticks on a two-connection pool.
   if (ticking || runtime === null || shuttingDown) return;
   ticking = true;
-  void runtime.probe()
+  void runtime.tick()
     .catch((error: unknown) => {
-      // A failed tick is reported and retried on the next interval. It is not a
-      // reason to exit: a development database restart should not take the worker
-      // down, and there is no work in flight to lose.
+      // A failed tick is reported and retried on the next interval. A claimed
+      // run recovers through its bounded lease after a process/database failure.
       process.stderr.write(`worker probe failed: ${error instanceof Error ? error.message : String(error)}\n`);
     })
     .finally(() => { ticking = false; });

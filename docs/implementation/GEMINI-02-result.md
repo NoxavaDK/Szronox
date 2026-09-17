@@ -1,0 +1,35 @@
+# GEMINI-02 — shared durable AI pipeline
+
+Implementation branch: `codex/gemini-02-impl`, worktree `.worktrees/gemini-02-impl`, based on LABEL-01 `52b1ecf`. This is the one approved implementation agent; there are no nested agents. The implementation is for the isolated SzroNox DEV release only. Final editorial voice and Style Profile remain unfrozen; stored runs use the honest `development_provisional` prompt stage and versioned prompt ID.
+
+## Implemented boundary
+
+- One PostgreSQL `app.ai_runs` queue holds immutable captured Reel input, validated input-image references, bounded existing Meme candidates, approved programme-index evidence, run result, private provenance, warnings, lease token, retry state and application history. API operations are actor-, route- and payload-scoped in the existing idempotency ledger.
+- The worker claims with `FOR UPDATE SKIP LOCKED`, a five-minute lease and fencing token. Provider/source execution has a four-minute outer deadline; expired owners cannot finalize. Finalization commits the result and at most three new persistent hooks together. Hook generation is explicitly additive; all other result fields require explicit version-checked application.
+- `Opracuj` snapshots original text, URL, additional text, shared fields, notes, script, hooks, publication fields and validated images. It returns separate title, summary, verification questions, script, publication description, hashtags, priority, provisional programme relevance and zero/one existing Meme suggestion. Publication replacement requires the current saved value and an explicit confirmation; a concurrent conflict reloads the current field without losing the generated draft.
+- `Sprawdź fakty` includes the current script and every active hook, records the exact source span and retained evidence, uses exactly the three frozen factual statuses, and applies source-scoped corrections. Application history remaps unaffected script claims deterministically after earlier corrections; overlapping or changed context becomes stale. `Sprawdź język` exposes editable A/B drafts and guards full-script application with both script text and monotonic revision, including edit-and-revert.
+- `Sprawdź postulat` uses only chunks from an operator-approved versioned PDF index. It cannot fabricate candidate IDs, source URL or page metadata. Results never attach automatically. Replacement rejection preserves an existing attached proposition; only explicit `Przypnij` or `Odłącz` changes it. With no approved corpus, enqueue fails closed with `INSUFFICIENT_EVIDENCE`.
+- A small shared Meme name/thumbnail library supports validated private-image creation from the current Reel, ordered attach/detach and bounded real candidate IDs in Opracuj. First attached Meme remains primary; suggestions never auto-attach and a null suggestion never detaches.
+- API/worker use separate role grants. The worker receives read-only validated image storage and network egress; only the worker reads the mounted Gemini key. The API never receives it. The deployment overlay for the real DEV key is host-owned and outside the repository.
+
+## Source/operator input still required
+
+No approved programme PDF or index manifest was found in the repository or current DEV artifacts. The operator must supply the authoritative approved PDF, its version-pinned HTTPS source URL, and a reviewed JSON manifest containing stable document/proposal/chunk IDs, exact excerpts, proposal/category/chapter labels and PDF/printed page metadata. `apps/api/src/ai/import-programme-cli.ts` validates and hashes the PDF, requires owner database role, and loads a single approved version atomically. Nothing is fabricated from model memory or web search.
+
+## Verification recorded before DEV application deployment
+
+- `npm run build` — contracts, web/PWA, API and worker builds pass.
+- `node --test apps/api/dist/ai/service.test.js` — six focused PGlite cases pass for snapshot validation, publication replacement, independent and overlapping factual corrections, language revision, programme attachment preservation/no-match null-version and idempotency scope.
+- `node --test apps/worker/dist/ai/actions.test.js` — three focused cases pass for bounded Meme IDs and separate publication drafts, unsupported fact-evidence downgrade, and refusal of unindexed programme chunks.
+- `git diff --check` — pass.
+- The disposable real-PostgreSQL harness at `apps/worker/test/postgres/ai-pipeline-harness.mjs` is staged for the predeployment boundary. It refuses to run unless `AI_TEST_DISPOSABLE=yes` and database name `ai_pipeline_disposable`; it has **not yet run**. It must run in a separate ephemeral PostgreSQL container, never against live DEV tables.
+
+The bounded live probe ran inside a disposable read-only container on the approved DEV egress network, with the existing key file mounted read-only under its current owner UID/GID. It printed only status/diagnostic fields with key redaction. On `gemini-3.8-flash`, plain text, corrected structured JSON and inline-image structured JSON each returned HTTP 200 with `STOP` and a text part. Google Search grounding returned HTTP 429 `RESOURCE_EXHAUSTED` for the DEV key on both 3.8 and 3.6. URL-context tool checks returned transient 503 on 3.8 and a retrieval-status error on 3.6; the implementation instead retrieves bounded public URL content itself. These are provider capability observations, not a passed end-to-end Opracuj or Fact Check run. The worker request format was corrected from the rejected `responseFormat.text.mimeType` form to `responseMimeType` + `responseJsonSchema` for `generateContent`.
+
+## Gates and deployment state
+
+**OPEN REAL-WORLD GATE:** live Fact Check cannot complete its Google Search grounding with the current DEV key quota (HTTP 429). A full provider-backed Reel run, real browser/HTTPS acceptance, and Android installed Share Target remain unverified. Programme matching needs the approved corpus above.
+
+**Predeployment:** root bounded integration review, disposable real-PostgreSQL race/fencing test, DEV database and storage backup, migration/grants application, same-release API/worker rollout and rollback pin. Gemini has **not been deployed**. The running DEV application was last observed at image `758d780`; the implementation branch is based on the separately approved LABEL-01 commit `52b1ecf`.
+
+No production host, Task Tracker, scaffold or unrelated project was changed. No key is committed, printed, passed in an argument or stored in SQL.

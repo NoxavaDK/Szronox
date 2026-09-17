@@ -30,6 +30,7 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
     sources, editingNotes, materials,
     publicationExpanded, onTogglePublication, publication,
     saveState, conflict,
+    aiRowEnabled, onAiAction, onOpenMeme, onDetachMeme, attachedMemes, onOpenProgramme,
   } = props;
 
   return (
@@ -58,11 +59,14 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       <MetadataSelectors {...selectors} />
 
       {metadata.programmeState !== 'unchecked' ? (
-        <p className={styles.metadataProgramme}>
+        <button type="button" className={styles.metadataProgramme} onClick={onOpenProgramme}>
           {metadata.programmeState === 'matched' ? 'Program: powiązane' : 'Program: brak powiązania'}
-        </p>
+        </button>
       ) : null}
-      {metadata.memeName ? <p className={styles.metadataItem}>Mem: {metadata.memeName}</p> : null}
+      <div className={styles.metadataItem}>
+        {attachedMemes?.map((meme) => <span key={meme.id}>Mem: {meme.name} <button type="button" onClick={() => onDetachMeme?.(meme.id)} aria-label={`Odłącz mem ${meme.name}`}>×</button> </span>)}
+        <button type="button" onClick={onOpenMeme}>{attachedMemes?.length ? '+ kolejny' : '+ Mem'}</button>
+      </div>
 
       <section className={styles.contentBlock}>
         <h2 className={styles.sectionLabel}>Hooki</h2>
@@ -96,11 +100,10 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
         {scriptConflict ? <ConflictNotice conflict={scriptConflict} /> : null}
       </section>
 
-      {/* Capability-disabled for this milestone: present, honestly inert. */}
       <div className={styles.aiRow} aria-label="Akcje AI">
-        <button type="button" className={styles.aiButton} disabled>Fakty</button>
-        <button type="button" className={styles.aiButton} disabled>Aa Język</button>
-        <button type="button" className={styles.aiButton} disabled>✦ Opracuj</button>
+        <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('fact_check')}>Fakty</button>
+        <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('language_check')}>Aa Język</button>
+        <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('develop')}>✦ Opracuj</button>
       </div>
 
       <div className={styles.secondarySections}>

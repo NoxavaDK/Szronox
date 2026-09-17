@@ -42,6 +42,7 @@ export class ConfigError extends Error {
 }
 
 export interface CoreEnv extends AuthEnv {
+  AI_ENABLED?: string;
   /** Absolute private filesystem root. */
   APP_STORAGE_ROOT?: string;
   /** Same-origin base used to construct absolute upload transport URLs. */
@@ -121,6 +122,7 @@ export function buildCoreDependencies(
     authenticate: auth.authenticate,
     storage: buildStorage(env),
     allowlist: allowlist.map((entry) => ({ ...entry, avatarUrl: null })),
+    aiEnabled: env.AI_ENABLED === 'true',
     auth,
   };
 }

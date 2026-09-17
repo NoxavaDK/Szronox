@@ -2,11 +2,8 @@
  * Worker runtime composition.
  *
  * The worker is a second process against the same database, with its own bounded
- * pool, its own credentials and its own — deliberately much smaller — set of grants.
- * It does no AI work: T12/T16 are not implemented here, and nothing in this file
- * dispatches a job, calls a model or reads a prompt. What it establishes is the
- * runtime seam a later AI task can build on, with the privilege boundary already in
- * place.
+ * pool, its own credentials and its own deliberately narrow grants. When enabled,
+ * it dispatches the durable GEMINI-02 jobs through the AI module.
  *
  * The privilege assertion is the substantive part. A worker that can read
  * `app.user_credentials` or `app.auth_sessions` turns any compromise of background
@@ -25,6 +22,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { Pool } from 'pg';
+import { tickAi } from './ai/jobs.js';
 
 export class WorkerConfigError extends Error {
   constructor(message: string) {
@@ -52,6 +50,9 @@ export interface WorkerEnv {
   DATABASE_POOL_MAX?: string;
   WORKER_POLL_MS?: string;
   APP_ENFORCE_DB_PRIVILEGES?: string;
+  AI_ENABLED?: string;
+  GEMINI_API_KEY_FILE?: string;
+  APP_STORAGE_ROOT?: string;
 }
 
 const present = (value: string | undefined): value is string =>
@@ -118,6 +119,7 @@ export interface WorkerRuntime {
   describe(): Record<string, unknown>;
   /** Bounded, read-only transactional probe. Used at startup and by each tick. */
   probe(): Promise<void>;
+  tick(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -165,12 +167,35 @@ async function privilegeViolations(pool: Pool): Promise<{ role: string; violatio
           or pg_catalog.has_table_privilege('app.users', 'DELETE')) as writes`,
   );
   if (users.rows[0].writes) violations.push('it may write app.users');
+
+  const ai = await pool.query<{ can_read: boolean; can_update: boolean; can_insert: boolean; can_delete: boolean }>(
+    `select has_table_privilege('app.ai_runs','SELECT') as can_read,
+            has_table_privilege('app.ai_runs','UPDATE') as can_update,
+            has_table_privilege('app.ai_runs','INSERT') as can_insert,
+            has_table_privilege('app.ai_runs','DELETE') as can_delete`);
+  if (!ai.rows[0].can_read || !ai.rows[0].can_update) violations.push('it cannot process app.ai_runs');
+  if (ai.rows[0].can_insert || ai.rows[0].can_delete) violations.push('it may create or delete AI runs');
+  const domain = await pool.query<{ reels_unrelated_write: boolean; hooks_unrelated_write: boolean; programme_write: boolean }>(
+    `select (has_column_privilege('app.reels','script','UPDATE')
+             or has_column_privilege('app.reels','publication_description','UPDATE')
+             or has_column_privilege('app.reels','original_input','UPDATE')) as reels_unrelated_write,
+            (has_table_privilege('app.reel_hooks','UPDATE') or has_table_privilege('app.reel_hooks','DELETE')) as hooks_unrelated_write,
+            (has_table_privilege('app.programme_versions','INSERT')
+             or has_table_privilege('app.programme_proposals','UPDATE')
+             or has_table_privilege('app.programme_chunks','DELETE')) as programme_write`);
+  if (domain.rows[0].reels_unrelated_write) violations.push('it may rewrite Reel content');
+  if (domain.rows[0].hooks_unrelated_write) violations.push('it may edit or delete hooks');
+  if (domain.rows[0].programme_write) violations.push('it may alter approved programme evidence');
   return { role: row.role, violations };
 }
 
 export async function composeWorkerRuntime(env: WorkerEnv): Promise<WorkerRuntime> {
   const pollMs = bounded(env.WORKER_POLL_MS, 'WORKER_POLL_MS', 30_000, 1_000, 3_600_000);
   const enforce = boolish(env.APP_ENFORCE_DB_PRIVILEGES, 'APP_ENFORCE_DB_PRIVILEGES', true);
+  const aiEnabled = boolish(env.AI_ENABLED, 'AI_ENABLED', false);
+  if (aiEnabled && (!present(env.GEMINI_API_KEY_FILE) || !present(env.APP_STORAGE_ROOT))) {
+    throw new WorkerConfigError('AI_ENABLED requires GEMINI_API_KEY_FILE and APP_STORAGE_ROOT');
+  }
   // Two connections is enough for one tick plus a probe. A larger worker pool would
   // compete with the API for a small development server's connection slots.
   const pool = new Pool({
@@ -229,6 +254,10 @@ export async function composeWorkerRuntime(env: WorkerEnv): Promise<WorkerRuntim
       pollMs,
       role,
       probe,
+      async tick() {
+        if (aiEnabled) await tickAi(pool, env);
+        else await probe();
+      },
       privilegeViolations: violations,
       privilegeEnforcement: enforce ? 'enforced' : 'reported_only',
       describe: () => ({
@@ -242,7 +271,7 @@ export async function composeWorkerRuntime(env: WorkerEnv): Promise<WorkerRuntim
         pollMs,
         privilegeEnforcement: enforce ? 'enforced' : 'reported_only',
         privilegeViolations: violations,
-        aiLifecycle: 'not_implemented',
+        aiLifecycle: aiEnabled ? 'enabled' : 'disabled',
       }),
       async close() {
         if (closed) return;
