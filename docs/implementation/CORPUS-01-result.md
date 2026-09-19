@@ -1,7 +1,7 @@
 # CORPUS-01 — approved programme corpus: importer, schema, retrieval, citation source
 
-Branch `codex/corpus-01`, commit `bf90810`, worktree `.worktrees/corpus-01`, based on
-`codex/gemini-02-impl` (`c13f7a1`). Not merged.
+Branch `codex/corpus-01`, worktree `.worktrees/corpus-01`, based on `codex/gemini-02-impl` (`c13f7a1`).
+Implementation commit `7be52b5`; this record is the commit after it. Not merged.
 Implemented by the root agent directly on the approved Opus scope brief; no coding agent was dispatched
 and no nested agent was spawned.
 
@@ -50,7 +50,8 @@ from the archived bytes; passage grounding against that text; a coverage ledger;
 - `apps/api/src/core/routes.ts` — `programmeArchiveRoot` dependency
 - `apps/api/src/core/config.ts` — `PROGRAMME_ARCHIVE_ROOT`, defaulting to `<APP_STORAGE_ROOT>/programme`
 - `apps/api/src/deploy-grants.test.ts` — corpus grants and immutability assertions
-- `apps/api/package.json` — `node --test dist/` so nested test files actually run
+- `apps/api/src/core.test.ts`, `apps/api/src/vps-integration.test.ts`, `apps/api/src/ai/service.test.ts` — stale assertions and fixtures (§7)
+- `apps/api/package.json` — `node --test dist/*.test.js dist/*/*.test.js`, so nested test files actually run
 - `apps/worker/src/ai/actions.ts` — page arrays, reduced model projection, proposal de-duplication
 - `apps/worker/src/ai/actions.test.ts`
 - `deploy/vps/postgres/grants.sql` — corpus tables readable, never writable, by both runtime roles
