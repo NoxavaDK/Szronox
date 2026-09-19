@@ -26,7 +26,10 @@ test('combined migrations, /me sessions and filesystem attachment routes compose
   const app = Fastify();
   try {
     const first = await migrate(db);
-    assert.deepEqual(first.map(x => x.name), ['0001_core_schema.sql', '0002_script_revision.sql', '0003_vps_auth.sql', '0004_vps_storage.sql']);
+    // Every committed migration, in order. GEMINI-02's 0005 was never added here;
+    // CORPUS-01 adds 0006 and restores the assertion.
+    assert.deepEqual(first.map(x => x.name), ['0001_core_schema.sql', '0002_script_revision.sql',
+      '0003_vps_auth.sql', '0004_vps_storage.sql', '0005_ai_pipeline.sql', '0006_programme_corpus.sql']);
     assert.ok((await migrate(db)).every(x => x.alreadyApplied));
     await seedUsers(db, users);
     await provisionTestCredentials(db, users);

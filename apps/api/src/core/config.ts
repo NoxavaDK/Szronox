@@ -18,6 +18,8 @@
  * what was configured without printing any of it.
  */
 
+import path from 'node:path';
+
 import { buildAuthDependencies } from '../auth/compose.js';
 import { type AuthEnv, describeAuthConfig } from '../auth/config.js';
 import type { Database } from '../db/client.js';
@@ -52,6 +54,12 @@ export interface CoreEnv extends AuthEnv {
   APP_ALLOWLIST?: string;
   /** Opt-in, development only: use the in-memory storage adapter. */
   STORAGE_DRIVER?: string;
+  /**
+   * Private root holding archived programme sources. Defaults to `programme/` under the
+   * storage root, so a deployment that configured storage already has an archive; set it
+   * explicitly to keep the corpus on a separate volume.
+   */
+  PROGRAMME_ARCHIVE_ROOT?: string;
 }
 
 const present = (value: string | undefined): value is string =>
@@ -105,6 +113,19 @@ export function buildStorage(env: CoreEnv): StorageAdapter {
 }
 
 /**
+ * Where archived programme sources live.
+ *
+ * Never a silent fallback to a writable temporary directory: with neither an explicit root
+ * nor a storage root there is no archive, the source route says so, and `find_programme`
+ * still fails closed on its own account.
+ */
+export function programmeArchiveRoot(env: CoreEnv): string | undefined {
+  if (present(env.PROGRAMME_ARCHIVE_ROOT)) return path.resolve(env.PROGRAMME_ARCHIVE_ROOT.trim());
+  if (present(env.APP_STORAGE_ROOT)) return path.resolve(env.APP_STORAGE_ROOT.trim(), 'programme');
+  return undefined;
+}
+
+/**
  * Build the core dependency set, including the session authentication seam.
  *
  * The auth service is returned alongside the dependencies because the composition
@@ -123,6 +144,7 @@ export function buildCoreDependencies(
     storage: buildStorage(env),
     allowlist: allowlist.map((entry) => ({ ...entry, avatarUrl: null })),
     aiEnabled: env.AI_ENABLED === 'true',
+    programmeArchiveRoot: programmeArchiveRoot(env),
     auth,
   };
 }
@@ -133,6 +155,7 @@ export function describeConfig(env: CoreEnv = process.env as CoreEnv) {
     authentication: describeAuthConfig(env),
     storage: env.STORAGE_DRIVER === 'memory' ? 'memory' : present(env.APP_STORAGE_ROOT) ? 'filesystem' : 'unconfigured',
     storageRootConfigured: present(env.APP_STORAGE_ROOT),
+    programmeArchiveConfigured: programmeArchiveRoot(env) !== undefined,
     allowlistConfigured: present(env.APP_ALLOWLIST),
   };
 }

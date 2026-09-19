@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { test } from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { pgliteDatabase } from '../db/client.js';
+import { migrate } from '../db/migrate.js';
 import { AiService } from './service.js';
 
 const user = '11111111-1111-4111-8111-111111111111';
@@ -16,10 +15,9 @@ const input = { text: 'Źródło', images: [{ attachmentId: imageId, fileName: '
 async function setup() {
   const instance = new PGlite();
   const db = pgliteDatabase(instance);
-  const root = path.resolve(import.meta.dirname, '../../../../database/migrations');
-  for (const file of ['0001_core_schema.sql', '0002_script_revision.sql', '0003_vps_auth.sql', '0004_vps_storage.sql', '0005_ai_pipeline.sql']) {
-    await db.execScript(await readFile(path.join(root, file), 'utf8'));
-  }
+  // Every committed migration, in order, rather than a hand-kept list that silently
+  // stops covering the schema the code under test actually queries.
+  await migrate(db);
   await db.query("insert into app.users(id,name) values($1,'NOXAVA')", [user]);
   await db.query('insert into app.reels(id,original_input,created_by,script) values($1,$2,$3,$4)', [reelId, JSON.stringify(input), user, 'Stary skrypt.']);
   await db.query(`insert into app.attachments(id,reel_id,purpose,kind,state,file_name,mime_type,byte_size)
@@ -34,6 +32,38 @@ async function readyInput(db: Awaited<ReturnType<typeof setup>>['db']) {
 }
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+
+/**
+ * The smallest active corpus release `find_programme` will accept.
+ *
+ * Written out in full because the release-membership trigger refuses a document version
+ * without validated provenance — which is the point of that trigger, and a fixture that
+ * dodged it would be testing a schema the deployment does not have.
+ */
+async function activeRelease(db: Awaited<ReturnType<typeof setup>>['db']): Promise<void> {
+  const documentId = '03000000-0000-4000-8000-000000000011';
+  const versionId = '03000000-0000-4000-8000-000000000001';
+  const releaseId = '03000000-0000-4000-8000-000000000012';
+  await db.query(`insert into app.programme_documents
+      (id, document_slug, title, document_type, issuing_body, admission_rationale)
+    values($1,'doc-programme','Program','programme','Partia Zieloni','Przyjęty przez Kongres.')`, [documentId]);
+  await db.query(`insert into app.programme_versions
+      (id, title, source_url, document_sha256, document_id, version_slug, source_title, edition, adopted_at,
+       language, source_file_name, source_format, source_byte_size, retrieved_at, page_count,
+       printed_page_labels, structure_coverage, archive_key, normalized_text_sha256, normalized_length,
+       ingestion, state)
+    values($1,'Program','https://example.org/programme.pdf',$2,$3,'dv-programme-01','Program (2026)',
+       'Kongres 2026','2026-01-17','pl','Program.pdf','pdf',1024,now(),4,
+       array['','','3','4']::text[],'full','dv-programme-01/Program.pdf',$4,100,'{}'::jsonb,'approved')`,
+  [versionId, 'a'.repeat(64), documentId, 'b'.repeat(64)]);
+  await db.query(`insert into app.programme_releases
+      (id, corpus_id, release_slug, label, state, category_vocabulary_id, imported_by,
+       validation_report, coverage_ledger, approved_by, approved_at, activated_at)
+    values($1,'zieloni-programme','release-01','Wydanie testowe','active','cat-vocab-01','NOXAVA',
+       '{}'::jsonb,'{}'::jsonb,'NOXAVA',now(),now())`, [releaseId]);
+  await db.query('insert into app.programme_release_versions(release_id,document_version_id,position) values($1,$2,0)',
+    [releaseId, versionId]);
+}
 
 function claim(id: string, script: string, original: string, correction: string, inputHash: string) {
   const start = script.indexOf(original);
@@ -162,9 +192,7 @@ test('no-match result retains an existing programme attachment', async () => {
   const { db, service } = await setup();
   try {
     await readyInput(db);
-    const programmeId = '03000000-0000-4000-8000-000000000001';
-    await db.query(`insert into app.programme_versions(id,title,source_url,document_sha256,approved_at)
-      values($1,'Approved source','https://example.org/programme.pdf',$2,now())`, [programmeId, 'a'.repeat(64)]);
+    await activeRelease(db);
     const run = await successfulRun(db, service, 'find_programme', { candidates: [] },
       '03000000-0000-4000-8000-000000000002');
     const attachment = { candidateId: '03000000-0000-4000-8000-000000000003', proposal: 'Saved proposition' };

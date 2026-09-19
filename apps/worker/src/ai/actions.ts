@@ -9,7 +9,11 @@ interface Snapshot {
   inputNote: string; script: string; hooks: Array<{ id: string; text: string; source: string; position: number }>;
   priority: string; memeCandidates: Array<{ id: string; name: string }>;
   imageObjects: Array<{ id: string; storageKey: string; mimeType: string; byteSize: number }>;
-  programmeEvidence: Array<{ documentVersionId: string; proposalId: string; chunkId: string; category: string; proposal: string; excerpt: string; sourceTitle: string; sourceUrl: string; chapter: string; subchapter: string | null; pdfPage: number; printedPage: string | null }>;
+  programmeEvidence: Array<{
+    releaseId: string; documentVersionId: string; proposalId: string; chunkId: string; category: string;
+    proposal: string; excerpt: string; sourceTitle: string; sourceUrl: string; chapter: string;
+    subchapter: string | null; pdfPages: number[]; printedPages: string[];
+  }>;
   reelVersion: number;
 }
 export interface WorkRun { id: string; action: string; model: string; input_snapshot: Snapshot; input_hash: string }
@@ -133,21 +137,35 @@ export async function executeAction(run: WorkRun, options: { call: Call; storage
   }
 
   if (run.action === 'find_programme') {
+    // A genuinely empty retrieval is a legitimate answer and never reaches the provider:
+    // asking a model about zero candidates can only invite it to supply its own.
     if (input.programmeEvidence.length === 0) return { result: { candidates: [] }, warnings: ['Brak pasujących fragmentów w zatwierdzonym indeksie programu.'], provenance: baseProvenance };
-    const response = await options.call(run.model, structured([{ text: `Provisional development prompt. Match the Reel ONLY against these indexed programme chunks. No web or model-memory facts. Select up to three chunk IDs from this list or none, with short Polish rationale and strong/indirect strength. Reel: ${data}. Approved chunks: ${JSON.stringify(input.programmeEvidence)}` }], schemas.find_programme));
+    // The model ranks. It sees the text and structural position it needs to judge
+    // relevance, and nothing it could mistake for a citation to author: no source URL, no
+    // page numbers, no version identity. Those are resolved from the index below.
+    const offered = input.programmeEvidence.map((item) => ({
+      chunkId: item.chunkId, category: item.category, proposal: item.proposal,
+      chapter: item.chapter, subchapter: item.subchapter, text: item.excerpt,
+    }));
+    const response = await options.call(run.model, structured([{ text: `Provisional development prompt. Match the Reel ONLY against these indexed programme chunks. No web or model-memory facts. Select up to three chunk IDs from this list or none, with short Polish rationale and strong/indirect strength. Reel: ${data}. Approved chunks: ${JSON.stringify(offered)}` }], schemas.find_programme));
     const raw = parseJson(response);
     if (!Array.isArray(raw.candidates) || raw.candidates.length > 3) throw new ProviderError('INVALID_AI_RESULT', false);
-    const seen = new Set<string>();
+    const seenChunks = new Set<string>();
+    const seenProposals = new Set<string>();
     const candidates = raw.candidates.map((entry) => {
       const choice = entry as Record<string, unknown>;
       const evidence = input.programmeEvidence.find((item) => item.chunkId === choice.chunkId);
-      if (!evidence || seen.has(evidence.chunkId) || !['strong', 'indirect'].includes(String(choice.strength))) throw new ProviderError('INVALID_AI_RESULT', false);
-      seen.add(evidence.chunkId);
+      // An identifier outside the supplied set is an evidence error, not a weak match.
+      if (!evidence || seenChunks.has(evidence.chunkId) || seenProposals.has(evidence.proposalId)
+        || !['strong', 'indirect'].includes(String(choice.strength))) throw new ProviderError('INVALID_AI_RESULT', false);
+      seenChunks.add(evidence.chunkId);
+      seenProposals.add(evidence.proposalId);
+      // Every citation field comes from the immutable snapshot of the indexed record.
       return {
         candidateId: randomUUID(), documentVersionId: evidence.documentVersionId, proposalId: evidence.proposalId,
         chunkIds: [evidence.chunkId], category: evidence.category, proposal: evidence.proposal,
         excerpt: evidence.excerpt, sourceTitle: evidence.sourceTitle, sourceUrl: evidence.sourceUrl, chapter: evidence.chapter,
-        subchapter: evidence.subchapter, pdfPages: [evidence.pdfPage], printedPages: evidence.printedPage ? [evidence.printedPage] : [],
+        subchapter: evidence.subchapter, pdfPages: evidence.pdfPages, printedPages: evidence.printedPages,
         rationale: boundedText(choice.rationale, 800), strength: choice.strength,
       };
     });

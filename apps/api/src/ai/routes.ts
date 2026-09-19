@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AiAction, ApplyAiRequest } from '@szronox/contracts';
 import type { CoreDependencies } from '../core/routes.js';
 import { CoreError, internalError, validationError } from '../core/errors.js';
+import { readArchivedFile } from './corpus/archive.js';
+import { resolveActiveRelease } from './corpus/repository.js';
+import { resolveArchivedSource } from './corpus/retrieval.js';
 import { AiService } from './service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -40,8 +43,50 @@ export function registerAiRoutes(app: FastifyInstance, dependencies: CoreDepende
 
   app.get('/api/v1/ai/capabilities', handle(async (request) => {
     await dependencies.authenticate(request);
-    const version = await dependencies.db.query<{ id: string }>('select id from app.programme_versions where approved_at is not null limit 1');
-    return { enabled: dependencies.aiEnabled === true, programmeIndexed: Boolean(version.rows[0]) };
+    const release = await resolveActiveRelease(dependencies.db);
+    return { enabled: dependencies.aiEnabled === true, programmeIndexed: release !== null };
+  }));
+
+  /**
+   * The archived programme source, opened at the first cited page.
+   *
+   * Version-specific and session-authenticated: a citation pins a `documentVersionId`, and
+   * a superseded version stays readable so an older attachment can still open its source.
+   * The bytes are verified against the hash recorded at import before anything is sent, so
+   * a replaced file on disk surfaces as an error rather than as a different document.
+   */
+  app.get('/api/v1/programme/versions/:id/source', handle(async (request, reply) => {
+    await dependencies.authenticate(request);
+    const id = uuid((request.params as { id: string }).id);
+    if (!dependencies.programmeArchiveRoot) {
+      throw new CoreError({
+        status: 503, code: 'PROVIDER_UNAVAILABLE',
+        message: 'No programme archive root is configured', retryable: false,
+      });
+    }
+    const source = await resolveArchivedSource(dependencies.db, id);
+    if (!source || !source.resolvable) throw new CoreError({ status: 404, code: 'NOT_FOUND', message: 'Programme source not found' });
+    let bytes: Buffer;
+    try {
+      bytes = await readArchivedFile(dependencies.programmeArchiveRoot, source.archiveKey, {
+        sha256: source.sha256, byteSize: source.byteSize,
+      });
+    } catch (error) {
+      request.log.error(error);
+      // An unopenable source is reported; it never rewrites or removes an attachment.
+      throw new CoreError({
+        status: 503, code: 'PROVIDER_UNAVAILABLE',
+        message: 'Archived programme source is unavailable', retryable: false,
+      });
+    }
+    reply.headers({
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Type': 'application/pdf',
+      'Content-Length': String(bytes.byteLength),
+      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(source.fileName.replace(/[\r\n]/g, '_'))}`,
+    });
+    return reply.send(bytes);
   }));
 
   app.get('/api/v1/reels/:id/ai-runs/latest', handle(async (request) => {

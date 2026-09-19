@@ -4,6 +4,8 @@ import type { Database, Queryable } from '../db/client.js';
 import { pgErrorCode, PG_UNIQUE_VIOLATION } from '../db/client.js';
 import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
 import { CoreError, editConflict, idempotencyConflict, notFound, validationError } from '../core/errors.js';
+import { resolveActiveRelease } from './corpus/repository.js';
+import { findEvidence, MAX_EVIDENCE_CANDIDATES, type ProgrammeEvidence, searchTerms } from './corpus/retrieval.js';
 
 const MODEL = 'gemini-3.8-flash';
 const PROMPT_ID = 'gemini-02-development-provisional-v1';
@@ -16,14 +18,14 @@ const stale = (code: 'STALE_FACT_CLAIM' | 'STALE_LANGUAGE_RESULT' = 'STALE_FACT_
 interface ImageObject {
   id: string; storageKey: string; mimeType: string; byteSize: number; validatedAt: string;
 }
-interface ProgrammeEvidence {
-  documentVersionId: string; proposalId: string; chunkId: string; category: string;
-  proposal: string; excerpt: string; sourceTitle: string; sourceUrl: string;
-  chapter: string; subchapter: string | null; pdfPage: number; printedPage: string | null;
-}
 export interface InternalSnapshot extends AiInputSnapshot {
   imageObjects: ImageObject[];
   programmeEvidence: ProgrammeEvidence[];
+  /**
+   * The corpus release this run was matched against, snapshotted so a later activation
+   * cannot change what a completed run was allowed to see.
+   */
+  programmeReleaseId: string | null;
 }
 interface RunRow {
   id: string; reel_id: string; requested_by: string; action: AiAction; state: AiRun['state'];
@@ -79,7 +81,10 @@ function mappedClaimSpan(original: string, claim: FactCheckResult['claims'][numb
 }
 
 function visibleSnapshot(snapshot: InternalSnapshot): AiInputSnapshot {
-  const { imageObjects: _imageObjects, programmeEvidence: _programmeEvidence, ...visible } = snapshot;
+  const {
+    imageObjects: _imageObjects, programmeEvidence: _programmeEvidence,
+    programmeReleaseId: _programmeReleaseId, ...visible
+  } = snapshot;
   return {
     ...visible,
     attachments: visible.attachments.map(({ storageKey: _key, ...entry }) => entry),
@@ -89,11 +94,17 @@ function visibleSnapshot(snapshot: InternalSnapshot): AiInputSnapshot {
   };
 }
 
-function relevant(snapshot: AiInputSnapshot, action: AiAction): unknown {
+function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | null }, action: AiAction): unknown {
   const hooks = snapshot.hooks.map(({ id, text, source, position }) => ({ id, text, source, position }));
   if (action === 'language_check') return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
   if (action === 'fact_check') return { script: snapshot.script, hooks };
-  if (action === 'find_programme') return { script: snapshot.script, hooks, programmeDocumentVersionId: snapshot.programmeDocumentVersionId };
+  if (action === 'find_programme') {
+    return {
+      script: snapshot.script, hooks,
+      programmeDocumentVersionId: snapshot.programmeDocumentVersionId,
+      programmeReleaseId: snapshot.programmeReleaseId ?? null,
+    };
+  }
   if (action === 'generate_hooks') return { originalInput: snapshot.originalInput, inputNote: snapshot.inputNote, script: snapshot.script, hooks };
   return {
     title: snapshot.title, originalInput: snapshot.originalInput, inputNote: snapshot.inputNote,
@@ -201,28 +212,16 @@ export class AiService {
       }
       const memes = await tx.query<{ id: string; name: string; thumbnail_ref: string | null }>(
         'select id, name, thumbnail_ref from app.memes order by name asc, id asc limit 24');
-      const programmeVersion = await tx.query<{ id: string }>(
-        'select id from app.programme_versions where approved_at is not null limit 1');
-      if (body.action === 'find_programme' && !programmeVersion.rows[0]) {
-        throw new CoreError({ status: 422, code: 'INSUFFICIENT_EVIDENCE', message: 'No approved programme index is available' });
+      // Resolved once, and only for the action that uses it. Every candidate below, and
+      // every citation later reconstructed from them, belongs to this one release.
+      const release = body.action === 'find_programme' ? await resolveActiveRelease(tx) : null;
+      if (body.action === 'find_programme' && !release) {
+        throw new CoreError({ status: 422, code: 'INSUFFICIENT_EVIDENCE', message: 'No active programme corpus release is available' });
       }
-      const programmeEvidence: ProgrammeEvidence[] = [];
-      if (body.action === 'find_programme') {
-        const terms = [...new Set(([reel.script, ...reel.hooks.map((hook) => hook.text)].join(' ')
-          .toLowerCase().match(/\p{L}{4,}/gu) ?? []))].slice(0, 20);
-        const query = terms.join(' | ');
-        const chunks = await tx.query<ProgrammeEvidence>(
-          `select v.id as "documentVersionId", p.id as "proposalId", c.id as "chunkId",
-                  p.category, p.title as proposal, c.excerpt, v.title as "sourceTitle",
-                  v.source_url as "sourceUrl", p.chapter, p.subchapter,
-                  c.pdf_page as "pdfPage", c.printed_page as "printedPage"
-             from app.programme_chunks c join app.programme_proposals p on p.id=c.proposal_id
-             join app.programme_versions v on v.id=p.document_version_id
-            where v.id=$1 and $2<>'' and c.search_vector @@ to_tsquery('simple', $2)
-            order by ts_rank(c.search_vector, to_tsquery('simple', $2)) desc, c.id
-            limit 8`, [programmeVersion.rows[0].id, query]);
-        programmeEvidence.push(...chunks.rows);
-      }
+      const programmeEvidence: ProgrammeEvidence[] = release
+        ? await findEvidence(tx, release.releaseId,
+          searchTerms([reel.script, ...reel.hooks.map((hook) => hook.text)]), MAX_EVIDENCE_CANDIDATES)
+        : [];
       const snapshot: InternalSnapshot = {
         reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput,
         script: reel.script, scriptRevision: reel.scriptRevision,
@@ -233,7 +232,11 @@ export class AiService {
         priority: reel.priority, attachedMemeIds: reel.memeIds,
         memeCandidateIds: memes.rows.map((meme) => meme.id),
         memeCandidates: memes.rows.map((meme) => ({ id: meme.id, name: meme.name, thumbnailRef: meme.thumbnail_ref })),
-        programmeDocumentVersionId: programmeVersion.rows[0]?.id ?? null,
+        // A release with exactly one document version names it here, which is what the
+        // single-version contract field means. A multi-document release leaves it null and
+        // each candidate carries its own version, because there is no single answer.
+        programmeDocumentVersionId: release?.documentVersionIds.length === 1 ? release.documentVersionIds[0] : null,
+        programmeReleaseId: release?.releaseId ?? null,
         programmeEvidence, imageObjects: images.rows.map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
       };
       const id = randomUUID();

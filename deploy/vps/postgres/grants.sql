@@ -45,10 +45,21 @@ grant update (state, lease_token, lease_expires_at, attempt_count, next_attempt_
   on app.ai_runs to szronox_worker;
 grant insert (id, reel_id, text, source, position) on app.reel_hooks to szronox_worker;
 grant update (version, updated_at) on app.reels to szronox_worker;
-grant select on app.programme_versions, app.programme_proposals, app.programme_chunks
+-- CORPUS-01: the corpus is read-only to both runtime processes. It is written by the
+-- operator command running as the owner, which is what makes "the model ranks, the server
+-- cites, and only a named human publishes" a property of the database rather than of the
+-- application's good intentions. Migration 0006 additionally refuses UPDATE and DELETE on
+-- indexed content from every role, owner included.
+grant select on
+  app.programme_releases, app.programme_documents, app.programme_versions,
+  app.programme_release_versions, app.programme_vocabulary_entries,
+  app.programme_sections, app.programme_proposals, app.programme_chunks
   to szronox_api, szronox_worker;
-revoke insert, update, delete on app.programme_versions, app.programme_proposals,
-  app.programme_chunks from szronox_api, szronox_worker;
+revoke insert, update, delete on
+  app.programme_releases, app.programme_documents, app.programme_versions,
+  app.programme_release_versions, app.programme_vocabulary_entries,
+  app.programme_sections, app.programme_proposals, app.programme_chunks
+  from szronox_api, szronox_worker;
 
 -- ── Roster ──────────────────────────────────────────────────────────────────────
 -- Read-only for both. The roster is an operator decision applied by the provisioning

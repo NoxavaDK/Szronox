@@ -1,65 +1,184 @@
-/** Operator-only importer. No programme document is bundled with the app. */
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+/**
+ * Operator command for the approved programme corpus.
+ *
+ *   validate  <bundle-dir>                 read and prove a bundle; touches no database
+ *   import    <bundle-dir>                 archive the files and commit an INACTIVE release
+ *   approve   <release-slug> --by "<name>" record the named human who accepted the report
+ *   activate  <release-slug>               re-prove, then make it the searchable release
+ *
+ * Four commands rather than one, because approving what you have not read and activating
+ * what you have not re-proved are exactly the failures this separation prevents. Import
+ * never makes anything searchable; activation is the only act that does, and it supersedes
+ * the previous release atomically.
+ *
+ * No programme document is bundled with the application. The operator's directory is the
+ * whole input, and nothing here reaches the network or a model.
+ */
+
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { programmeArchiveRoot, type CoreEnv } from '../core/config.js';
 import { openDatabase } from '../runtime/database.js';
+import { BundleError, loadBundle } from './corpus/bundle.js';
+import { activateRelease, approveRelease, CorpusError, importRelease } from './corpus/repository.js';
+import { validateBundle, type ValidationResult } from './corpus/validate.js';
 
-interface ImportChunk { id: string; excerpt: string; pdfPage: number; printedPage?: string }
-interface ImportProposal { id: string; category: string; title: string; chapter: string; subchapter?: string; searchText: string; chunks: ImportChunk[] }
-interface ImportFile { document: { id: string; title: string; sourceUrl: string }; approve: true; proposals: ImportProposal[] }
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const valid = (value: unknown, max: number) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+const out = (line: string): void => { process.stdout.write(`${line}\n`); };
 
-function check(data: ImportFile): void {
-  if (data.approve !== true || !data.document || !uuid.test(data.document.id) ||
-      !valid(data.document.title, 300) || !valid(data.document.sourceUrl, 2000) ||
-      !Array.isArray(data.proposals) || data.proposals.length === 0 || data.proposals.length > 5000) {
-    throw new Error('Invalid approved programme import manifest');
-  }
-  const url = new URL(data.document.sourceUrl);
-  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Programme source must be an HTTPS URL');
-  const ids = new Set<string>([data.document.id]);
-  for (const proposal of data.proposals) {
-    if (!uuid.test(proposal.id) || ids.has(proposal.id) || !valid(proposal.title, 500) ||
-        !valid(proposal.category, 300) || !valid(proposal.chapter, 300) ||
-        !valid(proposal.searchText, 10000) || !Array.isArray(proposal.chunks) ||
-        proposal.chunks.length === 0 || proposal.chunks.length > 100) throw new Error('Invalid programme proposal');
-    ids.add(proposal.id);
-    for (const chunk of proposal.chunks) {
-      if (!uuid.test(chunk.id) || ids.has(chunk.id) || !valid(chunk.excerpt, 4000) ||
-          !Number.isInteger(chunk.pdfPage) || chunk.pdfPage < 1) throw new Error('Invalid programme evidence chunk');
-      ids.add(chunk.id);
+function usage(): never {
+  out('Usage:');
+  out('  import-programme-cli validate <bundle-dir> [--report <file>]');
+  out('  import-programme-cli import   <bundle-dir>');
+  out('  import-programme-cli approve  <release-slug> --by "<named operator>"');
+  out('  import-programme-cli activate <release-slug>');
+  process.exit(2);
+}
+
+function flag(argv: readonly string[], name: string): string | null {
+  const index = argv.indexOf(`--${name}`);
+  if (index < 0) return null;
+  const value = argv[index + 1];
+  if (value === undefined || value.startsWith('--')) usage();
+  return value;
+}
+
+function archiveRoot(): string {
+  const root = programmeArchiveRoot(process.env as CoreEnv);
+  if (!root) throw new Error('PROGRAMME_ARCHIVE_ROOT or APP_STORAGE_ROOT is required');
+  return root;
+}
+
+/** Everything a reviewer needs on one screen; the full report goes to `--report`. */
+function printReport(result: ValidationResult): void {
+  const { report } = result;
+  out(`release            ${report.releaseId}`);
+  out(`document version   ${report.documentVersionId}`);
+  out(`extraction         ${report.extraction.tool}, ${report.extraction.pageCount} pages, `
+    + `${report.extraction.normalizedLength} normalized characters`);
+  out(`normalized sha256  ${report.extraction.normalizedSha256}`);
+  out(`source sha256      ${report.hashes.source}`);
+  out(`docx sha256        ${report.hashes.structure}`);
+  out(`dataset sha256     ${report.hashes.dataset}`);
+  out(`undecoded glyphs   ${report.extraction.undecodedCharacters}`);
+  out(`index              ${report.counts.sections} sections, ${report.counts.proposals} proposals, `
+    + `${report.counts.chunks} chunks`);
+  out(`pages indexed      ${report.pageCoverage.indexedPages.length} of ${report.pageCoverage.pageCount}`);
+  out(`pages excluded     ${report.pageCoverage.excludedPages.length}`);
+  out(`admission          type=${report.admission.documentType} adopted=${report.admission.adoptedAt ?? 'none'} `
+    + `amendment=${report.admission.amendment ? report.admission.amendment.approvedBy : 'none'}`);
+  out(`public source url  ${report.admission.publicSourceUrl ?? 'waived by amendment (archived copy is authoritative)'}`);
+  for (const warning of report.extraction.warnings) out(`extraction warning ${warning}`);
+
+  out('');
+  out('MANUAL CHECKS STILL OWED BY A HUMAN (specification §7):');
+  out(`  page-spanning chunk  ${report.manualChecks.pageSpanningChunk
+    ? `${report.manualChecks.pageSpanningChunk.chunkId} on pages ${report.manualChecks.pageSpanningChunk.pdfPages.join(', ')}`
+    : 'NONE FOUND — confirm no proposal crosses a page break'}`);
+  out(`  list/table chunk     ${report.manualChecks.listChunk?.chunkId ?? 'NONE FOUND'}`);
+  out(`  front-matter page    ${report.manualChecks.frontMatterPage
+    ? `pdf ${report.manualChecks.frontMatterPage.pdfPage} prints ""` : 'NONE — every page carries a printed label'}`);
+  out(`  body page            ${report.manualChecks.bodyPage
+    ? `pdf ${report.manualChecks.bodyPage.pdfPage} prints "${report.manualChecks.bodyPage.printedPage}"` : 'NONE'}`);
+  out(`  sample chunks        ${report.manualChecks.sampleChunks.map((chunk) => chunk.chunkId).join(', ') || 'none'}`);
+
+  if (result.issues.length > 0) {
+    out('');
+    out(`REJECTED — ${result.issues.length} findings:`);
+    for (const issue of result.issues.slice(0, 200)) {
+      out(`  [${issue.code}] ${issue.at ?? '-'}: ${issue.message}`);
     }
+    if (result.issues.length > 200) out(`  ... ${result.issues.length - 200} more`);
   }
 }
 
-const manifestPath = process.env.PROGRAMME_IMPORT_JSON;
-const pdfPath = process.env.PROGRAMME_SOURCE_PDF;
-if (!manifestPath || !pdfPath) throw new Error('PROGRAMME_IMPORT_JSON and PROGRAMME_SOURCE_PDF are required');
-const data = JSON.parse(await readFile(manifestPath, 'utf8')) as ImportFile;
-check(data);
-const pdf = await readFile(pdfPath);
-if (pdf.subarray(0, 5).toString() !== '%PDF-' || pdf.length > 30_000_000) throw new Error('Source is not a bounded PDF');
-const digest = createHash('sha256').update(pdf).digest('hex');
-const database = await openDatabase(process.env, { poolMax: 2, applicationName: 'szronox-programme-import' });
-try {
-  const role = await database.db.query<{ role: string }>('select current_user as role');
-  if (role.rows[0].role !== 'szronox_dev') throw new Error('Programme import requires the owner role');
-  await database.db.transaction(async (tx) => {
-    const prior = await tx.query<{ document_sha256: string }>('select document_sha256 from app.programme_versions where id=$1', [data.document.id]);
-    if (prior.rows[0]) throw new Error('Programme version ID already exists');
-    await tx.query('update app.programme_versions set approved_at=null where approved_at is not null');
-    await tx.query('insert into app.programme_versions(id,title,source_url,document_sha256) values($1,$2,$3,$4)',
-      [data.document.id, data.document.title, data.document.sourceUrl, digest]);
-    for (const proposal of data.proposals) {
-      await tx.query(`insert into app.programme_proposals(id,document_version_id,category,title,chapter,subchapter,search_text)
-        values($1,$2,$3,$4,$5,$6,$7)`,
-      [proposal.id, data.document.id, proposal.category, proposal.title, proposal.chapter, proposal.subchapter ?? null, proposal.searchText]);
-      for (const chunk of proposal.chunks) {
-        await tx.query('insert into app.programme_chunks(id,proposal_id,excerpt,pdf_page,printed_page) values($1,$2,$3,$4,$5)',
-          [chunk.id, proposal.id, chunk.excerpt, chunk.pdfPage, chunk.printedPage ?? null]);
-      }
+async function readBundle(directory: string) {
+  const bundle = await loadBundle(path.resolve(directory));
+  const sourceBytes = await readFile(bundle.source.absolutePath);
+  const structureBytes = await readFile(bundle.structure.absolutePath);
+  const datasetBytes = await readFile(bundle.dataset.absolutePath);
+  return { bundle, sourceBytes, structureBytes, datasetBytes, validation: validateBundle(bundle, sourceBytes) };
+}
+
+/** Every write command runs as the schema owner; runtime roles cannot publish evidence. */
+async function withOwnerDatabase<T>(body: (db: Awaited<ReturnType<typeof openDatabase>>['db']) => Promise<T>): Promise<T> {
+  const database = await openDatabase(process.env, { poolMax: 2, applicationName: 'szronox-programme-corpus' });
+  try {
+    const role = await database.db.query<{ role: string }>('select current_user as role');
+    if (role.rows[0].role !== 'szronox_dev') throw new Error('Programme corpus commands require the owner role');
+    return await body(database.db);
+  } finally {
+    await database.close();
+  }
+}
+
+async function main(argv: string[]): Promise<number> {
+  const command = argv[0];
+  const target = argv[1];
+  if (!command || !target) usage();
+
+  if (command === 'validate') {
+    const { validation } = await readBundle(target);
+    printReport(validation);
+    const reportPath = flag(argv, 'report');
+    if (reportPath) {
+      await writeFile(path.resolve(reportPath), `${JSON.stringify(validation.report, null, 2)}\n`, 'utf8');
+      out(`\nfull report written to ${path.resolve(reportPath)}`);
     }
-    await tx.query('update app.programme_versions set approved_at=now() where id=$1', [data.document.id]);
-  });
-  process.stdout.write(`Approved programme version ${data.document.id} with ${data.proposals.length} proposals; PDF SHA-256 ${digest}.\n`);
-} finally { await database.close(); }
+    return validation.ok ? 0 : 1;
+  }
+
+  if (command === 'import') {
+    const { bundle, validation, sourceBytes, structureBytes, datasetBytes } = await readBundle(target);
+    printReport(validation);
+    if (!validation.ok) {
+      out('\nNothing was imported. Correct the bundle and validate again.');
+      return 1;
+    }
+    const root = archiveRoot();
+    const outcome = await withOwnerDatabase((db) =>
+      importRelease(db, bundle, validation, {
+        archiveRoot: root, sourceBytes, structureBytes, datasetBytes,
+      }));
+    out('');
+    out(`Imported release ${outcome.releaseSlug} as ${outcome.state}: ${outcome.sections} sections, `
+      + `${outcome.proposals} proposals, ${outcome.chunks} chunks.`);
+    out(`Archive root ${root}`);
+    out('It is NOT searchable. Review the report, then approve and activate it.');
+    return 0;
+  }
+
+  if (command === 'approve') {
+    const approver = flag(argv, 'by');
+    if (!approver) usage();
+    const release = await withOwnerDatabase((db) => approveRelease(db, target, approver));
+    out(`Release ${release.release_slug} approved by ${release.approved_by}. It is still not searchable.`);
+    return 0;
+  }
+
+  if (command === 'activate') {
+    const root = archiveRoot();
+    const outcome = await withOwnerDatabase((db) => activateRelease(db, target, { archiveRoot: root }));
+    out(`Release ${outcome.releaseSlug} is now the active release of corpus ${outcome.corpusId}.`);
+    out(outcome.supersededSlug
+      ? `Superseded ${outcome.supersededSlug}; its versions, files and existing attachments stay resolvable.`
+      : 'No previous release existed for this corpus.');
+    return 0;
+  }
+
+  return usage();
+}
+
+try {
+  process.exitCode = await main(process.argv.slice(2));
+} catch (error) {
+  if (error instanceof BundleError) {
+    process.stderr.write(`${error.message}\n`);
+    for (const issue of error.issues) process.stderr.write(`  [${issue.code}] ${issue.message}\n`);
+  } else if (error instanceof CorpusError) {
+    process.stderr.write(`${error.reason}: ${error.message}\n`);
+  } else {
+    process.stderr.write(`${(error as Error).message}\n`);
+  }
+  process.exitCode = 1;
+}

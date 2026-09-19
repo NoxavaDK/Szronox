@@ -343,3 +343,88 @@ test('grants.sql names only objects the committed migrations create', async () =
     await context.close();
   }
 });
+
+test('neither runtime role can publish, edit or delete programme evidence', async () => {
+  // The corpus is the only admissible source of programme evidence, so the ability to
+  // write it is the ability to fabricate a citation. Both processes read; only the owner,
+  // running the operator command, writes.
+  const context = await provisionDatabase();
+  const CORPUS_TABLES = [
+    'app.programme_releases', 'app.programme_documents', 'app.programme_versions',
+    'app.programme_release_versions', 'app.programme_vocabulary_entries',
+    'app.programme_sections', 'app.programme_proposals', 'app.programme_chunks',
+  ] as const;
+  try {
+    for (const role of RUNTIME_ROLES) {
+      for (const table of CORPUS_TABLES) {
+        const grant = await context.db.query<{ s: boolean; i: boolean; u: boolean; d: boolean }>(
+          `select pg_catalog.has_table_privilege($1, $2, 'SELECT') as s,
+                  pg_catalog.has_table_privilege($1, $2, 'INSERT') as i,
+                  pg_catalog.has_table_privilege($1, $2, 'UPDATE') as u,
+                  pg_catalog.has_table_privilege($1, $2, 'DELETE') as d`,
+          [role, table],
+        );
+        assert.deepEqual(grant.rows[0], { s: true, i: false, u: false, d: false },
+          `${role} must read ${table} and never write it`);
+      }
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test('indexed programme content cannot be edited in place, even by the owner', async () => {
+  // Immutability is what makes a pinned attachment trustworthy: a superseded release stays
+  // readable precisely because nothing can rewrite the rows underneath it.
+  const context = await provisionDatabase();
+  try {
+    const version = '05000000-0000-4000-8000-000000000001';
+    const section = '05000000-0000-4000-8000-000000000002';
+    const proposal = '05000000-0000-4000-8000-000000000003';
+    const chunk = '05000000-0000-4000-8000-000000000004';
+    await context.db.query(
+      `insert into app.programme_versions (id, title, source_url, document_sha256)
+       values ($1,'T','https://example.org/p.pdf',$2)`, [version, 'a'.repeat(64)]);
+    await context.db.query(
+      `insert into app.programme_sections
+         (id, document_version_id, section_slug, chapter, subchapter, order_index, start_pdf_page, end_pdf_page)
+       values ($1,$2,'sec-1','Rozdział',null,0,1,1)`, [section, version]);
+    await context.db.query(
+      `insert into app.programme_proposals
+         (id, document_version_id, category, title, chapter, subchapter, search_text, section_id, external_id)
+       values ($1,$2,'Kategoria','Postulat','Rozdział',null,'tekst',$3,'prop-1')`, [proposal, version, section]);
+    await context.db.query(
+      `insert into app.programme_chunks
+         (id, proposal_id, excerpt, pdf_page, printed_page, document_version_id, section_id,
+          external_id, order_index, char_start, char_end, pdf_pages, printed_pages)
+       values ($1,$2,'Fragment',1,'1',$3,$4,'prop-1#000',0,0,8,$5,$6)`,
+      [chunk, proposal, version, section, [1], ['1']]);
+
+    await assert.rejects(
+      context.db.query("update app.programme_chunks set excerpt='Podmieniony' where id=$1", [chunk]),
+      /immutable/, 'chunk text must not be editable in place');
+    await assert.rejects(
+      context.db.query("update app.programme_proposals set title='Inny' where id=$1", [proposal]),
+      /immutable/, 'a proposal title must not be editable in place');
+    await assert.rejects(
+      context.db.query('delete from app.programme_sections where id=$1', [section]),
+      /immutable/, 'a section must not be deletable');
+    await assert.rejects(
+      context.db.query("update app.programme_versions set document_sha256=$2 where id=$1", [version, 'b'.repeat(64)]),
+      /immutable/, 'the source hash anchors every citation and must not move');
+
+    // A legacy version with no validated provenance can never join a release.
+    const release = '05000000-0000-4000-8000-000000000005';
+    await context.db.query(
+      `insert into app.programme_releases
+         (id, corpus_id, release_slug, label, category_vocabulary_id, imported_by, validation_report, coverage_ledger)
+       values ($1,'corpus','release-1','Etykieta','vocab-1','NOXAVA','{}','{}')`, [release]);
+    await assert.rejects(
+      context.db.query(
+        'insert into app.programme_release_versions (release_id, document_version_id, position) values ($1,$2,0)',
+        [release, version]),
+      /validated corpus provenance/);
+  } finally {
+    await context.close();
+  }
+});

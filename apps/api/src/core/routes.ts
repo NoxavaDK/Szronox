@@ -37,6 +37,11 @@ export interface CoreDependencies {
   /** The two allowlisted users, for /me peer identity. */
   allowlist: Array<{ id: string; name: 'NOXAVA' | 'SZRON'; avatarUrl?: string | null }>;
   aiEnabled?: boolean;
+  /**
+   * Private root holding archived programme sources. Absent means no archive is configured,
+   * and the source route says so explicitly rather than serving an unverified file.
+   */
+  programmeArchiveRoot?: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
