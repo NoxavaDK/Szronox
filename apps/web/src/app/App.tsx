@@ -37,12 +37,25 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [aiCapability, setAiCapability] = useState({ enabled: false, programmeIndexed: false });
-  const [aiView, setAiView] = useState<{ view: 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'attached_programme'; autoStart: boolean } | null>(null);
-  const [memeOpen, setMemeOpen] = useState(false);
+  /**
+   * The AI workspace and the meme picker belong to one Reel, so each remembers which Reel
+   * opened it and is ignored for any other.
+   *
+   * Without the `reelId` they outlived their Reel. An incoming Android share routes straight
+   * to Quick Add from an open workspace, and saving that capture returns to the list with
+   * `aiView` still set — so the next Reel opened jumped into an AI workspace nobody asked
+   * for and, finding no saved run for it, started a fresh provider call.
+   *
+   * Scoping the state is used rather than clearing it from an effect on route change: the
+   * `Opracuj` path sets the new route and then `aiView` in a later microtask, and a passive
+   * effect would run after both and wipe the workspace the user explicitly asked for.
+   */
+  const [aiView, setAiView] = useState<{ reelId: string; view: 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'attached_programme'; autoStart: boolean } | null>(null);
+  const [memeReelId, setMemeReelId] = useState<string | null>(null);
   const [memeNames, setMemeNames] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
-    if (!c.user) { setAiView(null); setMemeOpen(false); setAiCapability({ enabled: false, programmeIndexed: false }); return; }
+    if (!c.user) { setAiView(null); setMemeReelId(null); setAiCapability({ enabled: false, programmeIndexed: false }); return; }
     let live = true;
     void api.aiCapabilities().then((value) => { if (live) setAiCapability(value); }).catch(() => undefined);
     return () => { live = false; };
@@ -163,7 +176,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onSave={() => void c.submitCapture()}
       onOpracuj={() => { void c.submitCapture(true).then((saved) => {
         if (!saved) return;
-        if (aiCapability.enabled) setAiView({ view: 'develop', autoStart: true });
+        if (aiCapability.enabled) setAiView({ reelId: saved.id, view: 'develop', autoStart: true });
         else c.setMessage('Opracuj jest teraz niedostępne. Pomysł został zapisany.');
       }); }}
       saveState={c.saveState}
@@ -182,11 +195,12 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
 
   if (c.route.name === 'detail' && c.current) {
     const reel = c.current;
-    if (memeOpen) return <>{notice}<MemePicker api={api} reel={reel} onClose={() => setMemeOpen(false)} onReel={c.acceptReel} /></>;
-    if (aiView) return <>{notice}<AiWorkspace key={aiView.view} api={api} reel={reel}
+    // Both overlays are honoured only for the Reel that opened them.
+    if (memeReelId === reel.id) return <>{notice}<MemePicker api={api} reel={reel} onClose={() => setMemeReelId(null)} onReel={c.acceptReel} /></>;
+    if (aiView?.reelId === reel.id) return <>{notice}<AiWorkspace key={aiView.view} api={api} reel={reel}
       initialView={aiView.view} autoStart={aiView.autoStart} programmeIndexed={aiCapability.programmeIndexed}
       onClose={() => setAiView(null)} onReel={c.acceptReel} onRefresh={() => c.openDetail(reel.id)}
-      onSwitch={(view, autoStart = false) => setAiView({ view, autoStart })} /></>;
+      onSwitch={(view, autoStart = false) => setAiView({ reelId: reel.id, view, autoStart })} /></>;
     const editor = editorOf(reel.editorId);
     const peerName = c.peer?.name ?? '';
 
@@ -272,12 +286,12 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onChangeScript={(script) => c.changeReel({ script })}
       scriptConflict={c.conflict?.field === 'script' ? conflictView() : undefined}
       aiRowEnabled={aiCapability.enabled && !['saving', 'conflict', 'offline'].includes(c.saveState)}
-      onAiAction={(action) => setAiView({ view: action, autoStart: false })}
-      onOpenMeme={() => setMemeOpen(true)}
+      onAiAction={(action) => setAiView({ reelId: reel.id, view: action, autoStart: false })}
+      onOpenMeme={() => setMemeReelId(reel.id)}
       attachedMemes={memeNames}
       onDetachMeme={(memeId) => { void api.detachMeme(reel.id, memeId, { operationId: crypto.randomUUID(), expectedVersion: reel.version })
         .then(c.acceptReel).catch((error) => c.setMessage(String(error))); }}
-      onOpenProgramme={() => setAiView({ view: reel.programmeAttachment ? 'attached_programme' : 'find_programme', autoStart: false })}
+      onOpenProgramme={() => setAiView({ reelId: reel.id, view: reel.programmeAttachment ? 'attached_programme' : 'find_programme', autoStart: false })}
       sources={{
         expanded: sourcesExpanded,
         onToggle: () => setSourcesExpanded((value) => !value),
@@ -285,7 +299,12 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         originalUrl: reel.originalInput.url ?? null,
         onOpenSource: () => { if (reel.originalInput.url) window.open(reel.originalInput.url, '_blank', 'noopener,noreferrer'); },
         originalText: reel.originalInput.text ?? null,
-        additionalText: reel.originalInput.originalShare?.fields.find((f) => f.name === 'additionalText')?.value ?? null,
+        // `additionalText` is a first-class capture field written by Quick Add, not a shared
+        // scalar: `share/receive.ts` states it is "deliberately absent" from `originalShare`,
+        // because it belongs to the user rather than the sending app. Reading it out of
+        // `originalShare.fields` therefore always produced `null`, and the accompanying text
+        // a user typed next to a link or an image was persisted but never shown again.
+        additionalText: reel.originalInput.additionalText ?? null,
         attachments: reel.originalInput.images.map((image) => ({
           id: image.attachmentId,
           fileName: image.fileName,
