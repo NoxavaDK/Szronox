@@ -86,7 +86,12 @@ const VOCABULARY = {
   ],
 };
 
-async function writeBundle(): Promise<string> {
+interface AdmissionOverride {
+  adoptedAt: string | null;
+  admissionAmendment: Record<string, unknown> | null;
+}
+
+async function writeBundle(admission?: AdmissionOverride): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), 'szronox-enrichment-'));
   const pdf = buildPdf(PAGES);
   const manifest = {
@@ -102,13 +107,13 @@ async function writeBundle(): Promise<string> {
       document_type: 'programme',
       issuing_body: 'Partia Zieloni',
       admission_rationale: 'Program przyjety przez Kongres partii.',
-      admission_amendment: null,
+      admission_amendment: admission?.admissionAmendment ?? null,
     },
     version: {
       document_version_id: 'dv-program-zielonych-enrichment-test-r1',
       source_title: 'Program Partii Zieloni (fixture)',
       edition: 'wydanie testowe',
-      adopted_at: '2026-01-17',
+      adopted_at: admission ? admission.adoptedAt : '2026-01-17',
       language: 'pl',
       source_file_name: 'EnrichmentTest.pdf',
       structure_file_name: 'EnrichmentTest.docx',
@@ -311,5 +316,56 @@ test('the database itself refuses a raw UPDATE outside the six enrichment column
     await fixture.close();
     await rm(fixture.directory, { recursive: true, force: true });
     await rm(fixture.archiveRoot, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Migration 0008 regression: an unadopted draft with a recorded admission_amendment must
+ * import, approve and activate successfully — not just pass `validate`.
+ *
+ * Discovered live (CORPUS-05): migration 0006's `assert_programme_version_complete()`
+ * trigger required `adopted_at IS NOT NULL` unconditionally, with no exception for a
+ * document whose `admission_amendment` waives adoption. Every fixture before this one used a
+ * real `adopted_at` date, and `validate` never reaches this trigger (it only runs against a
+ * database during `import`), so the gap survived until the first real `import` run against a
+ * real unadopted-draft bundle. This test exercises exactly that path end to end.
+ */
+test('an unadopted draft with a recorded admission_amendment imports, approves and activates', async () => {
+  const directory = await writeBundle({
+    adoptedAt: null,
+    admissionAmendment: {
+      approved_by: 'Operator Testowy',
+      approved_at: '2026-09-21',
+      statement: 'Szkic dopuszczony do testów wewnetrznych.',
+      unpublished_source: false,
+    },
+  });
+  const { db, close } = await database();
+  const archiveRoot = await mkdtemp(path.join(tmpdir(), 'szronox-enrichment-draft-archive-'));
+  try {
+    const bundle = await loadBundle(directory);
+    const sourceBytes = await readFile(bundle.source.absolutePath);
+    const structureBytes = await readFile(bundle.structure.absolutePath);
+    const datasetBytes = await readFile(bundle.dataset.absolutePath);
+    const validation = validateBundle(bundle, sourceBytes);
+    assert.equal(validation.ok, true, JSON.stringify(validation.issues));
+    assert.equal(validation.report.admission.adoptedAt, null);
+    assert.equal(validation.report.admission.amendment?.approvedBy, 'Operator Testowy');
+
+    // The exact call that failed live before migration 0008: inserting into
+    // programme_release_versions fires assert_programme_version_complete(), which must now
+    // accept a null adopted_at when admission_amendment is present.
+    await importRelease(db, bundle, validation, { archiveRoot, sourceBytes, structureBytes, datasetBytes });
+    await approveRelease(db, bundle.manifest.releaseId, 'Operator Testowy');
+    const activation = await activateRelease(db, bundle.manifest.releaseId, { archiveRoot });
+    assert.equal(activation.releaseSlug, bundle.manifest.releaseId);
+
+    const active = await db.query<{ id: string }>(
+      "select id from app.programme_releases where release_slug=$1 and state='active'", [bundle.manifest.releaseId]);
+    assert.equal(active.rows.length, 1);
+  } finally {
+    await close();
+    await rm(directory, { recursive: true, force: true });
+    await rm(archiveRoot, { recursive: true, force: true });
   }
 });
