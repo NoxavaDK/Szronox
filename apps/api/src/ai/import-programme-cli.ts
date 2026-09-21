@@ -21,17 +21,23 @@ import path from 'node:path';
 import { programmeArchiveRoot, type CoreEnv } from '../core/config.js';
 import { openDatabase } from '../runtime/database.js';
 import { BundleError, loadBundle } from './corpus/bundle.js';
-import { activateRelease, approveRelease, CorpusError, importRelease } from './corpus/repository.js';
+import { adaptEtap3bBundle, Etap3bAdapterError } from './corpus/etap3b-adapter.js';
+import {
+  activateRelease, approveRelease, CorpusError, importRelease, reviseProposalEnrichment,
+} from './corpus/repository.js';
 import { validateBundle, type ValidationResult } from './corpus/validate.js';
 
 const out = (line: string): void => { process.stdout.write(`${line}\n`); };
 
 function usage(): never {
   out('Usage:');
-  out('  import-programme-cli validate <bundle-dir> [--report <file>]');
-  out('  import-programme-cli import   <bundle-dir>');
-  out('  import-programme-cli approve  <release-slug> --by "<named operator>"');
-  out('  import-programme-cli activate <release-slug>');
+  out('  import-programme-cli validate         <bundle-dir> [--report <file>]');
+  out('  import-programme-cli import           <bundle-dir>');
+  out('  import-programme-cli approve          <release-slug> --by "<named operator>"');
+  out('  import-programme-cli activate         <release-slug>');
+  out('  import-programme-cli etap3b-adapt     <program-dir>');
+  out('  import-programme-cli revise-enrichment <release-slug> <external-id> --by "<named operator>"');
+  out('                         [--primary-tag <slug>] [--secondary-tags a,b] [--keywords a,b,c]');
   process.exit(2);
 }
 
@@ -166,15 +172,52 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (command === 'etap3b-adapt') {
+    const result = await adaptEtap3bBundle({ programDir: path.resolve(target) });
+    out(`Wrote ${result.manifestPath}`);
+    out(`Wrote ${result.vocabularyPath}`);
+    out(`Wrote ${result.datasetPath}`);
+    out(`Wrote ${result.coveragePath}`);
+    out(`${result.proposalCount} proposals adapted, ${result.rejectedCount} rejected, `
+      + `${result.sectionCount} sections retained (${result.emptySectionCount} empty).`);
+    out('Run "validate" against this directory next.');
+    return 0;
+  }
+
+  if (command === 'revise-enrichment') {
+    const externalId = argv[2];
+    if (!externalId) usage();
+    const operator = flag(argv, 'by');
+    if (!operator) usage();
+    const primaryTagFlag = flag(argv, 'primary-tag');
+    const secondaryTagsFlag = flag(argv, 'secondary-tags');
+    const keywordsFlag = flag(argv, 'keywords');
+    if (!primaryTagFlag) {
+      out('--primary-tag is required');
+      return 2;
+    }
+    const outcome = await withOwnerDatabase((db) => reviseProposalEnrichment(db, {
+      releaseSlug: target,
+      externalId,
+      primaryTag: primaryTagFlag,
+      secondaryTags: secondaryTagsFlag ? secondaryTagsFlag.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
+      keywords: keywordsFlag ? keywordsFlag.split(',').map((keyword) => keyword.trim()).filter(Boolean) : [],
+      operator,
+    }));
+    out(`Proposal ${externalId} revised: revision ${outcome.revisionNumber}, checksum ${outcome.checksum}.`);
+    out('Identity, text, pages, category and section are unchanged; only enrichment fields were updated.');
+    return 0;
+  }
+
   return usage();
 }
 
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (error) {
-  if (error instanceof BundleError) {
+  if (error instanceof BundleError || error instanceof Etap3bAdapterError) {
     process.stderr.write(`${error.message}\n`);
-    for (const issue of error.issues) process.stderr.write(`  [${issue.code}] ${issue.message}\n`);
+    for (const issue of error.issues) process.stderr.write(`  [${issue.code}] ${issue.at ?? '-'}: ${issue.message}\n`);
   } else if (error instanceof CorpusError) {
     process.stderr.write(`${error.reason}: ${error.message}\n`);
   } else {

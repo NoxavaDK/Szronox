@@ -12,11 +12,12 @@
  * document version with new internal identifiers and the operator's external ones preserved.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Database, Queryable } from '../../db/client.js';
 import { archivedDigest, archiveKey, stageArchiveFile, verifyArchivedFile } from './archive.js';
 import type { LoadedBundle } from './bundle.js';
+import { normalizeKeywords } from './normalize.js';
 import type { ValidationResult } from './validate.js';
 
 export class CorpusError extends Error {
@@ -394,4 +395,107 @@ export async function resolveActiveRelease(tx: Queryable): Promise<ActiveRelease
     activatedAt: new Date(release.activated_at).toISOString(),
     documentVersionIds: versions.rows.map((row) => row.document_version_id),
   };
+}
+
+export interface EnrichmentRevisionInput {
+  releaseSlug: string;
+  externalId: string;
+  primaryTag: string;
+  secondaryTags: readonly string[];
+  keywords: readonly string[];
+  operator: string;
+  notes?: string | null;
+}
+
+export interface EnrichmentRevisionOutcome {
+  proposalId: string;
+  revisionNumber: number;
+  checksum: string;
+}
+
+/**
+ * Revise a proposal's tagging and keywords, keyed by its frozen external id.
+ *
+ * Everything else about the proposal — text, pages, category, section, identity — is
+ * enforced immutable at the database level (migration 0007's
+ * `guard_programme_proposal_enrichment`), so this function only ever needs to write the six
+ * enrichment columns and one audit row, in one transaction. Tags are checked against the
+ * *release's* pinned vocabulary snapshot, not the live vocabulary file, because that snapshot
+ * is what the release was approved against.
+ */
+export async function reviseProposalEnrichment(
+  db: Database,
+  input: EnrichmentRevisionInput,
+): Promise<EnrichmentRevisionOutcome> {
+  const operator = input.operator.trim();
+  if (operator === '' || operator.length > 200) {
+    throw new CorpusError('operator_invalid', 'Revising enrichment requires a named human operator');
+  }
+  const primaryTag = input.primaryTag.trim();
+  if (primaryTag === '') throw new CorpusError('primary_tag_invalid', 'primary_tag is required');
+  const secondaryTags = [...new Set(input.secondaryTags.map((tag) => tag.trim()).filter((tag) => tag !== ''))];
+  const keywords = normalizeKeywords(input.keywords);
+
+  return db.transaction(async (tx) => {
+    const releaseRows = await tx.query<{ id: string }>(
+      'select id from app.programme_releases where release_slug=$1', [input.releaseSlug]);
+    const release = releaseRows.rows[0];
+    if (!release) throw new CorpusError('release_not_found', `No release ${input.releaseSlug}`);
+
+    const vocabRows = await tx.query<{ entry_id: string }>(
+      'select entry_id from app.programme_vocabulary_entries where release_id=$1', [release.id]);
+    const vocabulary = new Set(vocabRows.rows.map((row) => row.entry_id));
+    if (!vocabulary.has(primaryTag)) {
+      throw new CorpusError('tag_unknown',
+        `primary_tag ${primaryTag} is not in release ${input.releaseSlug}'s pinned vocabulary`);
+    }
+    const unknownSecondary = secondaryTags.filter((tag) => !vocabulary.has(tag));
+    if (unknownSecondary.length > 0) {
+      throw new CorpusError('tag_unknown', `secondary_tags not in the pinned vocabulary: ${unknownSecondary.join(', ')}`);
+    }
+
+    const proposalRows = await tx.query<{
+      id: string; primary_tag: string | null; secondary_tags: string[]; keywords: string[]; keywords_raw: string[];
+    }>(
+      `select p.id, p.primary_tag, p.secondary_tags, p.keywords, p.keywords_raw
+         from app.programme_proposals p
+         join app.programme_release_versions rv on rv.document_version_id = p.document_version_id
+        where rv.release_id = $1 and p.external_id = $2
+        for update of p`,
+      [release.id, input.externalId]);
+    const proposal = proposalRows.rows[0];
+    if (!proposal) {
+      throw new CorpusError('proposal_not_found', `No proposal ${input.externalId} in release ${input.releaseSlug}`);
+    }
+
+    const keywordsText = keywords.normalized.join(' ');
+    const tagsText = [primaryTag, ...secondaryTags].join(' ');
+    const checksum = createHash('sha256')
+      .update(`${primaryTag}\n${secondaryTags.join(',')}\n${keywords.normalized.join(',')}`)
+      .digest('hex');
+
+    const revisionRows = await tx.query<{ revision_number: number }>(
+      `select coalesce(max(revision_number), 0) + 1 as revision_number
+         from app.programme_proposal_enrichment_revisions where proposal_id=$1`,
+      [proposal.id]);
+    const revisionNumber = revisionRows.rows[0].revision_number;
+
+    await tx.query(
+      `insert into app.programme_proposal_enrichment_revisions
+         (id, proposal_id, revision_number, operator, previous_primary_tag, previous_secondary_tags,
+          previous_keywords, previous_keywords_raw, new_primary_tag, new_secondary_tags, new_keywords,
+          new_keywords_raw, checksum, notes)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [randomUUID(), proposal.id, revisionNumber, operator, proposal.primary_tag, proposal.secondary_tags,
+        proposal.keywords, proposal.keywords_raw, primaryTag, secondaryTags, keywords.normalized,
+        keywords.raw, checksum, input.notes ?? null]);
+
+    await tx.query(
+      `update app.programme_proposals
+          set primary_tag=$2, secondary_tags=$3, keywords=$4, keywords_raw=$5, keywords_text=$6, tags_text=$7
+        where id=$1`,
+      [proposal.id, primaryTag, secondaryTags, keywords.normalized, keywords.raw, keywordsText, tagsText]);
+
+    return { proposalId: proposal.id, revisionNumber, checksum };
+  });
 }

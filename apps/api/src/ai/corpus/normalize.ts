@@ -28,6 +28,19 @@ const LIGATURES: Array<[RegExp, string]> = [
 /** Whitespace forms that collapse to a plain space. Includes NBSP and the narrow spaces. */
 const SPACE_LIKE = /[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
 
+/** Hyphen forms a PDF may use at a line-wrap: ASCII hyphen, soft hyphen, Unicode hyphens. */
+const HYPHEN_CHARS = '\\u002d\\u00ad\\u2010\\u2011';
+/**
+ * A hyphen directly attached to a letter or digit, with nothing between them — the shape of
+ * a genuine word-wrap break (`agencj-`, `35-`). A hyphen used as standalone punctuation
+ * (` - `, a dash with a space on each side) never matches this, because the character right
+ * before it is a space, not a letter or digit — so a line ending in "... hodowli -" is left
+ * to join with a space, exactly as before, rather than swallowing the dash.
+ */
+const ENDS_WITH_ATTACHED_HYPHEN = new RegExp(`[\\p{L}\\p{N}][${HYPHEN_CHARS}]$`, 'u');
+const ENDS_WITH_DIGIT_HYPHEN = new RegExp(`\\p{N}[${HYPHEN_CHARS}]$`, 'u');
+const STARTS_WITH_LETTER = /^\p{L}/u;
+
 export interface NormalizationProfile {
   id: string;
   /**
@@ -65,8 +78,14 @@ export function normalizePassage(raw: string, profile = DEFAULT_NORMALIZATION_PR
   for (const [pattern, replacement] of LIGATURES) text = text.replace(pattern, replacement);
   text = applyPunctuation(text, profile);
   text = text.replace(/\r\n?/g, '\n');
-  // Join words hyphenated across a line break, before line breaks become spaces.
-  text = text.replace(/(\p{L})[\u002d\u00ad\u2010\u2011]\n(\p{L})/gu, '$1$2');
+  // Join words hyphenated across an embedded line break, before line breaks become spaces.
+  // (The PDF page-assembly path below splits page text into lines before this function ever
+  // sees them, so this handles an operator-supplied passage that itself contains a literal
+  // line break — the PDF-side case is `joinHyphenatedLines`.)
+  text = text.replace(new RegExp(`(\\p{L})[${HYPHEN_CHARS}]\\n(\\p{L})`, 'gu'), '$1$2');
+  // A hyphen after a digit (e.g. "35-krotności") is part of the token, not an inserted
+  // word-wrap hyphen, so the line break is removed but the hyphen itself is kept.
+  text = text.replace(new RegExp(`(\\p{N})[${HYPHEN_CHARS}]\\n(\\p{L})`, 'gu'), '$1-$2');
   text = text.replace(/\n/g, ' ');
   text = text.replace(SPACE_LIKE, ' ');
   text = text.replace(/ {2,}/g, ' ');
@@ -86,6 +105,34 @@ export function normalizeKeywords(raw: readonly string[]): { normalized: string[
     kept.push(entry);
   }
   return { normalized, raw: kept };
+}
+
+/**
+ * Join a page's already-normalized lines into one string.
+ *
+ * The PDF text stream gives each visual line as its own entry (`page.text.split('\n')`,
+ * each normalized separately before this runs), so a word hyphenated across a line break
+ * arrives here as two already-separate strings — the first ending in a hyphen, the second
+ * starting with the resumed word — never as one string with an embedded `\n`. A blind
+ * space-join between every pair of lines is right for two real sentences and wrong for a
+ * mid-word break: it strands the hyphen with a trailing space and breaks the verbatim match
+ * against the source dataset's un-wrapped text. So each join point is checked: a line ending
+ * in a hyphen preceded by a letter joins directly with the next, and the hyphen — an
+ * artefact of the line wrap, not part of the word — is dropped; a hyphen preceded by a digit
+ * (e.g. "35-" before "krotności") is part of the token and is kept; anything else joins with
+ * a single space, as before.
+ */
+export function joinHyphenatedLines(lines: readonly string[]): string {
+  let body = '';
+  for (const line of lines) {
+    if (body === '' || line === '') { body += line; continue; }
+    if (STARTS_WITH_LETTER.test(line) && ENDS_WITH_ATTACHED_HYPHEN.test(body)) {
+      body = ENDS_WITH_DIGIT_HYPHEN.test(body) ? `${body}${line}` : `${body.slice(0, -1)}${line}`;
+      continue;
+    }
+    body += ` ${line}`;
+  }
+  return body;
 }
 
 export interface PageSpan {
@@ -156,7 +203,7 @@ export function assembleDocument(
       }
       kept.push(normalizedLine);
     }
-    const body = kept.join(' ').replace(/ {2,}/g, ' ').trim();
+    const body = joinHyphenatedLines(kept).replace(/ {2,}/g, ' ').trim();
     if (text !== '' && body !== '') text += ' ';
     const start = text.length;
     text += body;

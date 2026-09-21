@@ -248,6 +248,23 @@ export function validateBundle(bundle: LoadedBundle, sourceBytes: Buffer): Valid
   const seenProposalIds = new Set<string>();
   const sectionOrderIndexes = new Map<string, Set<number>>();
 
+  // Ledger-declared sections seed the section set and its reading order first, so a section
+  // with zero proposals is retained rather than only ever produced by a proposal record.
+  // Proposal records below are then checked for agreement with this shape, not left to
+  // define it alone. An 'excluded' ledger entry never seeds a section, matching the
+  // pre-existing meaning of exclusion: it must not appear in the index at all.
+  const declaredSections = bundle.ledger.sections
+    .filter((entry) => entry.status === 'indexed' && entry.chapter !== undefined
+      && entry.orderIndex !== undefined && entry.startPdfPage !== undefined && entry.endPdfPage !== undefined)
+    .slice()
+    .sort((left, right) => left.orderIndex! - right.orderIndex!);
+  for (const entry of declaredSections) {
+    if (entry.sectionId === '' || sectionShape.has(entry.sectionId)) continue;
+    sectionShape.set(entry.sectionId, { chapter: entry.chapter!, subchapter: entry.subchapter ?? null });
+    sectionOrder.push(entry.sectionId);
+    sectionPages.set(entry.sectionId, [entry.startPdfPage!, entry.endPdfPage!]);
+  }
+
   bundle.records.forEach((record, index) => {
     const at = `record[${index}]`;
     if (record.proposalId === '' || record.sectionId === '') return;

@@ -57,15 +57,25 @@ const STOPWORDS = new Set([
 ]);
 
 /**
+ * Controlled short terms that carry real topical signal despite being under four letters —
+ * `AI` and `UE` are controlled-vocabulary terms in the programme corpus itself (§ tagging
+ * rules distinguish `cyfryzacja` / `AI` / `technologie`). Lowering the general four-letter
+ * floor to admit them would reopen the noise problem that floor exists to prevent, so they
+ * are named explicitly instead, the same way `STOPWORDS` names exclusions explicitly.
+ */
+const SHORT_CONTROLLED_TERMS = new Set(['ai', 'ue']);
+
+/**
  * Search terms from Reel content.
  *
- * Only runs of four or more letters survive, which keeps the generated `tsquery` free of
- * anything that could be read as an operator — the query is built from user content, so it
- * must not be able to carry syntax.
+ * Runs of four or more letters survive, plus the named short controlled terms above, which
+ * keeps the generated `tsquery` free of anything that could be read as an operator — the
+ * query is built from user content, so it must not be able to carry syntax.
  */
 export function searchTerms(sources: readonly string[], limit = 24): string[] {
-  const words = sources.join(' ').toLowerCase().match(/\p{L}{4,}/gu) ?? [];
-  return [...new Set(words)].filter((word) => !STOPWORDS.has(word)).slice(0, limit);
+  const words = sources.join(' ').toLowerCase().match(/\p{L}{2,}/gu) ?? [];
+  const kept = words.filter((word) => word.length >= 4 || SHORT_CONTROLLED_TERMS.has(word));
+  return [...new Set(kept)].filter((word) => !STOPWORDS.has(word)).slice(0, limit);
 }
 
 interface EvidenceRow {

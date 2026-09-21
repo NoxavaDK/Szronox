@@ -587,6 +587,17 @@ export interface LedgerSection {
   sectionId: string;
   status: 'indexed' | 'excluded';
   reason: string | null;
+  /**
+   * Full section structure, declared independently of any proposal record. Optional: a
+   * bundle whose sections all carry at least one proposal never needs this. When present
+   * (ETAP 3B's 151-section coverage always supplies it), `validate.ts` seeds the section set
+   * from it, so a section with zero proposals is still retained rather than silently dropped.
+   */
+  chapter?: string;
+  subchapter?: string | null;
+  orderIndex?: number;
+  startPdfPage?: number;
+  endPdfPage?: number;
 }
 export interface CoverageLedger { pages: LedgerPage[]; sections: LedgerSection[] }
 
@@ -629,10 +640,18 @@ function parseLedger(raw: unknown, issues: IssueList): CoverageLedger {
         issues.add('ledger_status_invalid', 'coverage status must be indexed or excluded', at);
         return;
       }
+      const declaresStructure = entry.chapter !== undefined;
       sections.push({
         sectionId: text(entry, 'section_id', issues, at, 200),
         status,
         reason: status === 'excluded' ? text(entry, 'reason', issues, at, 500) : null,
+        ...(declaresStructure ? {
+          chapter: text(entry, 'chapter', issues, at, 500),
+          subchapter: optionalText(entry, 'subchapter', issues, at, 500),
+          orderIndex: integer(entry, 'order_index', issues, at, 0, 100000),
+          startPdfPage: integer(entry, 'start_pdf_page', issues, at, 1, 5000),
+          endPdfPage: integer(entry, 'end_pdf_page', issues, at, 1, 5000),
+        } : {}),
       });
     });
   }
