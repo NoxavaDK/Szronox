@@ -106,12 +106,41 @@ async function readBundle(directory: string) {
   return { bundle, sourceBytes, structureBytes, datasetBytes, validation: validateBundle(bundle, sourceBytes) };
 }
 
+/**
+ * The migrations the corpus commands require, in the order the runbook expects them applied.
+ * Read-only: this never runs a migration itself, only checks the ledger `db/migrate.ts`
+ * already writes (`public.schema_migrations`) before trusting that `app.programme_*` and the
+ * enrichment-revision guard exist. Assuming 0006/0007 are applied — as earlier corpus tasks
+ * did — means an unmigrated database fails with a raw `relation "app.programme_releases" does
+ * not exist` error instead of a clear one; this replaces that assumption with a check.
+ */
+const REQUIRED_MIGRATIONS = ['0006_programme_corpus.sql', '0007_programme_enrichment_revisions.sql'];
+
+async function assertMigrationsApplied(db: Awaited<ReturnType<typeof openDatabase>>['db']): Promise<void> {
+  const registry = await db.query<{ exists: boolean }>(
+    "select to_regclass('public.schema_migrations') is not null as exists");
+  if (!registry.rows[0].exists) {
+    throw new Error(
+      'public.schema_migrations does not exist — no migration has ever been applied to this database. '
+      + `Run the migration CLI first; the corpus commands require: ${REQUIRED_MIGRATIONS.join(', ')}`);
+  }
+  const applied = await db.query<{ name: string }>(
+    'select name from public.schema_migrations where name = any($1)', [REQUIRED_MIGRATIONS]);
+  const appliedNames = new Set(applied.rows.map((row) => row.name));
+  const missing = REQUIRED_MIGRATIONS.filter((name) => !appliedNames.has(name));
+  if (missing.length > 0) {
+    throw new Error(`Required migration(s) not applied to this database: ${missing.join(', ')}. `
+      + 'Run the migration CLI before any corpus command.');
+  }
+}
+
 /** Every write command runs as the schema owner; runtime roles cannot publish evidence. */
 async function withOwnerDatabase<T>(body: (db: Awaited<ReturnType<typeof openDatabase>>['db']) => Promise<T>): Promise<T> {
   const database = await openDatabase(process.env, { poolMax: 2, applicationName: 'szronox-programme-corpus' });
   try {
     const role = await database.db.query<{ role: string }>('select current_user as role');
     if (role.rows[0].role !== 'szronox_dev') throw new Error('Programme corpus commands require the owner role');
+    await assertMigrationsApplied(database.db);
     return await body(database.db);
   } finally {
     await database.close();

@@ -681,9 +681,20 @@ interface Fragment { x: number; y: number; endX: number; size: number; text: str
  *
  * Reading order is stream order — correct for a linearly typeset document, which is what
  * the admission rules allow into the corpus. A fragment whose baseline differs from the
- * previous one starts a new line; a horizontal gap wider than a quarter of the font size
- * becomes a single space, which is how a PDF that positions words separately still yields
- * word boundaries.
+ * previous one starts a new line; a horizontal gap wide enough becomes a single space, which
+ * is how a PDF that positions words separately still yields word boundaries.
+ *
+ * The gap multiplier (0.4 × font size) is set above the widest inter-letter gap a fully
+ * justified line in this corpus's source is known to produce, not just above the average.
+ * Justified text can stretch inter-character spacing, not only inter-word spacing, close to
+ * (previously: past) a naive word-gap threshold on specific letter pairs — confirmed
+ * (CORPUS-03) by instrumenting this function against the real 154-page programme PDF: every
+ * genuine word gap in the whole document carries its own explicit space-glyph fragment
+ * (so raising this multiplier cannot fuse two real words), while six single-letter-pair gaps
+ * with no such space glyph — false positives from justification stretching alone, at ratios
+ * 0.242–0.341 — were wrongly read as word boundaries at the previous 0.22 multiplier. The
+ * widest gap correctly left unjoined anywhere in the document is at ratio 0.177, so 0.4 keeps
+ * a wide margin on both sides.
  */
 function assembleLines(fragments: Fragment[]): string {
   const lines: string[] = [];
@@ -698,7 +709,7 @@ function assembleLines(fragments: Fragment[]): string {
         current = '';
       } else {
         const gap = fragment.x - previous.endX;
-        if (gap > Math.max(0.8, previous.size * 0.22) && !current.endsWith(' ') && !fragment.text.startsWith(' ')) {
+        if (gap > Math.max(0.8, previous.size * 0.4) && !current.endsWith(' ') && !fragment.text.startsWith(' ')) {
           current += ' ';
         }
       }

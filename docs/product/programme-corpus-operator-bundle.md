@@ -254,6 +254,35 @@ can read the corpus and cannot write it.
 the same root at `/api/v1/programme/versions/<id>/source`, behind the session, verifying the recorded
 SHA-256 before sending a byte.
 
+**The CLI runs outside the containers, on the operator's own machine or session — it must be pointed at
+the same archive root the deployed API and worker resolve, not a fresh empty directory on the host.**
+In the current deployment (`deploy/vps/compose.yaml`), both services set `APP_STORAGE_ROOT=
+/var/lib/szronox/storage` and no explicit `PROGRAMME_ARCHIVE_ROOT`, so they resolve
+`/var/lib/szronox/storage/programme` by the default above. Set exactly that when invoking `import`,
+`activate` or `revise-enrichment` on the deployment host:
+
+```
+PROGRAMME_ARCHIVE_ROOT=/var/lib/szronox/storage/programme \
+node apps/api/dist/ai/import-programme-cli.js import <bundle-dir>
+```
+
+Pointing the CLI at any other path archives the files somewhere the running API can never serve them from
+— `import` and `activate` would succeed, but the source route would 503 for every citation.
+
+### Migration state is checked, not assumed
+
+Every command that touches the database (`import`, `approve`, `activate`, `revise-enrichment` — not
+`validate`, which touches nothing) first runs a read-only check against `public.schema_migrations` (the
+ledger the migration CLI writes) for `0006_programme_corpus.sql` and
+`0007_programme_enrichment_revisions.sql`. If either is missing, the command fails immediately with the
+exact migration name(s) still needed, instead of assuming they're applied and surfacing a raw
+`relation "app.programme_releases" does not exist` error partway through. Apply migrations with the
+existing migration CLI before running any corpus command:
+
+```
+node apps/api/dist/db/migration-cli.js
+```
+
 ### What each step will not do
 
 - **Import** never makes anything searchable and never overwrites an existing release or version slug.

@@ -25,6 +25,18 @@ const LIGATURES: Array<[RegExp, string]> = [
   [/ﬅ/g, 'st'], [/ﬆ/g, 'st'],
 ];
 
+/**
+ * Subscript digits PDF extraction may produce for chemical/scientific notation (e.g. "CO₂").
+ * Expanded to plain digits for the same reason ligatures are: this is typography the PDF
+ * renderer chose, not a different character in the source's own wording — the source says
+ * "2", rendered smaller and lower. Confirmed against the real programme PDF: both of its two
+ * occurrences are literally "CO₂".
+ */
+const SUBSCRIPT_DIGITS: Array<[RegExp, string]> = [
+  [/₀/g, '0'], [/₁/g, '1'], [/₂/g, '2'], [/₃/g, '3'], [/₄/g, '4'],
+  [/₅/g, '5'], [/₆/g, '6'], [/₇/g, '7'], [/₈/g, '8'], [/₉/g, '9'],
+];
+
 /** Whitespace forms that collapse to a plain space. Includes NBSP and the narrow spaces. */
 const SPACE_LIKE = /[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
 
@@ -32,13 +44,13 @@ const SPACE_LIKE = /[\t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g;
 const HYPHEN_CHARS = '\\u002d\\u00ad\\u2010\\u2011';
 /**
  * A hyphen directly attached to a letter or digit, with nothing between them — the shape of
- * a genuine word-wrap break (`agencj-`, `35-`). A hyphen used as standalone punctuation
- * (` - `, a dash with a space on each side) never matches this, because the character right
- * before it is a space, not a letter or digit — so a line ending in "... hodowli -" is left
- * to join with a space, exactly as before, rather than swallowing the dash.
+ * a genuine word-wrap break (`agencj-`, `35-`, `MIR-`). A hyphen used as standalone
+ * punctuation (` - `, a dash with a space on each side) never matches this, because the
+ * character right before it is a space, not a letter or digit — so a line ending in
+ * "... hodowli -" is left to join with a space, exactly as before, rather than swallowing the
+ * dash.
  */
 const ENDS_WITH_ATTACHED_HYPHEN = new RegExp(`[\\p{L}\\p{N}][${HYPHEN_CHARS}]$`, 'u');
-const ENDS_WITH_DIGIT_HYPHEN = new RegExp(`\\p{N}[${HYPHEN_CHARS}]$`, 'u');
 const STARTS_WITH_LETTER = /^\p{L}/u;
 
 export interface NormalizationProfile {
@@ -76,16 +88,17 @@ function applyPunctuation(text: string, profile: NormalizationProfile): string {
 export function normalizePassage(raw: string, profile = DEFAULT_NORMALIZATION_PROFILE): string {
   let text = raw.normalize('NFC');
   for (const [pattern, replacement] of LIGATURES) text = text.replace(pattern, replacement);
+  for (const [pattern, replacement] of SUBSCRIPT_DIGITS) text = text.replace(pattern, replacement);
   text = applyPunctuation(text, profile);
   text = text.replace(/\r\n?/g, '\n');
-  // Join words hyphenated across an embedded line break, before line breaks become spaces.
-  // (The PDF page-assembly path below splits page text into lines before this function ever
-  // sees them, so this handles an operator-supplied passage that itself contains a literal
-  // line break — the PDF-side case is `joinHyphenatedLines`.)
-  text = text.replace(new RegExp(`(\\p{L})[${HYPHEN_CHARS}]\\n(\\p{L})`, 'gu'), '$1$2');
-  // A hyphen after a digit (e.g. "35-krotności") is part of the token, not an inserted
-  // word-wrap hyphen, so the line break is removed but the hyphen itself is kept.
-  text = text.replace(new RegExp(`(\\p{N})[${HYPHEN_CHARS}]\\n(\\p{L})`, 'gu'), '$1-$2');
+  // Join a word hyphenated across an embedded line break, before line breaks become spaces —
+  // and keep the hyphen: confirmed against the real programme PDF (see `joinHyphenatedLines`,
+  // the actual PDF-side join point) that every hyphen at a line-wrap in this corpus's source
+  // is a real, orthographic one, never an inserted word-wrap artefact. (The PDF page-assembly
+  // path below splits page text into lines before this function ever sees them, so this
+  // specific branch only matters for an operator-supplied passage that itself contains a
+  // literal embedded line break.)
+  text = text.replace(new RegExp(`([\\p{L}\\p{N}])[${HYPHEN_CHARS}]\\n(\\p{L})`, 'gu'), '$1-$2');
   text = text.replace(/\n/g, ' ');
   text = text.replace(SPACE_LIKE, ' ');
   text = text.replace(/ {2,}/g, ' ');
@@ -116,18 +129,27 @@ export function normalizeKeywords(raw: readonly string[]): { normalized: string[
  * starting with the resumed word — never as one string with an embedded `\n`. A blind
  * space-join between every pair of lines is right for two real sentences and wrong for a
  * mid-word break: it strands the hyphen with a trailing space and breaks the verbatim match
- * against the source dataset's un-wrapped text. So each join point is checked: a line ending
- * in a hyphen preceded by a letter joins directly with the next, and the hyphen — an
- * artefact of the line wrap, not part of the word — is dropped; a hyphen preceded by a digit
- * (e.g. "35-" before "krotności") is part of the token and is kept; anything else joins with
- * a single space, as before.
+ * against the source dataset's un-wrapped text.
+ *
+ * A line ending in a hyphen directly attached to a letter or digit joins with the next line
+ * with no space, hyphen kept (`MIR-` + `PIB` → `MIR-PIB`; `agencj-` + `ach` → `agencj-ach`).
+ * The hyphen is always retained, never dropped: confirmed empirically against the real
+ * programme PDF (CORPUS-03) that every attached-hyphen line-wrap in this document is a real,
+ * orthographic hyphen (a compound word or acronym — `MIR-PIB`, `doradczo-rozwojowych`,
+ * `społeczno-ekonomicznego`, `35-krotności`), never an inserted word-wrap artefact — the
+ * underlying document performs no automatic syllable hyphenation at all. Re-running grounding
+ * for all 1,423 canonical proposals with "always retain" produced zero regressions against
+ * "drop for a letter, keep for a digit" (the previous rule): every record whose outcome
+ * changed newly grounded correctly, none newly failed. A hyphen used as standalone
+ * punctuation (` - `, a dash with a space on each side) is untouched either way, because
+ * `ENDS_WITH_ATTACHED_HYPHEN` only matches a hyphen with no space before it.
  */
 export function joinHyphenatedLines(lines: readonly string[]): string {
   let body = '';
   for (const line of lines) {
     if (body === '' || line === '') { body += line; continue; }
     if (STARTS_WITH_LETTER.test(line) && ENDS_WITH_ATTACHED_HYPHEN.test(body)) {
-      body = ENDS_WITH_DIGIT_HYPHEN.test(body) ? `${body}${line}` : `${body.slice(0, -1)}${line}`;
+      body += line;
       continue;
     }
     body += ` ${line}`;

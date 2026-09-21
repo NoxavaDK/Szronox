@@ -28,7 +28,8 @@ import { loadBundle } from './ai/corpus/bundle.js';
 import { readArchivedFile } from './ai/corpus/archive.js';
 import { activateRelease, approveRelease, importRelease, resolveActiveRelease } from './ai/corpus/repository.js';
 import { findEvidence, MAX_EVIDENCE_CANDIDATES, searchTerms } from './ai/corpus/retrieval.js';
-import { joinHyphenatedLines } from './ai/corpus/normalize.js';
+import { joinHyphenatedLines, normalizePassage } from './ai/corpus/normalize.js';
+import { extractPdfText } from './ai/corpus/pdf-text.js';
 import { validateBundle } from './ai/corpus/validate.js';
 import { pgliteDatabase, type Database } from './db/client.js';
 import { migrate } from './db/migrate.js';
@@ -59,6 +60,40 @@ function buildPdf(pages: readonly string[][]): Buffer {
   objects[catalogNumber - 1] = `<< /Type /Catalog /Pages ${pagesNumber} 0 R >>`;
   objects[pagesNumber - 1] = `<< /Type /Pages /Count ${pageNumbers.length} `
     + `/Kids [ ${pageNumbers.map((number) => `${number} 0 R`).join(' ')} ] >>`;
+  objects[fontNumber - 1] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+
+  let pdf = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objects.forEach((body, index) => {
+    offsets.push(Buffer.byteLength(pdf, 'latin1'));
+    pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(pdf, 'latin1');
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(pdf, 'latin1');
+}
+
+/**
+ * A one-page PDF from a raw content stream, for tests that need to control inter-glyph
+ * positioning directly (the gap-threshold regression below) rather than relying on the font's
+ * own natural character advances, which `buildPdf` above uses.
+ */
+function buildPdfWithContent(content: string): Buffer {
+  const objects: string[] = ['', '', '', ''];
+  const catalogNumber = 1;
+  const pagesNumber = 2;
+  const pageNumber = 3;
+  const fontNumber = 4;
+  const contentBody = `<< /Length ${Buffer.byteLength(content, 'latin1')} >>\nstream\n${content}\nendstream`;
+  objects.push(contentBody);
+  const contentNumber = objects.length;
+
+  objects[catalogNumber - 1] = `<< /Type /Catalog /Pages ${pagesNumber} 0 R >>`;
+  objects[pagesNumber - 1] = `<< /Type /Pages /Count 1 /Kids [ ${pageNumber} 0 R ] >>`;
+  objects[pageNumber - 1] = `<< /Type /Page /Parent ${pagesNumber} 0 R /MediaBox [0 0 595 842] `
+    + `/Resources << /Font << /F1 ${fontNumber} 0 R >> >> /Contents ${contentNumber} 0 R >>`;
   objects[fontNumber - 1] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
 
   let pdf = '%PDF-1.4\n';
@@ -261,10 +296,17 @@ async function database(): Promise<{ db: Database; close(): Promise<void> }> {
  * which broke grounding for real proposals whose dataset text has the word unwrapped. These
  * cases are taken directly from that run, both the ones it must fix and the one it must not
  * (a standalone dash used as punctuation, not a word-wrap).
+ *
+ * CORPUS-03: the hyphen is always retained, never dropped, for an attached hyphen — confirmed
+ * against the real PDF (rendered and read by eye) that every attached-hyphen wrap in this
+ * document is a real compound word or acronym (`MIR-PIB`, `doradczo-rozwojowych`), never an
+ * inserted word-wrap artefact, and confirmed against all 1,423 canonical proposals that
+ * "always retain" produces zero regressions versus the earlier drop-for-letter rule.
  */
-test('joinHyphenatedLines joins a word-wrap hyphen and drops it, per corpus specification §3', () => {
-  assert.equal(joinHyphenatedLines(['agencj-', 'ach wykonawczych']), 'agencjach wykonawczych');
-  assert.equal(joinHyphenatedLines(['systemoweg-', 'o wykorzystywania']), 'systemowego wykorzystywania');
+test('joinHyphenatedLines joins an attached hyphen and keeps it, confirmed against the real PDF', () => {
+  assert.equal(joinHyphenatedLines(['agencj-', 'ach wykonawczych']), 'agencj-ach wykonawczych');
+  assert.equal(joinHyphenatedLines(['MIR-', 'PIB, IBW PAN']), 'MIR-PIB, IBW PAN');
+  assert.equal(joinHyphenatedLines(['doradczo-', 'rozwojowych alternatywami']), 'doradczo-rozwojowych alternatywami');
 });
 
 test('joinHyphenatedLines keeps a digit-preceded hyphen, since it is part of the token', () => {
@@ -282,6 +324,43 @@ test('joinHyphenatedLines leaves two ordinary lines exactly as a single-space jo
   assert.equal(joinHyphenatedLines(['Pierwsze zdanie.', 'Drugie zdanie.']), 'Pierwsze zdanie. Drugie zdanie.');
   assert.equal(joinHyphenatedLines(['Jedna linia']), 'Jedna linia');
   assert.equal(joinHyphenatedLines([]), '');
+});
+
+/**
+ * `normalizePassage`'s subscript-digit expansion (CORPUS-03): the real PDF renders "CO₂"
+ * with a genuine Unicode subscript 2 (confirmed by rendering page 57 and reading it by eye),
+ * while the ETAP 3B dataset's canonical text has plain "CO2". Expanded the same way ligatures
+ * are — typography, not spelling.
+ */
+test('normalizePassage expands a subscript digit to its plain form', () => {
+  assert.equal(normalizePassage('trwałego wiązania CO₂ wyłącznie'), 'trwałego wiązania CO2 wyłącznie');
+  assert.equal(normalizePassage('H₂O i CO₂'), 'H2O i CO2');
+});
+
+/**
+ * `pdf-text.ts`'s `assembleLines` glyph-gap threshold (CORPUS-03).
+ *
+ * The content stream places "agencj" then "ach" on one line with an explicit TJ-array
+ * kerning adjustment between them, at font size 12 — the same mechanism (and the same
+ * font size) that produced every false positive found in the real document. A gap ratio of
+ * 0.3 (between the old 0.22 multiplier, which wrongly split this into two words, and the new
+ * 0.4, which must not) reproduces the exact defect class this fix closes. A second case with
+ * ratio 0.6 — comfortably past 0.4 — proves the threshold still recognizes a genuine wide gap.
+ */
+function contentWithGap(tjAdjustment: number): string {
+  return ['BT', '/F1 12 Tf', '1 0 0 1 50 760 Tm', `[(agencj) ${tjAdjustment} (ach)] TJ`, 'ET'].join('\n');
+}
+
+test('assembleLines does not split a word at a justified-text kerning gap that used to false-positive', () => {
+  // ratio 0.3: ((-adjustment/1000) * 12) / 12 = 0.3  =>  adjustment = -300
+  const extracted = extractPdfText(buildPdfWithContent(contentWithGap(-300)));
+  assert.equal(extracted.pages[0].text, 'agencjach');
+});
+
+test('assembleLines still inserts a space at a genuine wide gap', () => {
+  // ratio 0.6: adjustment = -600
+  const extracted = extractPdfText(buildPdfWithContent(contentWithGap(-600)));
+  assert.equal(extracted.pages[0].text, 'agencj ach');
 });
 
 test('slugify transliterates Polish diacritics explicitly', () => {

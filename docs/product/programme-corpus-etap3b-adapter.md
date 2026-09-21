@@ -115,53 +115,62 @@ section page ranges, because those ranges are not mutually exclusive (a page can
 section and open the next). A page no proposal touches is `excluded` with a stated reason; the
 real corpus has five such pages (1, 30, 52, 118, 145).
 
-## 6. What is genuinely missing, and reported rather than guessed
+## 6. Printed page labels
 
-**`printed_page_labels`.** None of the four canonical ETAP 3B files supply the 154 printed
-page labels the bundle format requires. The adapter does not invent them. `validate` reports
-`printed_labels_invalid` until the operator supplies this array (front matter pages recorded
-as `""`, never omitted, never back-filled with the physical page number) — this is the
-"otherwise report the missing companion input" case the CORPUS-02 handoff names explicitly.
+**Resolved in CORPUS-03.** None of the four canonical ETAP 3B files supply printed page
+labels, and the adapter never invents them — CORPUS-02 correctly reported
+`printed_labels_invalid` rather than guess. CORPUS-03 established, by rendering and visually
+inspecting representative pages (1, 77, 154) of `ProgramSzroNox.pdf` and exhaustively scanning
+all 154 pages' extracted text for any candidate label line, that **this document has no
+printed pagination at all** — not a gap in the supplied files, a genuine property of the
+source. Per corpus specification §4, the honest encoding of "no printed pagination" is 154
+empty strings, one per physical page, supplied in `Program/etap3b.manifest.json`'s
+`version.printed_page_labels` — not omitted, not back-filled with the physical page number.
 
-## 7. A line-join fix discovered while validating the real dataset
+## 7. Fixes found and applied while validating the real dataset (CORPUS-02 → CORPUS-03)
 
-Running `validate` against the real PDF/dataset pair surfaced 15 `passage_not_found`
-findings, all traced to one mechanism: `assembleDocument` (in `normalize.ts`) was joining a
-page's extracted lines with a blind single space (`kept.join(' ')`), so a word wrapped across
-a line break at a hyphen (`"agencj-"` / `"ach wykonawczych"`, two separate extracted lines)
-kept a stray space at the join (`"agencj- ach"`) instead of joining per corpus specification
-§3 ("join words hyphenated across line breaks"). This mechanism existed before CORPUS-02 but
-was never actually reachable for PDF-extracted text — the pre-existing hyphen-join regex
-inside `normalizePassage` only fires on a string that still contains an embedded `\n`, and
-page-assembly always splits lines (and removes their newlines) before normalizing each one
-individually.
+Running `validate` against the real PDF/dataset pair first surfaced 15 `passage_not_found`
+findings (CORPUS-02), traced to `assembleDocument` (in `normalize.ts`) joining a page's
+extracted lines with a blind single space (`kept.join(' ')`) — so a word wrapped across a
+line break at a hyphen kept a stray space at the join (`"agencj- ach"`) instead of joining, per
+corpus specification §3. This mechanism existed before CORPUS-02 but was never actually
+reachable for PDF-extracted text — the pre-existing hyphen-join regex inside `normalizePassage`
+only fires on a string that still contains an embedded `\n`, and page-assembly always splits
+lines (and removes their newlines) before normalizing each one individually. CORPUS-02 fixed
+this with a new `joinHyphenatedLines` function, used in place of the blind join: a line ending
+in a hyphen **directly attached** to a letter or digit (no space before it — which is exactly
+what distinguishes it from standalone punctuation like `"pozarządowych - oraz"`, left alone)
+joins with the next without a space. That mechanism fix alone brought grounding from
+1408 → 1411 of 1423, leaving 12 `passage_not_found` findings, reduced to **0** by CORPUS-03's
+further fixes below — each one verified by rendering the actual PDF page and confirmed against
+the full 1,423-record dataset, not guessed from the ETAP 3B text alone.
 
-Fixed with a new `joinHyphenatedLines` function used in place of the blind join: a line ending
-in a hyphen **directly attached** to a letter or digit joins with the next without a space —
-the hyphen is dropped for a letter (`agencj-` + `ach` → `agencjach`, per spec) and kept for a
-digit (`35-` + `krotności` → `35-krotności`, since the hyphen is part of the token, not an
-inserted wrap). A hyphen used as standalone punctuation (a dash with a space on each side,
-`"pozarządowych - oraz"`) is left alone — the "directly attached" check (no space between the
-letter/digit and the hyphen) is exactly what tells the two apart, and an earlier version of
-this fix without that check wrongly collapsed two such dashes before the real-data run caught
-it.
+| Root cause | Records | Fix |
+| --- | --- | --- |
+| Line-join never reached PDF text at all | (mechanism gap; no record count) | CORPUS-02: new `joinHyphenatedLines`, used at the real per-page join site instead of a blind `kept.join(' ')` |
+| Compound-word hyphen wrongly dropped | 4 (`MIR-PIB`, `doradczo-rozwojowych`, `społeczno-ekonomicznego`, `przyczynowo-skutkowych`) | CORPUS-03: `joinHyphenatedLines` always retains an attached hyphen (this document performs no automatic syllable hyphenation; every attached hyphen at a wrap is real, confirmed with zero regressions across all 1,423 proposals) |
+| False-positive mid-word space from a PDF glyph-gap heuristic | 5 (`agencj\|ach`, `systemoweg\|o`, `zawsz\|e`, `odb\|yciu`, `wykluczon\|ych`) | CORPUS-03: `pdf-text.ts`'s `assembleLines` gap multiplier raised 0.22 → 0.4× font size, calibrated against every gap in the whole document (detail below) |
+| Subscript-digit encoding (`CO₂` vs `CO2`) | 1 (`SZR-ENG-NFMPP-014`) | CORPUS-03: `normalize.ts` gained a `SUBSCRIPT_DIGITS` table, same class of fix as the existing ligature table |
+| Footnote text spliced into body flow by stream-order reading | 1 (`SZR-ECO-GREEN-005`) | CORPUS-03: no code change — declared the footnote's two lines in `etap3b.manifest.json`'s `header_footer.drop_exact_lines` |
+| Genuine content divergence (PDF has a real list-bullet dash; ETAP 3B's curated text dropped it) | 1 (`SZR-EDU-EE-002`) | CORPUS-03: corrected `Finalszronox_programme_proposals.json`'s `proposal_text` after user approval — see `docs/implementation/CORPUS-03-result.md` for the exact before/after |
 
-Net effect on the real corpus: 1408 → 1411 of 1423 proposals now ground successfully (three
-additional records fixed: `SZR-CIV-ANTI-006`, `SZR-ANM-VET-003` were false alarms from an
-intermediate version of the fix and are not part of the final count — see
-`docs/implementation/CORPUS-02-result.md` §4 for the precise before/after). Regression-tested
-in `apps/api/src/corpus-etap3b.test.ts` (`joinHyphenatedLines` unit tests) and confirmed against
-the full existing `corpus.test.ts` suite, unchanged.
+**The glyph-gap threshold, in detail.** `pdf-text.ts`'s `assembleLines` inserts a
+space between two horizontally-separated text fragments when the gap exceeds a multiple of the
+font size — this is what lets a PDF that positions words individually still yield word
+boundaries. Instrumented against the whole 154-page document: filtering to space-insertions
+between two letters where *neither* side already carries its own explicit space glyph (i.e.
+the position heuristic is the *only* thing providing the space) found exactly 6 events in the
+entire document, at gap/fontSize ratios 0.242–0.341 — all false positives, none a real word
+boundary (confirmed by rendering the affected pages: e.g. "agencjach" on page 26 reads as one
+normal, tightly-set word). The widest ratio among the genuine same-word letter-pairs correctly
+left unjoined anywhere in the document is 0.177 — a clean separation. Raising the multiplier to
+0.4 sits comfortably above every observed false positive and cannot create a new false negative
+here, because every real inter-word gap in the whole document already carries its own explicit
+space-glyph fragment (so the position heuristic is never actually the only signal for a
+genuine word boundary in this document).
 
-**12 records still fail `passage_not_found` after this fix**, for reasons outside this
-adapter's or this normalization function's scope — see
-`docs/implementation/CORPUS-02-result.md` §5 for the itemized root-cause breakdown (a
-hyphen-retention judgment call our deterministic pipeline cannot make without a dictionary; a
-distinct stray-space extraction artifact unrelated to hyphenation; one subscript-digit
-encoding difference; one apparent footnote-content bleed; one case where ETAP 3B's own curated
-text drops a bullet dash present in the raw PDF). None of these is fixed here — doing so would
-mean either guessing at linguistic judgment or further, separately-scoped extraction-pipeline
-work.
+Regression-tested in `apps/api/src/corpus-etap3b.test.ts`. Full acceptance evidence (commands,
+exact record IDs, final counts) is in `docs/implementation/CORPUS-03-result.md`.
 
 ## 8. Enrichment revisions
 
@@ -194,3 +203,13 @@ four-letter rule, rather than lowering the general threshold, which would reopen
 problem that rule exists to prevent. No other retrieval behaviour changed: the eight-candidate
 cap, the worker's three-candidate selection, dedup-by-proposal, invented-id rejection and the
 "no active release is an explicit error" behaviour are unchanged CORPUS-01 code.
+
+## 10. Migration state and archive configuration (CORPUS-03)
+
+`import-programme-cli.ts` no longer assumes migrations 0006/0007 are applied. Every
+database-touching command (`import`, `approve`, `activate`, `revise-enrichment`) now runs a
+read-only check against `public.schema_migrations` first and fails with the exact missing
+migration name(s) if either is absent, instead of surfacing a raw `relation does not exist`
+error partway through. See `docs/product/programme-corpus-operator-bundle.md` §6 for the full
+runbook, including the exact `PROGRAMME_ARCHIVE_ROOT` value the operator must set to match the
+deployed containers' resolved archive path when running the CLI outside them.
