@@ -202,14 +202,35 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, [api, reportLoadFailure, user]);
   useEffect(() => { if (route.name === 'deleted') void loadDeleted(); }, [loadDeleted, route.name]);
 
+  /**
+   * Open a Reel's detail screen.
+   *
+   * The route is changed only once the Reel is in hand, because `current` and `route` are
+   * what the detail screen is rendered from and they must never disagree:
+   *
+   *   - Navigating first left the previous Reel in `current` for the whole round trip, so
+   *     tapping B straight after A rendered *A's* title, script and hooks under route B.
+   *     `changeReel` patches `currentRef.current`, so an edit made in that window would
+   *     have been written to A.
+   *   - A failed read then left `route` on `detail` with `current` still null, which falls
+   *     through to the list — and the list's own effect is guarded by `route.name === 'list'`,
+   *     so the status tabs silently stopped reloading while still highlighting the new tab.
+   *
+   * Loading and failure are reported through the shared `loadState`, which the list screen
+   * already renders as "Wczytywanie…" and "Nie udało się wczytać" with a retry. Staying put
+   * on a failure keeps that retry meaningful instead of stranding the user on a dead route.
+   */
   const openDetail = useCallback(async (reelId: string) => {
-    setRoute({ name: 'detail', reelId }); setLoadState('loading');
+    setLoadState('loading');
     try {
       const reel = await api.reel(reelId, { includeDeleted: true });
       // Drafts are read for the account that is active now, and the id is part of
       // the key, so a draft can only ever be paired with its own account's Reel.
       const draft = user ? await store.reel(user.id, reelId) : undefined;
-      setCurrent(draft ? { ...reel, ...draft.changes } : reel); setSaveState(draft ? 'offline' : 'idle'); setLoadState('loaded');
+      const resolved = draft ? { ...reel, ...draft.changes } : reel;
+      currentRef.current = resolved;
+      setCurrent(resolved); setSaveState(draft ? 'offline' : 'idle'); setLoadState('loaded');
+      setRoute({ name: 'detail', reelId });
     } catch (error) { reportLoadFailure(error); }
   }, [api, reportLoadFailure, store, user]);
 
