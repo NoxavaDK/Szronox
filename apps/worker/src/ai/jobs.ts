@@ -49,7 +49,7 @@ export async function claimNext(pool: Pool): Promise<ClaimedRun | null> {
 
 function publicFailure(error: unknown): { code: string; retryable: boolean } {
   if (error instanceof ProviderError) return { code: error.code, retryable: error.retryable };
-  if (error instanceof SourceError) return { code: error.code, retryable: error.code === 'PROVIDER_UNAVAILABLE' };
+  if (error instanceof SourceError) return { code: error.code, retryable: error.code === 'SOURCE_UNAVAILABLE' };
   if (error instanceof Error && error.message === 'UNSUPPORTED_INPUT') return { code: 'UNSUPPORTED_INPUT', retryable: false };
   return { code: 'INTERNAL_ERROR', retryable: true };
 }

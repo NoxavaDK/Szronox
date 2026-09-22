@@ -3,8 +3,12 @@ import { createHash } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { isIP } from 'node:net';
+import type { Readable } from 'node:stream';
+import { parseHTML } from 'linkedom';
+import { Readability } from '@mozilla/readability';
 
-const MAX_BYTES = 256_000;
+export const MAX_BYTES = 2 * 1024 * 1024;
+export const MAX_ARTICLE_CHARS = 20_000;
 const MAX_REDIRECTS = 2;
 
 function publicAddress(address: string): boolean {
@@ -28,19 +32,19 @@ function publicAddress(address: string): boolean {
 
 export function canonicalPublicUrl(raw: string): URL {
   let url: URL;
-  try { url = new URL(raw); } catch { throw new SourceError('UNSUPPORTED_INPUT'); }
+  try { url = new URL(raw); } catch { throw new SourceError('SOURCE_UNSUPPORTED'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
       !url.hostname || url.hostname.length > 253 ||
       /(^|\.)(localhost|local|internal|invalid|test)$/.test(url.hostname.toLowerCase())) {
-    throw new SourceError('UNSUPPORTED_INPUT');
+    throw new SourceError('SOURCE_UNSUPPORTED');
   }
-  if (isIP(url.hostname) && !publicAddress(url.hostname)) throw new SourceError('UNSUPPORTED_INPUT');
+  if (isIP(url.hostname) && !publicAddress(url.hostname)) throw new SourceError('SOURCE_UNSUPPORTED');
   url.hash = '';
   return url;
 }
 
 export class SourceError extends Error {
-  constructor(readonly code: 'UNSUPPORTED_INPUT' | 'PROVIDER_UNAVAILABLE') {
+  constructor(readonly code: 'SOURCE_UNSUPPORTED' | 'SOURCE_UNAVAILABLE' | 'SOURCE_ACCESS_DENIED' | 'SOURCE_TOO_LARGE' | 'SOURCE_TEXT_TOO_LONG' | 'SOURCE_TEXT_UNAVAILABLE') {
     super(code);
     this.name = 'SourceError';
   }
@@ -55,7 +59,7 @@ async function checkedAddress(hostname: string): Promise<{ address: string; fami
   if (isIP(hostname)) return { address: hostname, family: isIP(hostname) };
   const answers = await lookup(hostname, { all: true, verbatim: true });
   if (answers.length === 0 || answers.some(({ address }) => !publicAddress(address))) {
-    throw new SourceError('UNSUPPORTED_INPUT');
+    throw new SourceError('SOURCE_UNSUPPORTED');
   }
   return answers[0];
 }
@@ -87,54 +91,93 @@ async function oneFetch(url: URL): Promise<{ status: number; location?: string; 
         resolve({ status, location, contentType, bytes: Buffer.alloc(0) });
         return;
       }
-      if (status !== 200 || contentEncoding !== 'identity' || !['text/html', 'text/plain'].includes(contentType)) {
-        response.resume(); reject(new SourceError('UNSUPPORTED_INPUT')); return;
+      if (status !== 200) {
+        response.destroy(); reject(new SourceError(status === 401 || status === 403 || status === 429 ? 'SOURCE_ACCESS_DENIED' : 'SOURCE_UNAVAILABLE')); return;
       }
-      const chunks: Buffer[] = [];
-      let size = 0;
-      response.on('data', (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > MAX_BYTES) { response.destroy(new SourceError('UNSUPPORTED_INPUT')); return; }
-        chunks.push(chunk);
-      });
-      response.on('end', () => resolve({ status, contentType, bytes: Buffer.concat(chunks) }));
-      response.on('error', reject);
+      if (contentEncoding !== 'identity' || !['text/html', 'text/plain'].includes(contentType)) {
+        response.destroy(); reject(new SourceError('SOURCE_UNSUPPORTED')); return;
+      }
+      void readSourceBody(response, response.headers['content-length']).then(
+        (bytes) => resolve({ status, contentType, bytes }), reject);
     });
-    request.on('timeout', () => request.destroy(new SourceError('PROVIDER_UNAVAILABLE')));
+    request.on('timeout', () => request.destroy(new SourceError('SOURCE_UNAVAILABLE')));
+    const deadline = setTimeout(() => request.destroy(new SourceError('SOURCE_UNAVAILABLE')), 6000);
+    request.on('close', () => clearTimeout(deadline));
     request.on('error', reject);
     request.end();
   });
 }
 
-function textFrom(bytes: Buffer, contentType: string): string {
+/** Count actual streamed bytes; Content-Length is only an early rejection, never trusted. */
+export async function readSourceBody(stream: Readable, contentLength?: string): Promise<Buffer> {
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_BYTES) {
+    stream.destroy();
+    throw new SourceError('SOURCE_TOO_LARGE');
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.length;
+    if (size > MAX_BYTES) {
+      stream.destroy();
+      throw new SourceError('SOURCE_TOO_LARGE');
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+/** Inert parsing only: no scripts execute and no linked resources are requested. */
+export function textFrom(bytes: Buffer, contentType: string): string {
   let text = bytes.toString('utf8');
   if (contentType === 'text/html') {
-    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+    const { document } = parseHTML(text);
+    for (const node of document.querySelectorAll('script,style,noscript,nav,footer,aside,form,dialog,button,iframe,svg,[hidden],[aria-hidden="true"],[role="navigation"],[role="dialog"]')) node.remove();
+    for (const node of document.querySelectorAll('[class],[id]')) {
+      if (/(?:^|[\s_-])(cookie|consent|newsletter|related|recommendations|advertisement|advert|social-share)(?:$|[\s_-])/i.test(`${node.id} ${node.className}`)) node.remove();
+    }
+    // Onet keeps its introduction in a separate semantic article from the body.
+    // Retain only explicit lead paragraphs, never a metadata description or script.
+    const heading = document.querySelector('h1')?.textContent?.trim() ?? '';
+    const leads = [...document.querySelectorAll('p')].filter((node) =>
+      /(?:^|[\s_-])(lead|standfirst)(?:$|[\s_-])/i.test(node.className)).map((node) => node.textContent.trim());
+    // Publisher-specific follow widget; it is not part of the reported article.
+    for (const node of document.querySelectorAll('.ods-m-google-article,.ods-o-google-buttons-bottom')) node.remove();
+    for (const node of document.querySelectorAll('p,li,h1,h2,h3,h4,blockquote')) node.appendChild(document.createTextNode('\n'));
+    try {
+      const article = new Readability(document, { charThreshold: 80, maxElemsToParse: 30_000, disableJSONLD: true }).parse();
+      text = article?.textContent ?? '';
+      if (!text.trim()) throw new SourceError('SOURCE_TEXT_UNAVAILABLE');
+      const prefix = [heading, ...leads].filter((value, index, all) => value && all.indexOf(value) === index && !text.includes(value));
+      text = [...prefix, text].join('\n');
+    } catch { throw new SourceError('SOURCE_TEXT_UNAVAILABLE'); }
   }
-  return text.replace(/\s+/g, ' ').trim().slice(0, 20_000);
+  text = text.replace(/\s+/g, ' ').trim();
+  if (!text || (contentType === 'text/html' && text.length < 80)) throw new SourceError('SOURCE_TEXT_UNAVAILABLE');
+  if (text.length > MAX_ARTICLE_CHARS) throw new SourceError('SOURCE_TEXT_TOO_LONG');
+  return text;
 }
 
 /** Every redirect is resolved and checked independently, and DNS is pinned per hop. */
 export async function retrievePublicSource(raw: string): Promise<RetrievedSource> {
   let url = canonicalPublicUrl(raw);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    const response = await oneFetch(url);
+    const response = await oneFetch(url).catch((error: unknown) => {
+      throw error instanceof SourceError ? error : new SourceError('SOURCE_UNAVAILABLE');
+    });
     if (response.location) {
-      if (redirect === MAX_REDIRECTS) throw new SourceError('UNSUPPORTED_INPUT');
+      if (redirect === MAX_REDIRECTS) throw new SourceError('SOURCE_UNSUPPORTED');
       url = canonicalPublicUrl(new URL(response.location, url).toString());
       continue;
     }
     const excerpt = textFrom(response.bytes, response.contentType);
-    if (!excerpt) throw new SourceError('UNSUPPORTED_INPUT');
+    if (!excerpt) throw new SourceError('SOURCE_UNSUPPORTED');
     return {
       url: url.toString(), retrievedAt: new Date().toISOString(), status: response.status,
       contentType: response.contentType, excerpt,
       sha256: createHash('sha256').update(response.bytes).digest('hex'),
     };
   }
-  throw new SourceError('UNSUPPORTED_INPUT');
+  throw new SourceError('SOURCE_UNSUPPORTED');
 }
