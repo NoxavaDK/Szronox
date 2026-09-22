@@ -1,0 +1,260 @@
+name: szronox-dev
+
+# Disposable local development project. It is not a VPS deployment, and running it
+# changes nothing outside these project-scoped resources.
+#
+# Four identities, not one:
+#
+#   szronox_dev     database owner. Migrations, grants and provisioning only.
+#   szronox_api     the API process. Reads the roster and credential hashes, reads and
+#                   writes sessions and domain data. Cannot manage users or the schema.
+#   szronox_worker  the AI worker process. Reads domain data and writes only fenced AI
+#                   job lifecycle, additive hooks and the Reel version. No access to
+#                   credentials or sessions at all.
+#   postgres        never used by the application.
+#
+# Each service mounts only the secrets its own identity needs. The API and worker refuse
+# to start if they find privileges beyond the above.
+
+networks:
+  private:
+    name: szronox-dev_private
+    internal: true
+  worker_egress:
+    name: szronox-dev_worker_egress
+
+volumes:
+  postgres_data:
+    name: szronox-dev_postgres_data
+  app_storage:
+    name: szronox-dev_app_storage
+
+secrets:
+  postgres_password:
+    file: ${SZRONOX_DEV_POSTGRES_PASSWORD_FILE:?Set SZRONOX_DEV_POSTGRES_PASSWORD_FILE to a local development-only secret file}
+  api_db_password:
+    file: ${SZRONOX_DEV_API_DB_PASSWORD_FILE:?Set SZRONOX_DEV_API_DB_PASSWORD_FILE to a local development-only secret file}
+  worker_db_password:
+    file: ${SZRONOX_DEV_WORKER_DB_PASSWORD_FILE:?Set SZRONOX_DEV_WORKER_DB_PASSWORD_FILE to a local development-only secret file}
+  app_csrf_secret:
+    file: ${SZRONOX_DEV_CSRF_SECRET_FILE:?Set SZRONOX_DEV_CSRF_SECRET_FILE to a local development-only secret file of at least 32 characters}
+
+x-app-image: &app_image
+  image: szronox-dev:${SZRONOX_RELEASE:-local}
+
+x-owner-database: &owner_database
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: szronox_dev
+  DATABASE_USER: szronox_dev
+  DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: szronox_dev
+      POSTGRES_USER: szronox_dev
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    # The runtime role passwords are needed at initialisation time, because the roles are
+    # created once with the data directory. They are not used by PostgreSQL afterwards.
+    secrets: [postgres_password, api_db_password, worker_db_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U szronox_dev -d szronox_dev]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 60s
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile
+    <<: *app_image
+    command: [node, apps/api/dist/db/migration-cli.js]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *owner_database
+    secrets: [postgres_password]
+    networks: [private]
+
+  # Table grants need the tables, so this runs after migrate and is rerun after any new
+  # migration. It uses the PostgreSQL image because it needs psql, not Node.
+  grants:
+    image: postgres:17.6-bookworm
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGDATABASE: szronox_dev
+      PGUSER: szronox_dev
+    entrypoint:
+      - sh
+      - -ec
+      - >-
+        umask 077
+        && printf 'postgres:5432:szronox_dev:szronox_dev:%s\n' "$$(cat /run/secrets/postgres_password)" > /tmp/pgpass
+        && chmod 600 /tmp/pgpass
+        && PGPASSFILE=/tmp/pgpass psql -v ON_ERROR_STOP=1 -f /grants.sql
+    volumes:
+      - ./postgres/grants.sql:/grants.sql:ro
+    secrets: [postgres_password]
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    networks: [private]
+
+  storage-init:
+    <<: *app_image
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - >-
+        mkdir -p /var/lib/szronox/storage/staging /var/lib/szronox/storage/objects
+        && chown 1000:1000 /var/lib/szronox/storage /var/lib/szronox/storage/staging /var/lib/szronox/storage/objects
+        && chmod 700 /var/lib/szronox/storage /var/lib/szronox/storage/staging /var/lib/szronox/storage/objects
+    restart: "no"
+    volumes:
+      - app_storage:/var/lib/szronox/storage
+
+  # Operator-only, run by hand with `run --rm -T`. Passwords arrive on stdin as one
+  # bounded JSON object and nowhere else: not argv, not a file, not the environment.
+  # It runs as the owner, the only identity permitted to write credentials.
+  provision:
+    <<: *app_image
+    command: [node, apps/api/dist/runtime/provision-cli.js]
+    restart: "no"
+    profiles: [operator]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *owner_database
+      APP_ALLOWLIST: ${APP_ALLOWLIST:-NOXAVA:11111111-1111-4111-8111-111111111111,SZRON:22222222-2222-4222-8222-222222222222}
+    secrets: [postgres_password]
+    networks: [private]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  api:
+    <<: *app_image
+    restart: unless-stopped
+    depends_on:
+      grants:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+    init: true
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Must be the exact browser origin. The session cookie carries the __Host- prefix,
+      # so a real deployment is HTTPS. There is deliberately no deployment hostname or
+      # localhost default here: the operator must supply the actual origin explicitly.
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the exact browser origin; VPS-05 supplies the HTTPS hostname}
+      APP_STORAGE_ROOT: /var/lib/szronox/storage
+      AI_ENABLED: ${AI_ENABLED:-false}
+      # The addresses of the reverse proxy, so request.ip is the real client and the
+      # login throttle keys per client. Empty means trust nothing, which behind a proxy
+      # makes that throttle one global counter. Never "true": any client could then
+      # choose its own bucket with a header. See deploy/vps/README.md.
+      APP_TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES:-}
+      APP_CSRF_SECRET_FILE: /run/secrets/app_csrf_secret
+      APP_SESSION_TTL_SECONDS: ${APP_SESSION_TTL_SECONDS:-604800}
+      APP_ALLOWLIST: ${APP_ALLOWLIST:-NOXAVA:11111111-1111-4111-8111-111111111111,SZRON:22222222-2222-4222-8222-222222222222}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: szronox_dev
+      DATABASE_USER: szronox_api
+      DATABASE_PASSWORD_FILE: /run/secrets/api_db_password
+      DATABASE_POOL_MAX: "6"
+    secrets: [api_db_password, app_csrf_secret]
+    ports:
+      - "127.0.0.1:3010:3000"
+    volumes:
+      - app_storage:/var/lib/szronox/storage
+    networks: [private]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Readiness, not liveness. /api/v1/health answers 200 from a scaffold with no
+    # database at all, so watching it would keep a broken process in rotation.
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/v1/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  worker:
+    <<: *app_image
+    restart: unless-stopped
+    depends_on:
+      grants:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    init: true
+    command: [node, apps/worker/dist/index.js]
+    environment:
+      NODE_ENV: development
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: szronox_dev
+      DATABASE_USER: szronox_worker
+      DATABASE_PASSWORD_FILE: /run/secrets/worker_db_password
+      DATABASE_POOL_MAX: "2"
+      WORKER_POLL_MS: "5000"
+      AI_ENABLED: ${AI_ENABLED:-false}
+      APP_STORAGE_ROOT: /var/lib/szronox/storage
+    # The worker has no CSRF secret; it reads validated image objects only.
+    secrets: [worker_db_password]
+    networks: [private, worker_egress]
+    volumes:
+      - app_storage:/var/lib/szronox/storage:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.25
+    stop_grace_period: 15s
+
+  # Deferred to VPS-06. It runs as the owner because it creates and seeds its own
+  # disposable rows, which no runtime identity may do.
+  real-pg-harness:
+    <<: *app_image
+    command: [node, apps/api/test/postgres/real-pg-harness.mjs]
+    restart: "no"
+    profiles: [harness]
+    depends_on:
+      grants:
+        condition: service_completed_successfully
+    environment:
+      <<: *owner_database
+    secrets: [postgres_password]
+    networks: [private]

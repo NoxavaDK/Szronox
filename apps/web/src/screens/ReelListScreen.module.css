@@ -1,0 +1,188 @@
+.screen {
+  min-height: 100%;
+  background: var(--sz-color-background);
+  font-family: var(--sz-font-family);
+  color: var(--sz-color-text-primary);
+  padding: var(--sz-space-4) var(--sz-space-4) 96px;
+  max-width: var(--sz-content-max-width);
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sz-space-4);
+}
+
+.title {
+  font-size: var(--sz-text-screen-title-size);
+  line-height: var(--sz-text-screen-title-line);
+  font-weight: var(--sz-text-screen-title-weight);
+  margin: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Swipe-reveal wrapper (LIST-01). `.row` translates on top of `.revealTrack`; giving `.row`
+ * an opaque background is what makes the reveal actions invisible until the row actually
+ * moves — no separate show/hide toggle needed for the track itself.
+ */
+.rowWrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+/* `.rowWrapper .row` is the active list (LIST-01 swipe wrapper); a bare `.row` is
+   `DeletedReelsScreen`, which reuses this stylesheet without the wrapper. */
+.list > .rowWrapper:last-child .row,
+.list > .row:last-child {
+  border-bottom: 1px solid var(--sz-color-divider);
+}
+
+.row {
+  container-type: inline-size;
+  appearance: none;
+  border: none;
+  background: var(--sz-color-background);
+  width: 100%;
+  min-height: var(--sz-row-height-min);
+  max-height: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-3);
+  padding: var(--sz-space-2) var(--sz-space-1);
+  border-top: 1px solid var(--sz-color-divider);
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  /* Vertical panning and pinch-zoom stay native; only a confirmed horizontal drag is ever
+     preventDefault()'d. `pan-y` alone also disables pinch-zoom per the touch-action spec —
+     `pinch-zoom` must be listed explicitly to keep it working on this element. */
+  touch-action: pan-y pinch-zoom;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: -2px;
+}
+
+.urgentRail {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--sz-color-urgent);
+  border-radius: 2px;
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.titleLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rowTitle {
+  font-size: var(--sz-text-reel-title-size);
+  line-height: var(--sz-text-reel-title-line);
+  font-weight: var(--sz-text-reel-title-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/*
+ * A label derived from the capture, shown when no title has been written yet.
+ *
+ * Colour only. Size, weight, line height and layout stay exactly as `.rowTitle`, so the row
+ * keeps its 56–64 px height and the title remains first under width pressure (frozen visual
+ * spec sec. 2). The quieter colour is what distinguishes a derived label from an authored
+ * title; nothing else about the row changes.
+ */
+.rowTitleDerived {
+  color: var(--sz-color-text-secondary);
+}
+
+.metaLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--sz-text-metadata-size);
+  line-height: var(--sz-text-metadata-line);
+  color: var(--sz-color-text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.metaUrgent {
+  color: var(--sz-color-urgent);
+  font-weight: 650;
+}
+
+.metaVerified {
+  color: var(--sz-color-success);
+}
+
+.metaOutdated {
+  color: var(--sz-color-warning);
+}
+
+.metaProgramme {
+  color: var(--sz-color-programme);
+}
+
+.metaMeme {
+  color: var(--sz-color-text-secondary);
+}
+
+/* Information priority under width pressure (frozen-visual-spec.md sec. 2):
+   title > urgency/elapsed > editor > verification > programme > meme. Meme
+   drops first, then programme, as the row itself narrows. */
+@container (max-width: 300px) {
+  .metaMeme {
+    display: none;
+  }
+}
+
+@container (max-width: 250px) {
+  .metaProgramme {
+    display: none;
+  }
+}
+
+@container (max-width: 220px) {
+  .editorName {
+    display: none;
+  }
+}
+
+.rowCover {
+  flex-shrink: 0;
+}
+
+.emptyOrLoading {
+  padding: var(--sz-space-6) 0;
+}

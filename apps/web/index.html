@@ -1,5 +1,15 @@
 <!doctype html>
 <html lang="pl">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>SzroNox</title></head>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SzroNox</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Matches the manifest's background/theme colour, so the install splash and the browser
+         chrome do not flash a different colour than the app. -->
+    <meta name="theme-color" content="#141414" />
+    <link rel="icon" href="/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+  </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

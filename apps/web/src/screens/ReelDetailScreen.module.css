@@ -1,0 +1,214 @@
+.screen {
+  min-height: 100%;
+  background: var(--sz-color-background);
+  font-family: var(--sz-font-family);
+  color: var(--sz-color-text-primary);
+  padding: var(--sz-space-4) var(--sz-space-4) var(--sz-space-6);
+  max-width: var(--sz-content-max-width);
+  margin: 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-5);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-2);
+}
+
+.iconButton {
+  appearance: none;
+  border: none;
+  background: none;
+  width: var(--sz-touch-target);
+  height: var(--sz-touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
+}
+
+.iconButton:first-child {
+  margin-left: calc(var(--sz-space-2) * -1);
+}
+
+.iconButton:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 2px;
+}
+
+.titleField {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font-family: var(--sz-font-family);
+  font-size: var(--sz-text-reel-title-size);
+  line-height: var(--sz-text-reel-title-line);
+  font-weight: var(--sz-text-reel-title-weight);
+  color: var(--sz-color-text-primary);
+  padding: var(--sz-space-1) 0;
+}
+
+/*
+ * The derived label, when there is no authored title. Set explicitly rather than left to the
+ * browser's default placeholder grey, which is too faint to read as the Reel's identity.
+ */
+.titleField::placeholder {
+  color: var(--sz-color-text-secondary);
+  opacity: 1;
+}
+
+.titleField:focus {
+  outline: none;
+  border-bottom: 1px solid var(--sz-color-cobalt);
+}
+
+.metadataCluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sz-space-3);
+  font-size: var(--sz-text-metadata-size);
+  color: var(--sz-color-text-secondary);
+}
+
+.metadataItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.metadataVerified {
+  color: var(--sz-color-success);
+}
+
+.metadataOutdated {
+  color: var(--sz-color-warning);
+}
+
+.metadataProgramme {
+  color: var(--sz-color-programme);
+}
+
+.contentBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-2);
+}
+
+.sectionLabel {
+  font-size: var(--sz-text-section-label-size);
+  line-height: var(--sz-text-section-label-line);
+  font-weight: var(--sz-text-section-label-weight);
+  letter-spacing: var(--sz-text-section-label-tracking);
+  text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+}
+
+.hookList {
+  display: flex;
+  flex-direction: column;
+}
+
+.hookRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-2);
+  padding: var(--sz-space-2) 0;
+  border-top: 1px solid var(--sz-color-divider);
+}
+
+.hookText {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--sz-text-hook-size);
+  line-height: var(--sz-text-hook-line);
+  font-weight: var(--sz-text-hook-weight);
+}
+
+.hookOwnTag {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sz-color-cobalt);
+}
+
+.hookRemove {
+  appearance: none;
+  border: none;
+  background: none;
+  flex-shrink: 0;
+  width: var(--sz-touch-target);
+  height: var(--sz-touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sz-color-text-secondary);
+  cursor: pointer;
+}
+
+.scriptField {
+  border: none;
+  background: none;
+  font-family: var(--sz-font-family);
+  font-size: var(--sz-text-body-size);
+  line-height: var(--sz-text-body-line);
+  color: var(--sz-color-text-primary);
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 120px;
+  field-sizing: content;
+}
+
+.scriptField:focus {
+  outline: none;
+}
+
+.aiRow {
+  display: flex;
+  gap: var(--sz-space-3);
+}
+
+.aiButton {
+  appearance: none;
+  border: 1px solid var(--sz-color-divider);
+  background: var(--sz-color-surface);
+  border-radius: var(--sz-radius-md);
+  min-height: 42px;
+  padding: 0 var(--sz-space-3);
+  font-family: var(--sz-font-family);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sz-color-text-secondary);
+  flex: 1;
+}
+
+.aiButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.secondarySections {
+  display: flex;
+  flex-direction: column;
+}
+
+.saveState {
+  font-size: 13px;
+  color: var(--sz-color-text-secondary);
+  min-height: 18px;
+}
+
+.saveState[data-tone='offline'],
+.saveState[data-tone='conflict'] {
+  color: var(--sz-color-urgent);
+}

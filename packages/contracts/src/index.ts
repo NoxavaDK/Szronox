@@ -94,6 +94,7 @@ export interface ProgrammeCitation {
   proposal: string;
   excerpt: string;
   sourceTitle: string;
+  sourceUrl: string;
   chapter: string;
   subchapter: string | null;
   pdfPages: number[];
@@ -215,14 +216,19 @@ export type AiAction = 'develop' | 'generate_hooks' | 'fact_check' | 'language_c
 export type AiJobState = 'queued' | 'running' | 'succeeded' | 'failed';
 export interface AiInputSnapshot {
   reelVersion: number;
+  title: string;
+  originalInput: CaptureInput;
   script: string;
   scriptRevision: number;
   hooks: Array<Pick<ReelHook, 'id' | 'text' | 'source' | 'position'>>;
   inputNote: string;
+  publicationDescription: string;
+  publicationHashtags: string;
   attachments: AttachmentReference[];
   priority: Priority;
   attachedMemeIds: Id[];
   memeCandidateIds: Id[];
+  memeCandidates: Array<Pick<Meme, 'id' | 'name' | 'thumbnailRef'>>;
   programmeDocumentVersionId: Id | null;
 }
 export interface DevelopResult {
@@ -231,6 +237,8 @@ export interface DevelopResult {
   verificationIssues: string[];
   hookAdditions: string[];
   scriptSuggestion: string;
+  publicationDescriptionSuggestion: string;
+  publicationHashtagsSuggestion: string;
   possibleProgrammeConnection: string | null;
   prioritySuggestion: { priority: Priority; rationale: string } | null;
   memeSuggestion: MemeSuggestion | null;
@@ -301,7 +309,7 @@ export interface AiRunBase {
   isStale: boolean;
   model: string;
   promptId: string;
-  promptStage: 'diagnostic' | 'editorial_approved';
+  promptStage: 'diagnostic' | 'development_provisional' | 'editorial_approved';
   requestedBy: Id;
   createdAt: IsoDateTime;
   completedAt: IsoDateTime | null;
@@ -316,6 +324,8 @@ export type ApplyAiRequest = MutationContext & (
   | { selection: 'title'; text: string }
   | { selection: 'script'; text: string }
   | { selection: 'priority'; priority: Priority }
+  | { selection: 'publication_description'; text: string; replaceCurrentValue: string; confirmReplacement: true }
+  | { selection: 'publication_hashtags'; text: string; replaceCurrentValue: string; confirmReplacement: true }
   | { selection: 'programme_match'; candidateId: Id }
   | { selection: 'programme_no_match' }
   | { selection: 'fact_correction'; claimId: Id }

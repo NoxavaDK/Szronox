@@ -1,9 +1,56 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import { App } from './app/App.js';
+import { BrowserSession } from './auth/session.js';
+import { AuthTransport } from './auth/transport.js';
+import { CoreApiClient } from './data/api.js';
+import { AttachmentRecovery } from './data/attachment-recovery.js';
+import { DraftStore } from './drafts/store.js';
+import { SyncQueue } from './drafts/queue.js';
 
-function App() {
-  return <main className="shell"><h1>SzroNox</h1><p>Aplikacja jest gotowa do konfiguracji.</p></main>;
+/**
+ * Composition root.
+ *
+ * No authentication configuration reaches the browser bundle. The API is same-origin,
+ * so there is no URL to configure, and there is no anon key, project reference or
+ * signing secret to hold — which is why the former `VITE_SUPABASE_*` variables are
+ * gone rather than renamed.
+ */
+const auth = new BrowserSession(new AuthTransport());
+const api = new CoreApiClient(auth);
+const store = new DraftStore();
+// The queue's account comes from the server-confirmed session, so a flush cannot be
+// attributed to an account the server never acknowledged.
+const queue = new SyncQueue(store, api, () => auth.current()?.user.id ?? null);
+// Attachment recovery reads the active account from the same confirmed session, so a
+// late upload result can never be acknowledged against the other account's partition.
+const attachments = new AttachmentRecovery({
+  api,
+  store,
+  activeAccountId: () => auth.current()?.user.id ?? null,
+});
+
+/**
+ * Register the service worker.
+ *
+ * Classic, because that is what it is built as, and registered after load so it never
+ * competes with the first render for bandwidth. A browser without service workers — or a
+ * context without a secure origin — simply keeps running as an ordinary web app; the worker
+ * adds installability and share receipt, and nothing the app already does depends on it.
+ *
+ * A failure here is logged and otherwise ignored. It must not take the application down.
+ */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { type: 'classic', scope: '/' }).catch((error: unknown) => {
+      console.warn('Nie udało się zarejestrować service workera.', error);
+    });
+  });
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App auth={auth} api={api} store={store} queue={queue} attachments={attachments} />
+  </StrictMode>,
+);
