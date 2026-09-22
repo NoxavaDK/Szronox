@@ -50,6 +50,27 @@ export const STATUS_LABELS: Record<ReelStatus, string> = {
   published: 'Opublikowane',
 };
 
+/**
+ * The canonical product pipeline order. Single source of truth: both the STATUS sheet
+ * (`detail-sections.tsx`) and the list's swipe-right "next status" gesture (LIST-01) must
+ * agree on it, or a swipe could reveal a target the sheet would never itself suggest.
+ */
+export const STATUS_ORDER: ReelStatus[] = ['idea', 'to_record', 'editing', 'ready', 'published'];
+
+/**
+ * The one unambiguous next status in the pipeline, or `null` when there isn't one.
+ *
+ * `published` is the only status with no successor. The order above is strictly linear, so
+ * "unambiguous" always holds for every other status — there is no branching workflow to
+ * guess between. If that ever changes, this is the one place a real ambiguity should be
+ * expressed, by returning `null` for it too; callers already treat `null` as "offer the
+ * full status sheet instead" (LIST-01: "never guess").
+ */
+export function nextReelStatus(status: ReelStatus): ReelStatus | null {
+  const index = STATUS_ORDER.indexOf(status);
+  return index === -1 || index === STATUS_ORDER.length - 1 ? null : STATUS_ORDER[index + 1];
+}
+
 /** Primary list navigation labels. `Usunięte` is deliberately NOT among them. */
 export const STATUS_TAB_LABELS: Record<ReelStatus, string> = {
   idea: 'Pomysły',
@@ -126,7 +147,22 @@ export const COPY = {
   /** sec. 8 */
   deletedEntry: 'Usunięte',
   restoreReel: 'Przywróć rolkę',
+
+  /** LIST-01 — list quick actions. Reuses `statusHeading`/`editorHeading`/`kdriveOpen`/`deleteReel` above. */
+  quickActionsHeading: 'Szybkie akcje',
+  changeStatus: 'Zmień status',
+  assignEditor: 'Przypisz',
+  copyLink: 'Kopiuj link',
+  moreActions: 'Więcej',
+  undo: 'Cofnij',
+  /** One definition, reused by Reel Detail's Materials section and the list quick actions. */
+  kdriveUnavailable: 'Integracja kDrive nie jest jeszcze dostępna.',
 } as const;
+
+/** `Zmieniono status na „Montaż”.` — LIST-01 undo-snackbar confirmation after a quick move. */
+export function statusChangedLabel(statusLabel: string): string {
+  return `Zmieniono status na „${statusLabel}”.`;
+}
 
 /** `○ Czeka na <peer>` — sec. 2, using the actual peer identity. */
 export function awaitingVerifierLabel(peerName: string): string {
@@ -332,6 +368,11 @@ export interface StatusTabView {
 
 export interface ReelListItemView {
   id: Id;
+  /** Optimistic-concurrency token for mutations issued directly from the list (LIST-01). */
+  version: number;
+  status: ReelStatus;
+  /** True when a kDrive folder reference is stored, whether or not opening it is enabled. */
+  hasKdriveFolder: boolean;
   /**
    * What to show in the title slot — an authored title, or a label derived from the capture
    * when there is none. Never empty: a blank row is not a state the list can render.
@@ -356,6 +397,59 @@ export interface ReelListItemView {
   feedCoverDone: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// List quick actions and gestures (LIST-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which quick-actions surface is open for a row, and for which Reel.
+ *
+ * `sheet` is the long-press / swipe-left "Więcej" bottom sheet. `status` and `assign` are
+ * the same two selections reachable from inside that sheet, but may also be opened directly
+ * (the sheet's own items, or an unambiguous swipe-right commits instead of opening `status`).
+ * Only one row's surface is open at a time; opening another closes the previous one — this
+ * is state, not merely visual, because it is what "closes on view change" observably means.
+ */
+export type ListQuickActionsView = 'sheet' | 'status' | 'assign' | null;
+
+export interface ReelUndoView {
+  message: string;
+  onUndo: () => void;
+  /** The undo request's own state; distinct from the move it is undoing. */
+  saveState: SaveState;
+}
+
+export interface ReelQuickActionsProps {
+  /** Reel id the open surface belongs to; `null` reel id means nothing is open. */
+  openReelId: Id | null;
+  open: ListQuickActionsView;
+  onOpenSheet: (id: Id) => void;
+  /** The ambiguous-successor case ("never guess"), and the sheet's own `Zmień status` item. */
+  onOpenStatus: (id: Id) => void;
+  onOpenAssign: (id: Id) => void;
+  onDismiss: () => void;
+
+  /** Exactly the two allowlisted users, for the Przypisz sheet. */
+  editorOptions: EditorView[];
+  onSelectStatus: (id: Id, status: ReelStatus) => void;
+  onSelectEditor: (id: Id, editorId: Id | null) => void;
+  /** The unambiguous swipe-right pill commits directly, without opening the sheet. */
+  onQuickAdvanceStatus: (id: Id, status: ReelStatus) => void;
+  onCopyLink: (id: Id) => void;
+  /** kDrive integration is not yet enabled anywhere in the product; the row states that honestly. */
+  kdriveEnabled: boolean;
+  onOpenKdrive: (id: Id) => void;
+
+  onRequestDelete: (id: Id) => void;
+  confirmingDeleteId: Id | null;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+
+  selectionError: string | null;
+  saveState: SaveState;
+  undo: ReelUndoView | null;
+}
+
 export interface ReelListScreenProps {
   currentUser: EditorView;
   statusTabs: StatusTabView[];
@@ -374,6 +468,9 @@ export interface ReelListScreenProps {
    * never a sixth status and never a primary tab.
    */
   onOpenDeleted: () => void;
+
+  /** Long-press / swipe-reveal quick actions (LIST-01). Optional: omitting it disables gestures cleanly. */
+  quickActions?: ReelQuickActionsProps;
 }
 
 // ---------------------------------------------------------------------------

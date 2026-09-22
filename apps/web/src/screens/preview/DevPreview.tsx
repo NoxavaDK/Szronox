@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import '../../ui/tokens.css';
-import type { CaptureKind, EditorView, LoadState, MetadataSelector, SaveState } from '../../ui/screen-contracts.js';
-import { COPY } from '../../ui/screen-contracts.js';
+import type {
+  CaptureKind, EditorView, ListQuickActionsView, LoadState, MetadataSelector, SaveState,
+} from '../../ui/screen-contracts.js';
+import { COPY, statusChangedLabel, STATUS_LABELS } from '../../ui/screen-contracts.js';
 import type { Priority, ReelStatus } from '@szronox/contracts';
 import { ReelListScreen } from '../ReelListScreen.js';
 import { QuickAddScreen } from '../QuickAddScreen.js';
@@ -51,9 +53,36 @@ export function DevPreview() {
   );
 }
 
+/**
+ * LIST-01 quick actions, wired against local fixture state rather than the real API — this
+ * is what lets long-press/swipe/undo be exercised by hand in a real browser without the
+ * backend, session or database that `App.tsx`'s wiring depends on.
+ */
 function ListPreview() {
   const [selectedStatus, setSelectedStatus] = useState<(typeof fixtureStatusTabs)[number]['status']>('editing');
   const [loadState] = useState<LoadState>('loaded');
+  const [items, setItems] = useState(fixtureListItems);
+
+  const [quickOpenReelId, setQuickOpenReelId] = useState<string | null>(null);
+  const [quickOpen, setQuickOpen] = useState<ListQuickActionsView>(null);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [undo, setUndo] = useState<{ reelId: string; fromStatus: ReelStatus; message: string } | null>(null);
+
+  const closeQuick = () => { setQuickOpen(null); setQuickOpenReelId(null); setQuickError(null); setConfirmingDeleteId(null); };
+  const reportError = (message: string) => { if (quickOpen !== null) setQuickError(message); else console.info('list notice:', message); };
+
+  const applyStatus = (id: string, status: ReelStatus) => {
+    const item = items.find((entry) => entry.id === id);
+    if (!item) return;
+    if (status === 'published' && !item.feedCoverDone) { reportError(COPY.feedCoverRequired); return; }
+    const fromStatus = item.status;
+    setItems((list) => list.map((entry) => (entry.id === id ? { ...entry, status, version: entry.version + 1 } : entry)));
+    closeQuick();
+    setUndo({ reelId: id, fromStatus, message: statusChangedLabel(STATUS_LABELS[status]) });
+    window.setTimeout(() => setUndo((current) => (current?.reelId === id ? null : current)), 6000);
+  };
+
   return (
     <ReelListScreen
       currentUser={fixtureCurrentUser}
@@ -63,10 +92,46 @@ function ListPreview() {
       attentionCount={3}
       onOpenAttention={() => console.info('open attention')}
       loadState={loadState}
-      items={fixtureListItems}
+      items={items}
       onOpenReel={(id) => console.info('open reel', id)}
       onAddNew={() => console.info('add new')}
       onOpenDeleted={() => console.info('open deleted')}
+      quickActions={{
+        openReelId: quickOpenReelId,
+        open: quickOpen,
+        onOpenSheet: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('sheet'); },
+        onOpenStatus: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('status'); },
+        onOpenAssign: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('assign'); },
+        onDismiss: closeQuick,
+        editorOptions: [fixtureCurrentUser, fixtureOtherUser],
+        onSelectStatus: applyStatus,
+        onQuickAdvanceStatus: applyStatus,
+        onSelectEditor: (id, editorId) => {
+          const editor = editorId === null ? null : [fixtureCurrentUser, fixtureOtherUser].find((option) => option.id === editorId) ?? null;
+          setItems((list) => list.map((entry) => (entry.id === id ? { ...entry, editor, version: entry.version + 1 } : entry)));
+          closeQuick();
+        },
+        onCopyLink: (id) => console.info('copy link for', id, `${location.origin}/reels/${id}`),
+        kdriveEnabled: false,
+        onOpenKdrive: () => console.info('list notice:', COPY.kdriveUnavailable),
+        onRequestDelete: (id) => setConfirmingDeleteId(id),
+        confirmingDeleteId,
+        onCancelDelete: () => setConfirmingDeleteId(null),
+        onConfirmDelete: () => {
+          setItems((list) => list.filter((entry) => entry.id !== confirmingDeleteId));
+          closeQuick();
+        },
+        selectionError: quickError,
+        saveState: 'idle',
+        undo: undo ? {
+          message: undo.message,
+          onUndo: () => {
+            setItems((list) => list.map((entry) => (entry.id === undo.reelId ? { ...entry, status: undo.fromStatus, version: entry.version + 1 } : entry)));
+            setUndo(null);
+          },
+          saveState: 'idle',
+        } : null,
+      }}
     />
   );
 }

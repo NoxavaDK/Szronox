@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { Login } from '../auth/Login.js';
@@ -19,12 +19,18 @@ import {
   COPY,
   STATUS_LABELS,
   STATUS_TAB_LABELS,
+  statusChangedLabel,
   type ConflictRecoveryView,
   type EditorView,
-  type MetadataSelector,
+  type ListQuickActionsView,
   type ReelListItemView,
+  type MetadataSelector,
+  type SaveState,
   type VerificationViewState,
 } from '../ui/screen-contracts.js';
+
+/** kDrive integration is not enabled anywhere in the product yet (T04 remains unauthorized). */
+const KDRIVE_ENABLED = false;
 
 export function App({ auth, api, store, queue, attachments }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue; attachments: AttachmentRecovery }) {
   const c = useAppController(auth, api, store, queue, attachments);
@@ -37,6 +43,71 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [aiCapability, setAiCapability] = useState({ enabled: false, programmeIndexed: false });
+
+  // ── LIST-01: list-row quick actions (long-press / swipe) ──────────────────
+  const [quickOpenReelId, setQuickOpenReelId] = useState<string | null>(null);
+  const [quickOpen, setQuickOpen] = useState<ListQuickActionsView>(null);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const [quickConfirmDeleteId, setQuickConfirmDeleteId] = useState<string | null>(null);
+  const [quickSaveState, setQuickSaveState] = useState<SaveState>('idle');
+  const [undo, setUndo] = useState<{ reelId: string; fromStatus: ReelStatus; version: number; message: string } | null>(null);
+  const [undoSaveState, setUndoSaveState] = useState<SaveState>('idle');
+  const undoTimer = useRef<number>();
+
+  const closeQuickActions = () => {
+    setQuickOpen(null); setQuickOpenReelId(null); setQuickError(null); setQuickConfirmDeleteId(null); setQuickSaveState('idle');
+  };
+  // With the sheet open, an error belongs right next to the picker that produced it — the
+  // same place Reel Detail's own selectors show one. A bare swipe commit has no sheet open
+  // to show it in, so it falls back to the ordinary app-wide notice.
+  const reportQuickError = (message: string) => { if (quickOpen !== null) setQuickError(message); else c.setMessage(message); };
+  const clearUndoTimer = () => { if (undoTimer.current) { window.clearTimeout(undoTimer.current); undoTimer.current = undefined; } };
+  const scheduleUndoClear = () => { clearUndoTimer(); undoTimer.current = window.setTimeout(() => setUndo(null), 6000); };
+  useEffect(() => clearUndoTimer, []);
+
+  const applyQuickStatus = async (id: string, status: ReelStatus) => {
+    const item = c.reels.find((reel) => reel.id === id);
+    if (!item) return;
+    // The frozen publish gate, checked before the request exactly as Detail checks it.
+    if (status === 'published' && !item.feedCoverDone) { reportQuickError(COPY.feedCoverRequired); return; }
+    const previousStatus = item.status;
+    const result = await c.patchReelById(id, item.version, { status });
+    if (result.ok) {
+      closeQuickActions();
+      setUndo({ reelId: id, fromStatus: previousStatus, version: result.reel.version, message: statusChangedLabel(STATUS_LABELS[status]) });
+      scheduleUndoClear();
+    } else if (result.message) reportQuickError(result.message);
+  };
+
+  const applyQuickEditor = async (id: string, editorId: string | null) => {
+    const item = c.reels.find((reel) => reel.id === id);
+    if (!item) return;
+    const result = await c.patchReelById(id, item.version, { editorId });
+    if (result.ok) closeQuickActions();
+    else if (result.message) reportQuickError(result.message);
+  };
+
+  const confirmQuickDelete = async () => {
+    const id = quickConfirmDeleteId;
+    const item = id ? c.reels.find((reel) => reel.id === id) : undefined;
+    if (!id || !item) return;
+    setQuickSaveState('saving');
+    const result = await c.removeReelById(id, item.version);
+    if (result.ok) { setQuickSaveState('saved'); closeQuickActions(); }
+    else { setQuickSaveState('error'); setQuickError(result.message); }
+  };
+
+  /** Version-safe: a 409 here means someone else changed the Reel since the move, so the
+   * undo is refused rather than forced — never overwriting their intervening edit. */
+  const onUndoStatus = async () => {
+    if (!undo) return;
+    clearUndoTimer();
+    setUndoSaveState('saving');
+    const result = await c.patchReelById(undo.reelId, undo.version, { status: undo.fromStatus });
+    setUndoSaveState('idle');
+    setUndo(null);
+    if (!result.ok && result.message) c.setMessage(result.message);
+  };
   /**
    * The AI workspace and the meme picker belong to one Reel, so each remembers which Reel
    * opened it and is ignored for any other.
@@ -114,6 +185,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     const label = reelLabel(reel);
     return {
       id: reel.id,
+      version: reel.version,
+      status: reel.status,
+      hasKdriveFolder: reel.kdriveFolder !== null,
       title: label.text,
       titleIsDerived: label.derived,
       priority: reel.priority,
@@ -235,7 +309,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
               : { kind: 'unverified_by_me' };
 
     return <>{notice}<ReelDetailScreen
-      onBack={() => c.setRoute({ name: 'list' })}
+      onBack={c.leaveDetail}
       title={reel.title}
       onChangeTitle={(title) => c.changeReel({ title })}
       titlePlaceholder={label.derived ? label.text : undefined}
@@ -330,11 +404,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         expanded: materialsExpanded,
         onToggle: () => setMaterialsExpanded((value) => !value),
         kdriveFolder: { name: reel.kdriveFolder ? reel.kdriveFolder.folderId : null, unavailable: false },
-        onCreateKdriveFolder: () => c.setMessage('Integracja kDrive nie jest jeszcze dostępna.'),
-        onOpenKdriveFolder: () => c.setMessage('Integracja kDrive nie jest jeszcze dostępna.'),
-        onRelinkKdriveFolder: () => c.setMessage('Integracja kDrive nie jest jeszcze dostępna.'),
+        onCreateKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
+        onOpenKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
+        onRelinkKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
         // Honestly unavailable rather than pretending.
-        kdriveEnabled: false,
+        kdriveEnabled: KDRIVE_ENABLED,
         currentExport: { label: reel.currentExport?.label ?? null, revision: reel.currentExport?.revision ?? null },
         onOpenExport: () => { if (reel.currentExport) window.open(reel.currentExport.url, '_blank', 'noopener,noreferrer'); },
         onReplaceExport: () => {
@@ -386,5 +460,27 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     onAddNew={c.startCapture}
     onRetry={() => void c.loadList()}
     onOpenDeleted={() => c.setRoute({ name: 'deleted' })}
+    quickActions={{
+      openReelId: quickOpenReelId,
+      open: quickOpen,
+      onOpenSheet: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('sheet'); },
+      onOpenStatus: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('status'); },
+      onOpenAssign: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('assign'); },
+      onDismiss: closeQuickActions,
+      editorOptions: [c.user, c.peer].filter((entry): entry is NonNullable<typeof entry> => entry !== null),
+      onSelectStatus: (id, status) => void applyQuickStatus(id, status),
+      onSelectEditor: (id, editorId) => void applyQuickEditor(id, editorId),
+      onQuickAdvanceStatus: (id, status) => void applyQuickStatus(id, status),
+      onCopyLink: (id) => void c.copyReelLink(id),
+      kdriveEnabled: KDRIVE_ENABLED,
+      onOpenKdrive: () => c.setMessage(COPY.kdriveUnavailable),
+      onRequestDelete: (id) => setQuickConfirmDeleteId(id),
+      confirmingDeleteId: quickConfirmDeleteId,
+      onCancelDelete: () => setQuickConfirmDeleteId(null),
+      onConfirmDelete: () => void confirmQuickDelete(),
+      selectionError: quickError,
+      saveState: quickSaveState,
+      undo: undo ? { message: undo.message, onUndo: () => void onUndoStatus(), saveState: undoSaveState } : null,
+    }}
   /><button className="sign-out" onClick={() => void c.signOut()}>Wyloguj</button></>;
 }

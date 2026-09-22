@@ -28,11 +28,28 @@
   flex-direction: column;
 }
 
+/*
+ * Swipe-reveal wrapper (LIST-01). `.row` translates on top of `.revealTrack`; giving `.row`
+ * an opaque background is what makes the reveal actions invisible until the row actually
+ * moves — no separate show/hide toggle needed for the track itself.
+ */
+.rowWrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+/* `.rowWrapper .row` is the active list (LIST-01 swipe wrapper); a bare `.row` is
+   `DeletedReelsScreen`, which reuses this stylesheet without the wrapper. */
+.list > .rowWrapper:last-child .row,
+.list > .row:last-child {
+  border-bottom: 1px solid var(--sz-color-divider);
+}
+
 .row {
   container-type: inline-size;
   appearance: none;
   border: none;
-  background: none;
+  background: var(--sz-color-background);
   width: 100%;
   min-height: var(--sz-row-height-min);
   max-height: none;
@@ -44,10 +61,8 @@
   text-align: left;
   cursor: pointer;
   position: relative;
-}
-
-.list > .row:last-child {
-  border-bottom: 1px solid var(--sz-color-divider);
+  /* Vertical panning stays native; only a confirmed horizontal drag is ever preventDefault()'d. */
+  touch-action: pan-y;
 }
 
 .row:focus-visible {

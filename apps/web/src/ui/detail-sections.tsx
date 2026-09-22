@@ -10,11 +10,12 @@
  * no large CTA buttons, no chat/comment affordances.
  */
 import './tokens.css';
-import type { ReelStatus, Priority, Id } from '@szronox/contracts';
+import type { Priority, Id } from '@szronox/contracts';
 import {
   COPY,
   PRIORITY_LABELS,
   STATUS_LABELS,
+  STATUS_ORDER,
   awaitingVerifierLabel,
   previousExportVerifiedBy,
   verifiedByLabel,
@@ -31,7 +32,6 @@ import { Avatar, PriorityGlyph, TextAction } from './primitives.js';
 import { CheckIcon, ChevronRightIcon, ExternalLinkIcon, WarningIcon } from './icons.js';
 import styles from './detail-sections.module.css';
 
-const STATUS_ORDER: ReelStatus[] = ['idea', 'to_record', 'editing', 'ready', 'published'];
 const PRIORITY_ORDER: Priority[] = ['urgent', 'normal', 'evergreen'];
 
 /** A collapsible inline section header with the frozen chevron affordance. */

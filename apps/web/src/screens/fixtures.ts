@@ -28,6 +28,9 @@ export const fixtureStatusTabs: StatusTabView[] = [
 export const fixtureListItems: ReelListItemView[] = [
   {
     id: 'r-1',
+    version: 1,
+    status: 'editing',
+    hasKdriveFolder: true,
     title: 'Maszyniści zwalniają tempo przed protestem',
     priority: 'urgent',
     editor: fixtureOtherUser,
@@ -40,6 +43,9 @@ export const fixtureListItems: ReelListItemView[] = [
   },
   {
     id: 'r-2',
+    version: 3,
+    status: 'editing',
+    hasKdriveFolder: false,
     title: 'Podsumowanie tygodnia w Sejmie',
     priority: 'normal',
     editor: fixtureCurrentUser,
@@ -54,6 +60,9 @@ export const fixtureListItems: ReelListItemView[] = [
     // An untitled capture — the case that used to render a blank but tappable row. The label
     // is derived from the shared link by `data/reel-label.ts` and shown more quietly.
     id: 'r-4',
+    version: 1,
+    status: 'idea',
+    hasKdriveFolder: false,
     title: 'instagram.com/reel/ABC123',
     titleIsDerived: true,
     priority: 'normal',
@@ -67,6 +76,9 @@ export const fixtureListItems: ReelListItemView[] = [
   },
   {
     id: 'r-3',
+    version: 2,
+    status: 'ready',
+    hasKdriveFolder: false,
     title: 'Rozmowa z rolnikami o dopłatach',
     priority: 'evergreen',
     editor: null,

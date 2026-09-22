@@ -231,8 +231,44 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       currentRef.current = resolved;
       setCurrent(resolved); setSaveState(draft ? 'offline' : 'idle'); setLoadState('loaded');
       setRoute({ name: 'detail', reelId });
+      // `route` alone is in-memory and vanishes on reload. `Kopiuj link` (LIST-01) and
+      // reloading while a Reel is open both need the address bar to actually name it.
+      const path = `/reels/${encodeURIComponent(reelId)}`;
+      if (typeof history !== 'undefined' && location.pathname !== path) history.pushState({ reelId }, '', path);
     } catch (error) { reportLoadFailure(error); }
   }, [api, reportLoadFailure, store, user]);
+
+  /** Reads a deep link (`/reels/:id`) on first load, once the session is confirmed. */
+  const deepLinkAttempted = useRef(false);
+  useEffect(() => {
+    if (deepLinkAttempted.current || !user) return;
+    deepLinkAttempted.current = true;
+    const match = typeof location === 'undefined' ? null : location.pathname.match(/^\/reels\/([^/]+)\/?$/);
+    if (match) void openDetail(decodeURIComponent(match[1]));
+  }, [openDetail, user]);
+
+  /** Browser back/forward on the one URL this app pushes: a deep-linked or opened Reel. */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => {
+      const match = location.pathname.match(/^\/reels\/([^/]+)\/?$/);
+      if (match) {
+        const id = decodeURIComponent(match[1]);
+        if (!(currentRef.current?.id === id && route.name === 'detail')) void openDetail(id);
+      } else if (route.name === 'detail') {
+        setRoute({ name: 'list' });
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [openDetail, route]);
+
+  /** Undo the address bar's `/reels/:id` when leaving Detail through any success path. */
+  const syncListUrl = useCallback(() => {
+    if (typeof history !== 'undefined' && location.pathname !== '/') history.pushState({}, '', '/');
+  }, []);
+
+  const leaveDetail = useCallback(() => { setRoute({ name: 'list' }); syncListUrl(); }, [syncListUrl]);
 
   const startCapture = useCallback(() => {
     if (!user) return; const reelId = crypto.randomUUID();
@@ -338,24 +374,87 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const deleteCurrent = useCallback(async () => {
     if (!current || !user) return;
     const request = { operationId: crypto.randomUUID(), expectedVersion: current.version }; setSaveState('saving');
-    try { await api.remove(current.id, request); setCurrent(null); setRoute({ name: 'list' }); setSaveState('saved'); }
+    try { await api.remove(current.id, request); setCurrent(null); setRoute({ name: 'list' }); syncListUrl(); setSaveState('saved'); }
     catch (error) {
       if (isAbandonedRequest(error)) return;
       const conflict = error instanceof ClientApiError && error.status === 409;
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'delete', reelId: current.id, createdAt: Date.now(), state: conflict ? 'conflict' : 'pending', payload: request });
       setSaveState(conflict ? 'conflict' : 'offline'); setMessage(polishError(error));
     }
-  }, [api, current, store, user]);
+  }, [api, current, store, syncListUrl, user]);
 
   const restore = useCallback(async (reel: Reel) => {
     if (!user) return; const request = { operationId: crypto.randomUUID(), expectedVersion: reel.version };
-    try { await api.restore(reel.id, request); setRoute({ name: 'list' }); }
+    try { await api.restore(reel.id, request); setRoute({ name: 'list' }); syncListUrl(); }
     catch (error) {
       if (isAbandonedRequest(error)) return;
       const conflict = error instanceof ClientApiError && error.status === 409;
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'restore', reelId: reel.id, createdAt: Date.now(), state: conflict ? 'conflict' : 'pending', payload: request }); setMessage(polishError(error));
     }
+  }, [api, store, syncListUrl, user]);
+
+  /**
+   * Version-checked patch against a Reel that may not be `current` (LIST-01 list quick
+   * actions: swipe-right status move, Przypisz).
+   *
+   * A genuine network failure reuses the exact same offline queue `changeReel` and
+   * `deleteCurrent` already use below — `store.enqueue` plus `SyncQueue.flush()` on
+   * reconnect — rather than a parallel mechanism. The local list is deliberately NOT
+   * updated optimistically when queued: unlike Detail's live-editing draft, there is no
+   * open screen here to reconcile against later, so "queued" is reported honestly instead
+   * of a change that would silently revert if the eventual sync conflicts. Nothing is ever
+   * reported accepted before the server actually has it.
+   */
+  const patchReelById = useCallback(async (
+    id: string, expectedVersion: number, changes: ReelPatchRequest['changes'],
+  ): Promise<{ ok: true; reel: Reel } | { ok: false; conflict: boolean; queued: boolean; message: string }> => {
+    if (!user) return { ok: false, conflict: false, queued: false, message: '' };
+    const request = { operationId: crypto.randomUUID(), expectedVersion, changes };
+    try {
+      const saved = await api.patch(id, request);
+      setReels((list) => list.map((item) => (item.id === id ? saved : item)));
+      if (currentRef.current?.id === id) { currentRef.current = saved; setCurrent(saved); }
+      return { ok: true, reel: saved };
+    } catch (error) {
+      if (isAbandonedRequest(error)) return { ok: false, conflict: false, queued: false, message: '' };
+      if (error instanceof ClientApiError && error.status === 409) {
+        return { ok: false, conflict: true, queued: false, message: 'Ktoś zmienił tę rolkę. Otwórz ją, aby zobaczyć aktualny stan.' };
+      }
+      await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'patch', reelId: id, createdAt: Date.now(), state: 'pending', payload: request });
+      return { ok: false, conflict: false, queued: true, message: 'Brak sieci. Zmiana zostanie wysłana po powrocie sieci.' };
+    }
   }, [api, store, user]);
+
+  /** Same reasoning as `patchReelById`: a list-row delete that is not necessarily `current`. */
+  const removeReelById = useCallback(async (id: string, expectedVersion: number): Promise<{ ok: true } | { ok: false; conflict: boolean; queued: boolean; message: string }> => {
+    if (!user) return { ok: false, conflict: false, queued: false, message: '' };
+    const request = { operationId: crypto.randomUUID(), expectedVersion };
+    try {
+      await api.remove(id, request);
+      setReels((list) => list.filter((item) => item.id !== id));
+      if (currentRef.current?.id === id) { currentRef.current = null; setCurrent(null); }
+      return { ok: true };
+    } catch (error) {
+      if (isAbandonedRequest(error)) return { ok: false, conflict: false, queued: false, message: '' };
+      if (error instanceof ClientApiError && error.status === 409) {
+        return { ok: false, conflict: true, queued: false, message: 'Ktoś zmienił tę rolkę. Otwórz ją, aby zobaczyć aktualny stan.' };
+      }
+      await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'delete', reelId: id, createdAt: Date.now(), state: 'pending', payload: request });
+      return { ok: false, conflict: false, queued: true, message: 'Brak sieci. Usunięcie zostanie wysłane po powrocie sieci.' };
+    }
+  }, [api, store, user]);
+
+  /** `Kopiuj link` (LIST-01): a same-origin, session-authenticated deep link to this Reel. */
+  const copyReelLink = useCallback(async (id: string) => {
+    const link = `${location.origin}/reels/${encodeURIComponent(id)}`;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE');
+      await navigator.clipboard.writeText(link);
+      setMessage('Skopiowano link.');
+    } catch {
+      setMessage(`Nie udało się skopiować. Zaznacz i skopiuj ręcznie:\n\n${link}`);
+    }
+  }, []);
 
   /**
    * Explicit recovery. `local` retries the same edit against the current version;
@@ -465,6 +564,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, [auth, clearAccountView, recover]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
-    deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs };
+  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
+    deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
+    patchReelById, removeReelById, copyReelLink };
 }
