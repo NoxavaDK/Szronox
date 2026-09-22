@@ -51,8 +51,24 @@ export function ReelQuickActionsSheet({
 
   if (open === null) return null;
 
+  /**
+   * Contains Tab/Shift+Tab within the sheet (`aria-modal` promises this; nothing enforced
+   * it). The backdrop is only a visual overlay — without this, Tab from the last control
+   * would reach whatever is behind it in the list. Queried fresh on every keydown rather
+   * than cached, since which view (menu/status/assign/confirm) is showing — and so which
+   * elements exist — changes while the sheet stays open.
+   */
   const onKeyDown = (event: ReactKeyboardEvent) => {
-    if (event.key === 'Escape') { event.stopPropagation(); onDismiss(); }
+    if (event.key === 'Escape') { event.stopPropagation(); onDismiss(); return; }
+    if (event.key !== 'Tab' || !sheetRef.current) return;
+    const focusable = Array.from(
+      sheetRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    );
+    if (focusable.length === 0) { event.preventDefault(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
 
   const heading = open === 'status' ? COPY.statusHeading : open === 'assign' ? COPY.editorHeading : COPY.quickActionsHeading;

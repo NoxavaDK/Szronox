@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import '../ui/tokens.css';
 import type { ReelListItemView, ReelListScreenProps, ReelQuickActionsProps } from '../ui/screen-contracts.js';
@@ -99,10 +99,17 @@ function ReelRow({
     onSwipeOpen: () => onRevealChange(item.id),
   });
 
-  // Another row opened its own swipe reveal, or the quick-actions sheet closed the whole
-  // list's interaction state (e.g. after a confirmed delete): this row's reveal, if any,
-  // must close too rather than being left visually open with nothing behind it anymore.
-  useEffect(() => { if (!revealed && offset !== 0) close(); }, [revealed, offset, close]);
+  // Another row committed its own swipe reveal (`revealed` went true→false for this one):
+  // this row's reveal must close too, rather than being left visually open with nothing
+  // behind it anymore. This must NOT fire on every nonzero `offset` — `revealed` only
+  // becomes true on release (`onSwipeOpen`), so during an in-progress drag it stays false
+  // the whole time; keying off `offset !== 0` directly closed the row mid-drag, on every
+  // pointermove, before the swipe could ever be released and open.
+  const wasRevealed = useRef(revealed);
+  useEffect(() => {
+    if (wasRevealed.current && !revealed) close();
+    wasRevealed.current = revealed;
+  }, [revealed, close]);
 
   const reduceMotion = prefersReducedMotion();
   const dragging = offset !== 0 && !revealed;

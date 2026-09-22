@@ -61,8 +61,10 @@
   text-align: left;
   cursor: pointer;
   position: relative;
-  /* Vertical panning stays native; only a confirmed horizontal drag is ever preventDefault()'d. */
-  touch-action: pan-y;
+  /* Vertical panning and pinch-zoom stay native; only a confirmed horizontal drag is ever
+     preventDefault()'d. `pan-y` alone also disables pinch-zoom per the touch-action spec —
+     `pinch-zoom` must be listed explicitly to keep it working on this element. */
+  touch-action: pan-y pinch-zoom;
 }
 
 .row:focus-visible {

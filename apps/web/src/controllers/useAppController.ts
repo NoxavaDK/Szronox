@@ -195,6 +195,23 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, [api, reportLoadFailure, status, user]);
   useEffect(() => { if (route.name === 'list') void loadList(); }, [loadList, route.name]);
 
+  /**
+   * Re-fetches the currently selected status tab without touching `loadState` (LIST-01).
+   *
+   * A status-changing list mutation — the swipe/sheet quick move, or its undo — can move a
+   * Reel out of (or back into) the tab currently being viewed. Patching the item in place
+   * left it sitting in the old tab under its new status label instead of leaving the list
+   * it no longer belongs to. Going through `loadList()` would work too, but it also flips
+   * `loadState` to `'loading'`, replacing the whole list with a spinner for what should read
+   * as a quick, quiet move; this re-fetches the same filtered page silently instead. A
+   * failure here is not reported — the row simply keeps its optimistic-free prior state and
+   * the ordinary `onRetry` path remains available.
+   */
+  const refreshFilteredList = useCallback(async () => {
+    if (!user) return;
+    try { const page = await api.list({ status }); setReels(page.items); } catch { /* keep current view */ }
+  }, [api, status, user]);
+
   const loadDeleted = useCallback(async () => {
     if (!user) return; setLoadState('loading');
     try { const page = await api.list({ visibility: 'deleted' }); setDeleted(page.items); setLoadState('loaded'); }
@@ -397,13 +414,16 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * Version-checked patch against a Reel that may not be `current` (LIST-01 list quick
    * actions: swipe-right status move, Przypisz).
    *
-   * A genuine network failure reuses the exact same offline queue `changeReel` and
-   * `deleteCurrent` already use below — `store.enqueue` plus `SyncQueue.flush()` on
-   * reconnect — rather than a parallel mechanism. The local list is deliberately NOT
-   * updated optimistically when queued: unlike Detail's live-editing draft, there is no
-   * open screen here to reconcile against later, so "queued" is reported honestly instead
-   * of a change that would silently revert if the eventual sync conflicts. Nothing is ever
-   * reported accepted before the server actually has it.
+   * Only a genuine transport failure — `error` is NOT a `ClientApiError`, meaning no
+   * response ever came back — reuses the exact same offline queue `changeReel` and
+   * `deleteCurrent` already use below (`store.enqueue` + `SyncQueue.flush()` on reconnect).
+   * A `ClientApiError` means the server actually answered: a 409 is the existing
+   * version-conflict case, and every OTHER status (422 FEED_COVER_REQUIRED, 400
+   * VALIDATION_ERROR, 403 FORBIDDEN, ...) is a real rejection that a retry cannot fix, so it
+   * is surfaced via `polishError` as-is rather than queued — queuing it would silently
+   * re-fail later instead of telling the user now. Nothing is ever reported accepted before
+   * the server actually has it, and a status-changing patch re-syncs the currently viewed
+   * tab through `refreshFilteredList` rather than leaving the row misfiled under its old tab.
    */
   const patchReelById = useCallback(async (
     id: string, expectedVersion: number, changes: ReelPatchRequest['changes'],
@@ -412,18 +432,22 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     const request = { operationId: crypto.randomUUID(), expectedVersion, changes };
     try {
       const saved = await api.patch(id, request);
-      setReels((list) => list.map((item) => (item.id === id ? saved : item)));
       if (currentRef.current?.id === id) { currentRef.current = saved; setCurrent(saved); }
+      if (changes.status !== undefined) await refreshFilteredList();
+      else setReels((list) => list.map((item) => (item.id === id ? saved : item)));
       return { ok: true, reel: saved };
     } catch (error) {
       if (isAbandonedRequest(error)) return { ok: false, conflict: false, queued: false, message: '' };
-      if (error instanceof ClientApiError && error.status === 409) {
-        return { ok: false, conflict: true, queued: false, message: 'Ktoś zmienił tę rolkę. Otwórz ją, aby zobaczyć aktualny stan.' };
+      if (error instanceof ClientApiError) {
+        if (error.status === 409) {
+          return { ok: false, conflict: true, queued: false, message: 'Ktoś zmienił tę rolkę. Otwórz ją, aby zobaczyć aktualny stan.' };
+        }
+        return { ok: false, conflict: false, queued: false, message: polishError(error) };
       }
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'patch', reelId: id, createdAt: Date.now(), state: 'pending', payload: request });
       return { ok: false, conflict: false, queued: true, message: 'Brak sieci. Zmiana zostanie wysłana po powrocie sieci.' };
     }
-  }, [api, store, user]);
+  }, [api, refreshFilteredList, store, user]);
 
   /** Same reasoning as `patchReelById`: a list-row delete that is not necessarily `current`. */
   const removeReelById = useCallback(async (id: string, expectedVersion: number): Promise<{ ok: true } | { ok: false; conflict: boolean; queued: boolean; message: string }> => {
@@ -436,8 +460,11 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       return { ok: true };
     } catch (error) {
       if (isAbandonedRequest(error)) return { ok: false, conflict: false, queued: false, message: '' };
-      if (error instanceof ClientApiError && error.status === 409) {
-        return { ok: false, conflict: true, queued: false, message: 'Ktoś zmienił tę rolkę. Otwórz ją, aby zobaczyć aktualny stan.' };
+      if (error instanceof ClientApiError) {
+        if (error.status === 409) {
+          return { ok: false, conflict: true, queued: false, message: 'Ktoś zmienił tę rolkę. Otwórz ją, aby zobaczyć aktualny stan.' };
+        }
+        return { ok: false, conflict: false, queued: false, message: polishError(error) };
       }
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'delete', reelId: id, createdAt: Date.now(), state: 'pending', payload: request });
       return { ok: false, conflict: false, queued: true, message: 'Brak sieci. Usunięcie zostanie wysłane po powrocie sieci.' };

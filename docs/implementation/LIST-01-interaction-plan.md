@@ -120,17 +120,23 @@ routing rewrite:
 `Reel`, just not previously projected to the list view, because nothing needed them there
 before quick actions existed. `useAppController` gained `patchReelById`/`removeReelById`,
 which issue the *same* version-checked `PATCH`/`POST .../delete` T00 already specifies,
-against a Reel that is not necessarily the open `current` one. A genuine network failure
-reuses the exact same offline path `changeReel`/`deleteCurrent` already use —
-`store.enqueue()` + `SyncQueue.flush()` on reconnect — rather than a second mechanism. The
-list is deliberately **not** updated optimistically when a mutation is queued offline: unlike
+against a Reel that is not necessarily the open `current` one.
+
+Only a genuine transport failure — `fetch` itself throwing, no response at all — reuses the
+exact same offline path `changeReel`/`deleteCurrent` already use (`store.enqueue()` +
+`SyncQueue.flush()` on reconnect) rather than a second mechanism; this is a corrected
+distinction, see "Error handling" in the Correction pass below for the bug it fixes. The list
+is deliberately **not** updated optimistically when a mutation is queued offline: unlike
 Detail, there is no open screen here to reconcile the eventual result against, so "queued" is
 reported honestly (`Brak sieci. Zmiana zostanie wysłana po powrocie sieci.`) instead of a row
 that could silently revert later. Nothing is ever reported accepted before the server has it.
+A status-changing patch also re-syncs the currently viewed tab (`refreshFilteredList`) rather
+than patching the row in place — see "Status filtering" in the Correction pass.
 
-Undo re-issues the same PATCH with the version returned by the original successful move. If
-that conflicts (someone else changed the Reel meanwhile), the 409 is surfaced and the undo is
-not retried or forced — it never overwrites an intervening edit.
+Undo re-issues the same PATCH with the version returned by the original successful move (which
+also goes through `refreshFilteredList`, so a Reel undone back into the viewed tab reappears).
+If that conflicts (someone else changed the Reel meanwhile), the 409 is surfaced and the undo
+is not retried or forced — it never overwrites an intervening edit.
 
 ## Accessibility: the non-gesture route
 
@@ -143,11 +149,13 @@ brief rules out ("No permanent extra buttons on list rows"). From there, `Zmień
 non-gesture route is this sheet, since Detail has no comparable action to point to.
 
 The sheet (`ReelQuickActionsSheet`) is a `role="dialog"` with `aria-modal`, focuses its first
-enabled control on open, restores focus to whatever opened it on close, and dismisses on
-`Escape`. It does not implement a full Tab focus trap — neither does any existing sheet in
-this codebase (`detail-sections.tsx`'s `MetadataSelectors`/`ReelOverflow`), so this matches
-current product behavior rather than regressing it; a full trap would be a separate,
-broader accessibility pass across all sheets, not scoped to LIST-01.
+enabled control on open, restores focus to whatever opened it on close, dismisses on
+`Escape`, and contains Tab/Shift+Tab within itself (boundary-cycling: Tab from the last
+control wraps to the first, Shift+Tab from the first wraps to the last — added in the
+correction pass below, since `aria-modal` had been declared without anything enforcing it).
+This is scoped to this one component; Reel Detail's existing sheets
+(`detail-sections.tsx`'s `MetadataSelectors`/`ReelOverflow`) are untouched, per the review's
+own instruction that no app-wide accessibility refactor was needed here.
 
 ## Mobile/PWA gesture handling
 
@@ -157,7 +165,8 @@ Pointer Events wiring (`useRowGesture`):
 - Axis lock: movement under 8px stays "undetermined" (still a long-press candidate); once
   resolved, horizontal beats a diagonal-favoring-vertical tie, and only a horizontal drag ever
   calls `preventDefault()` — vertical stays entirely with the browser's native scroll
-  (`touch-action: pan-y` on the row).
+  (`touch-action: pan-y pinch-zoom` on the row — see the correction pass below for why
+  `pinch-zoom` has to be listed explicitly).
 - **A defect found and fixed during self-review**: because the axis-lock threshold (8px) is
   smaller than the tap-slop threshold (10px) that would otherwise cancel a pending long-press,
   an axis could resolve to `vertical` at 8px while the long-press timer was still armed and
@@ -183,7 +192,54 @@ Pointer Events wiring (`useRowGesture`):
   entirely, which is what "closes on view change" means in practice — nothing extra was needed
   for that case.
 - Zoom and normal page scroll are untouched — nothing here calls `preventDefault()` outside a
-  confirmed horizontal drag, and no viewport/touch-action rule restricts pinch-zoom.
+  confirmed horizontal drag, and `touch-action: pan-y pinch-zoom` keeps pinch-zoom native (see
+  the correction pass below).
+
+## Correction pass (bounded review)
+
+A bounded review before merge found five issues the pure gesture-logic tests didn't cover
+(they test decision functions, not the stateful wiring or the surrounding app code). All five
+are fixed on this branch; accepted as still out of scope: `Duplikuj`/`Archiwizuj` (pending
+contracts), manual reordering, and keeping AI actions inside Detail.
+
+- **BLOCKER — swipe reset mid-drag.** `ReelRow`'s cleanup effect read `!revealed && offset !==
+  0` and called `close()`. `revealed` (`revealedId === item.id`, lifted to `ReelListScreen`)
+  only becomes true on release, via `onSwipeOpen`; during the drag itself `offset` changes on
+  every `pointermove` while `revealed` stays false the whole time — so the effect fired on
+  every drag frame and reset the row before it could ever be released and open. Fixed by
+  tracking the previous value of `revealed` and only closing on a true→false transition (i.e.
+  when *another* row's reveal supersedes this one), which is the only case that needed
+  handling — a row's own in-progress drag, and its own explicit close (tap-to-close, a reveal
+  button's own handler), were already correct and untouched.
+- **Status filtering.** A successful status-changing patch replaced the row in place
+  (`list.map`) in whichever tab was currently loaded, so a Reel that moved out of the viewed
+  tab stayed visible there under its new status label instead of leaving the list. Fixed with
+  a new `refreshFilteredList()` in `useAppController.ts`: for a patch whose `changes.status !==
+  undefined` (both the original move and its undo), it silently re-fetches `api.list({status})`
+  for the tab currently being viewed instead of patching the array by hand — deliberately not
+  `loadList()`, which also flips `loadState` to `'loading'` and would replace the whole list
+  with a spinner for what should read as a quiet move. Non-status changes (Przypisz) keep the
+  original in-place update, since they don't affect which tab a row belongs to.
+- **Error handling.** `patchReelById`/`removeReelById` treated every non-409 error —
+  including a real, structured rejection like 422 `FEED_COVER_REQUIRED`, 400
+  `VALIDATION_ERROR` or 403 `FORBIDDEN` — as a transport failure and enqueued it for retry,
+  reporting a false "Brak sieci" message that hid the actual reason and would have silently
+  re-failed the same way once "retried". Fixed by branching on `error instanceof
+  ClientApiError`: that means the server actually answered (a real response, not a dropped
+  connection), so anything other than 409 is now surfaced via the same `polishError()` the
+  rest of the app already uses, and only a genuine non-`ClientApiError` throw (fetch itself
+  failing — no response at all) is queued.
+- **Mobile zoom.** `touch-action: pan-y` does not preserve pinch-zoom — per the Touch Action
+  spec, listing `pan-y` alone disables every other default touch behavior on that element,
+  pinch-zoom included. Fixed to `touch-action: pan-y pinch-zoom`, which keeps vertical
+  scrolling and pinch-zoom both native while still leaving horizontal panning unclaimed for
+  the gesture hook to intercept once it confirms a horizontal drag.
+- **Modal keyboard focus.** The sheet declared `aria-modal="true"` but nothing enforced it —
+  Tab from the last focusable control could reach the list behind the (purely visual) backdrop.
+  Fixed with a standard boundary-cycling trap inside `ReelQuickActionsSheet`'s own `onKeyDown`
+  (Tab from the last element wraps to the first, Shift+Tab from the first wraps to the last),
+  scoped to this one component only — no change to Reel Detail's existing sheets, per the
+  review's own instruction that no app-wide accessibility refactor was needed here.
 
 ## Verification
 
@@ -220,24 +276,32 @@ dev --workspace @szronox/web`, and drive it by hand or with browser automation o
 
 | Check | Status |
 | --- | --- |
-| Tap/scroll/long-press/swipe separation | Decision logic unit-tested; a real defect (vertical scroll could still trigger long-press) found and fixed by code review. Live interaction UNVERIFIED. |
+| Tap/scroll/long-press/swipe separation | Decision logic unit-tested. Two real defects found and fixed by code review across the two review passes: a vertical scroll could still trigger long-press (initial self-review), and the reveal-close effect fired on every drag frame instead of only when superseded by another row, resetting a swipe before it could open (bounded review, see Correction pass). Live interaction still UNVERIFIED — no browser automation available in either session. |
 | Correct Reel identity for every action | Every callback is `(id, ...) => ...`, resolved from `c.reels`/`items` by that id, never from `current`/a captured closure over "the open row" — verified by reading, not by a dedicated test. |
-| Status gates, ambiguous transitions, safe undo | Feed-cover gate reuses the identical pre-check Detail already performs; ambiguous (`published`) case opens the sheet rather than guessing; undo re-PATCHes with the version returned by the move and surfaces (never forces past) a conflict. Logic-level review; no live mutation test against a real API this session. |
+| Status gates, ambiguous transitions, safe undo | Feed-cover gate reuses the identical pre-check Detail already performs; ambiguous (`published`) case opens the sheet rather than guessing; undo re-PATCHes with the version returned by the move and surfaces (never forces past) a conflict; a status change now re-syncs the viewed tab (`refreshFilteredList`) instead of leaving the row misfiled — see Correction pass. Logic-level review; no live mutation test against a real API this session. |
 | Delete confirmation and cancellation | Reuses the exact frozen confirm copy/labels; cancel returns to the sheet without a request. |
 | Automatic-sort protection | No reorder implemented at all — see "Long press + drag" above. |
-| Keyboard/screen-reader access, clipboard failures | Non-gesture routes implemented (ContextMenu key/right-click, existing Detail controls); clipboard failure reuses `copyPublication`'s truthful pattern. Actual screen-reader behavior UNVERIFIED (no AT available this session). |
-| Mobile browser behavior | UNVERIFIED — no device/browser automation available. |
+| Keyboard/screen-reader access, clipboard failures | Non-gesture routes implemented (ContextMenu key/right-click, existing Detail controls); the sheet now contains Tab focus within itself (Correction pass); clipboard failure reuses `copyPublication`'s truthful pattern. Actual screen-reader/keyboard-in-browser behavior UNVERIFIED (no AT or browser automation available in either session). |
+| Mobile browser behavior | UNVERIFIED — no device/browser automation available in either session. Pinch-zoom regression found and fixed (Correction pass) by static CSS review, not by an actual pinch test. |
 
 ## Remaining gates
 
+- The lead's requested follow-up — targeted browser checks of swipe, status/undo, keyboard
+  focus and back navigation — is still **UNVERIFIED**: no browser automation was available in
+  either session (Claude in Chrome not installed; declined both times it was offered). The
+  code-level fix for each of the five findings is in place and covered by typecheck/build/unit
+  tests, but none of the five has been exercised in an actual browser. The fixture harness
+  (`DevPreview.tsx`'s `ListPreview`, already wired with a working `quickActions` and no backend
+  dependency) is ready for whenever browser access is available — see Verification above for
+  how to mount it.
 - Live pointer/touch interaction, actual-device haptics, real screen-reader behavior, and
-  browser back/edge-gesture behavior: **UNVERIFIED**, no browser/device access this session.
+  browser back/edge-gesture behavior: **UNVERIFIED** for the same reason.
 - `Duplikuj` and `Archiwizuj`: **blocked on lead decisions** described above; nothing shipped
-  for either, by design.
+  for either, by design. Accepted by the review.
 - kDrive opening remains honestly disabled end-to-end (T04 unauthorized) — the list quick
   action inherits that, not a new limitation.
 - Manual reorder: not applicable to any current view; revisit only if a future task introduces
-  an explicitly manual-order list.
+  an explicitly manual-order list. Accepted by the review.
 
 ## Handoff
 
