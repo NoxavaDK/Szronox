@@ -8,7 +8,9 @@ import { resolveActiveRelease } from './corpus/repository.js';
 import { findEvidence, MAX_EVIDENCE_CANDIDATES, type ProgrammeEvidence, searchTerms } from './corpus/retrieval.js';
 
 const MODEL = 'gemini-3.8-flash';
-const PROMPT_ID = 'gemini-02-development-provisional-v1';
+// v2 (PUBLICATION-01): Opracuj without publication copy, plus generate_publication. Runs recorded
+// under v1 keep their label, so old output is never attributed to the split prompts.
+const PROMPT_ID = 'gemini-02-development-provisional-v2';
 export const ACTIONS: AiAction[] = ['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme', 'generate_publication'];
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sourceHash = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
