@@ -106,6 +106,7 @@ test('enqueue snapshots every validated input image and refuses pending ones', a
     assert.equal(run.input.attachments.length, 1);
     assert.equal(run.input.attachments[0].storageKey, undefined);
     assert.equal(run.promptStage, 'development_provisional');
+    assert.equal(run.promptId, 'gemini-02-development-provisional-v2');
   } finally { await db.close(); }
 });
 
