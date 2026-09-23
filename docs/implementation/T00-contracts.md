@@ -82,7 +82,7 @@ Approved 2026-09-22 (`docs/implementation/PUBLICATION-01-opus-handoff.md`); supe
 
 ## Correction 1 — persistent hook shortlist
 
-`ReelHook`: `id`, `reelId`, `text`, `source: user | ai`, `position`, `createdAt`. SQL names are snake_case. A Reel has zero or more active hooks; there is no singular authoritative `hook` field, selected-hook field or use-hook endpoint.
+`ReelHook`: `id`, `reelId`, `text`, `source: user | ai`, `position`, `createdAt`. SQL names are snake_case. A Reel has zero or more active hooks. See the explicit HOOKS-SELECT-EDIT amendment below for the one optional selected-hook reference. There is still no singular text-valued `Reel.hook` field or per-hook `Użyj` action.
 
 - Capture may create one user hook atomically with the Reel. Existing user hooks always survive AI generation.
 - User add/edit/remove operates on individual IDs. Source and creation time are server-owned provenance; editing wording does not manufacture a new generation history.
@@ -91,6 +91,18 @@ Approved 2026-09-22 (`docs/implementation/PUBLICATION-01-opus-handoff.md`); supe
 - Appending locks/checks the live Reel, allocates positions transactionally and preserves concurrent user hooks. Record applied hook IDs on the run in the same transaction, preventing retry duplication or resurrection of a later-removed hook. Deleted Reels cannot receive additions.
 - Text changes while AI runs do not permit replacing current content. Generated additions retain their run's input snapshot; the UI can identify stale run context. New hooks invalidate prior fact-check coverage.
 - Primary/prominent-hook presentation is NOT frozen here. `position` provides stable order; do not implement a primary-hook selector.
+
+### HOOKS-SELECT-EDIT — explicit selected candidate (2026-09-23)
+
+This user-approved correction supersedes only the earlier no-selector/no-selected-hook sentences above and their historical equivalents. The shortlist remains persistent, ordered `ReelHook` records. `Reel.selectedHookId: Id | null` is one server-owned nullable reference to an existing hook belonging to that Reel; SQL `selected_hook_id` defaults null. A Reel with hooks and no selection is valid, including every historical Reel. Never infer the first hook, copy its text to a second authoritative field, or change a hook's provenance when selecting it. A selected `user` hook can show both `WŁASNY` and `✓ WYBRANY`.
+
+Selection is an explicit, authenticated, idempotent, version-checked mutation. The server validates the hook belongs to the same nondeleted Reel, locks/checks the authoritative Reel version and stores only the ID. Selecting another replaces the ID atomically; selecting the same one may leave content unchanged but must still honor mutation and replay rules. Delete of an unselected hook leaves selection unchanged. Delete of the selected hook atomically clears selection; no replacement is guessed. Hook text edits update the existing ID, preserve `source`/`createdAt`/selection and use the existing hook-edit conflict contract. Generated hooks append as candidates and never change selection.
+
+Reel Detail's compact HOOKI rows are touch/pointer/keyboard selection targets with a subtle but explicit `✓ WYBRANY` state independent of text highlighting. `WŁASNY` marks only user provenance. Inline edit on an existing row uses the existing hook-edit endpoint; controls for edit/delete do not also select. In-progress text is preserved on save error/conflict rather than silently overwritten. No new screen, large action, analytics or hook version-history feature.
+
+Downstream script-development input may use the selected hook as its **current** hook context while preserving the complete shortlist for alternatives and other established processing. In particular, Fact Check still analyzes all active hooks, `generate_hooks` still appends without changing selection, and older AI snapshots/results remain readable. Selection does not automatically apply or overwrite a script. Reconcile only logic that currently expects a singular working hook; do not narrow global hook coverage or redesign Gemini actions.
+
+Acceptance: select any candidate; switch and persist across reload; provenance independent; edit selected/unselected text in place with version conflict protection; selected deletion clears and unselected deletion preserves; no automatic selection on creation/generation/history; row/controls do not conflict; existing null-selection Reels remain valid; downstream script context uses the selected ID where applicable without changing all-hooks Fact Check or additive generation.
 
 ## Correction 2 — existing-library meme suggestion
 
