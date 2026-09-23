@@ -1,5 +1,5 @@
 import '../ui/tokens.css';
-import type { ReelDetailScreenProps } from '../ui/screen-contracts.js';
+import type { HookEditView, ReelDetailScreenProps } from '../ui/screen-contracts.js';
 import { Avatar, CoverIndicator, SectionRow } from '../ui/primitives.js';
 import { BackArrowIcon, CloseIcon } from '../ui/icons.js';
 import {
@@ -25,7 +25,8 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
     onBack, title, onChangeTitle, titlePlaceholder,
     metadata, selectors, overflow, onOpenFeedCover, restore,
-    hooks, onRemoveHook,
+    hooks, onRemoveHook, selectedHookId, onSelectHook, hookSelectionPending,
+    hookEdits, onStartHookEdit, onChangeHookEdit, onSaveHookEdit, onCancelHookEdit,
     script, onChangeScript, scriptConflict,
     sources, editingNotes, materials,
     publicationExpanded, onTogglePublication, publication,
@@ -71,20 +72,66 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       <section className={styles.contentBlock}>
         <h2 className={styles.sectionLabel}>Hooki</h2>
         <ul className={styles.hookList}>
-          {hooks.map((hook) => (
-            <li key={hook.id} className={styles.hookRow}>
-              <span className={styles.hookText}>{hook.text}</span>
-              {hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}
-              <button
-                type="button"
-                className={styles.hookRemove}
-                onClick={() => onRemoveHook(hook.id)}
-                aria-label="Usuń hook"
-              >
-                <CloseIcon />
-              </button>
-            </li>
-          ))}
+          {hooks.map((hook) => {
+            const selected = hook.id === selectedHookId;
+            const edit = hookEdits[hook.id];
+            return (
+              <li key={hook.id} className={selected ? `${styles.hookRow} ${styles.hookRowSelected}` : styles.hookRow}>
+                {edit ? (
+                  <HookEditor
+                    edit={edit}
+                    onChange={(text) => onChangeHookEdit(hook.id, text)}
+                    onSave={() => onSaveHookEdit(hook.id)}
+                    onCancel={() => onCancelHookEdit(hook.id)}
+                  />
+                ) : (
+                  <>
+                    {/* The row itself is the selection target. Edit and delete are siblings,
+                        not children, so neither can also select. */}
+                    <button
+                      type="button"
+                      className={styles.hookSelect}
+                      aria-pressed={selected}
+                      disabled={hookSelectionPending}
+                      onClick={() => onSelectHook(hook.id)}
+                    >
+                      <span className={styles.hookText}>{hook.text}</span>
+                      {selected || hook.source === 'user' ? (
+                        <span className={styles.hookTags}>
+                          {selected ? <span className={styles.hookSelectedTag}>✓ WYBRANY</span> : null}
+                          {hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.hookControl}
+                      onClick={() => onStartHookEdit(hook.id)}
+                      aria-label="Edytuj hook"
+                    >
+                      <span aria-hidden="true">✎</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.hookControl}
+                      onClick={() => onRemoveHook(hook.id)}
+                      aria-label="Usuń hook"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </>
+                )}
+              </li>
+            );
+          })}
+          {/* A draft whose hook was deleted elsewhere: still shown, so the text is not lost. */}
+          {Object.entries(hookEdits)
+            .filter(([id]) => !hooks.some((hook) => hook.id === id))
+            .map(([id, edit]) => (
+              <li key={id} className={styles.hookRow}>
+                <HookEditor edit={edit} onChange={(text) => onChangeHookEdit(id, text)} onCancel={() => onCancelHookEdit(id)} />
+              </li>
+            ))}
         </ul>
       </section>
 
@@ -118,6 +165,52 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       {saveState === 'saving' ? <p className={styles.saveState} role="status">Zapisywanie…</p> : null}
       {saveState === 'offline' ? <p className={styles.saveState} role="status">Brak połączenia — zapisano lokalnie</p> : null}
       {saveState === 'error' ? <p className={styles.saveState} role="alert">Nie udało się zapisać</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Inline edit of one existing hook. Gotowe saves through the existing hook-edit endpoint;
+ * Anuluj (or Escape) discards the local text. Without `onSave` the hook no longer exists,
+ * so only closing is offered.
+ */
+function HookEditor({ edit, onChange, onSave, onCancel }: {
+  edit: HookEditView;
+  onChange: (text: string) => void;
+  onSave?: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className={styles.hookEditor}>
+      <textarea
+        className={styles.hookEditField}
+        aria-label="Tekst hooka"
+        value={edit.text}
+        rows={1}
+        readOnly={edit.saving}
+        autoFocus
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !edit.saving) onCancel();
+          if (event.key === 'Enter' && !event.shiftKey && onSave) { event.preventDefault(); onSave(); }
+        }}
+      />
+      <div className={styles.hookEditActions}>
+        {edit.error ? <p className={styles.hookEditError} role="alert">{edit.error}</p> : null}
+        <button type="button" className={styles.hookEditButton} disabled={edit.saving} onClick={onCancel}>
+          {onSave ? 'Anuluj' : 'Zamknij'}
+        </button>
+        {onSave ? (
+          <button
+            type="button"
+            className={`${styles.hookEditButton} ${styles.hookEditDone}`}
+            disabled={edit.saving || edit.text.trim() === ''}
+            onClick={onSave}
+          >
+            {edit.saving ? 'Zapisywanie…' : 'Gotowe'}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

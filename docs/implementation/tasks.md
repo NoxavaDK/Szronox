@@ -60,3 +60,7 @@ Dispatched /root/vps04_runtime on gpt-5.6-sol/high after explicit approval and C
 ## PUBLICATION-01
 
 Approved by the user on 2026-09-22 as a bounded manual Opus implementation with merge and DEV deployment (`PUBLICATION-01-opus-handoff.md`). Publication copy moves from Opracuj to the separate `generate_publication` action behind `Wygeneruj opis` in PUBLIKACJA; see the T00 PUBLICATION-01 amendment. Result: `PUBLICATION-01-result.md`.
+
+## HOOKS-SELECT-EDIT
+
+Approved by the user on 2026-09-23 as a bounded manual Opus implementation with merge and DEV deployment (`HOOKS-SELECT-EDIT-opus-handoff.md`). One nullable `Reel.selectedHookId` (migration 0010, same-Reel composite FK, cleared on hook delete), `PUT /reels/:id/selected-hook`, selectable/inline-editable HOOKI rows, and the selected hook as Opracuj's current-hook context. Result: `HOOKS-SELECT-EDIT-result.md`.

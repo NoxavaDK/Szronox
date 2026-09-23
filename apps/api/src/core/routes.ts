@@ -219,6 +219,18 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     return repository.removeHook(actor, requireUuid(id, 'id'), requireUuid(hookId, 'hookId'), context);
   }));
 
+  // Explicit selection of one existing hook (HOOKS-SELECT-EDIT); `hookId: null` clears it.
+  // There is no per-hook use action: this only records which candidate is chosen.
+  app.put('/api/v1/reels/:id/selected-hook', handle(async (request) => {
+    const actor = await actorOf(request);
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const context = requireMutationContext(body);
+    if (!Object.hasOwn(body, 'hookId')) throw validationError('hookId is required (null clears the selection)');
+    const hookId = body.hookId === null ? null : requireUuid(body.hookId, 'hookId');
+    return repository.selectHook(actor, requireUuid(id, 'id'), { ...context, hookId });
+  }));
+
   // ── Export reference and verification ──────────────────────────────────────
 
   app.post('/api/v1/reels/:id/current-export', handle(async (request) => {

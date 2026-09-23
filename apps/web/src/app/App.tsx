@@ -357,6 +357,15 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onOpenFeedCover={() => setPublicationExpanded(true)}
       hooks={reel.hooks}
       onRemoveHook={(id) => void c.removeHook(id)}
+      // `?? null`: a Reel cached before HOOKS-SELECT-EDIT has no such field, meaning no choice.
+      selectedHookId={reel.selectedHookId ?? null}
+      onSelectHook={(id) => void c.selectHook((reel.selectedHookId ?? null) === id ? null : id)}
+      hookSelectionPending={c.hookSelecting}
+      hookEdits={Object.fromEntries(Object.entries(c.hookEdits).filter(([, edit]) => edit.reelId === reel.id))}
+      onStartHookEdit={c.startHookEdit}
+      onChangeHookEdit={c.changeHookEdit}
+      onSaveHookEdit={(id) => void c.saveHookEdit(id)}
+      onCancelHookEdit={c.cancelHookEdit}
       script={reel.script}
       onChangeScript={(script) => c.changeReel({ script })}
       scriptConflict={c.conflict?.field === 'script' ? conflictView() : undefined}

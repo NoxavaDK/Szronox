@@ -160,3 +160,59 @@ test('two chunks of one proposal cannot become two candidates', async () => {
     ],
   }) }), (error: { code?: string }) => error.code === 'INVALID_AI_RESULT');
 });
+
+// ── HOOKS-SELECT-EDIT: the selected hook is current context for script development only ──
+
+const hookA = { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd01', text: 'Pierwszy hook', source: 'user', position: 0 };
+const hookB = { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd02', text: 'Drugi hook', source: 'ai', position: 1 };
+const developOutput = { titleSuggestion: 'Tytuł', eventSummary: 'Zdarzenie', verificationIssues: [], hookAdditions: [],
+  scriptSuggestion: 'Scenariusz', possibleProgrammeConnection: null, prioritySuggestion: null, memeSuggestion: null };
+async function withStorage<T>(body: (storageRoot: string) => Promise<T>): Promise<T> {
+  const storageRoot = await mkdtemp(path.join(tmpdir(), 'szronox-ai-hooks-'));
+  try { await mkdir(path.join(storageRoot, 'objects')); return await body(storageRoot); }
+  finally { await rm(storageRoot, { recursive: true, force: true }); }
+}
+const promptOf = (request: Record<string, unknown>) =>
+  (request.contents as Array<{ parts: Array<{ text: string }> }>)[0].parts.map((part) => part.text ?? '').join('\n');
+
+async function developPrompt(selectedHookId: string | null | undefined): Promise<string> {
+  const input = run('develop');
+  input.input_snapshot.hooks = [hookA, hookB];
+  if (selectedHookId !== undefined) input.input_snapshot.selectedHookId = selectedHookId;
+  let prompt = '';
+  await withStorage((storageRoot) => executeAction(input, { storageRoot, call: async (_model, request) => {
+    prompt = promptOf(request); return candidate(developOutput);
+  } }));
+  return prompt;
+}
+
+test('develop receives the selected hook as current context and still sees every hook', async () => {
+  const prompt = await developPrompt(hookB.id);
+  assert.match(prompt, /selectedHook: \{"id":"dddddddd-dddd-4ddd-8ddd-dddddddddd02","text":"Drugi hook"\}/);
+  assert.ok(prompt.includes(hookA.text) && prompt.includes(hookB.text), 'the full shortlist stays available');
+});
+
+test('develop without a selection, or from an older snapshot, never picks a hook', async () => {
+  for (const selection of [null, undefined]) {
+    assert.match(await developPrompt(selection), /selectedHook: null$/);
+  }
+  // An ID that is not in this run's own shortlist is not trusted as a selection.
+  assert.match(await developPrompt('dddddddd-dddd-4ddd-8ddd-dddddddddd99'), /selectedHook: null$/);
+});
+
+test('generate_hooks and fact_check keep every hook with nothing singled out', async () => {
+  for (const action of ['generate_hooks', 'fact_check']) {
+    const input = run(action);
+    input.input_snapshot.hooks = [hookA, hookB];
+    input.input_snapshot.selectedHookId = hookA.id;
+    const prompts: string[] = [];
+    await withStorage((storageRoot) => executeAction(input, { storageRoot, call: async (_model, request) => {
+      prompts.push(promptOf(request));
+      return candidate(action === 'generate_hooks' ? { hookAdditions: ['Nowy'] } : { coverage: 'no_factual_claims', claims: [], warnings: [] });
+    } }));
+    for (const prompt of prompts) {
+      assert.equal(prompt.includes('selectedHook'), false, `${action} is not given a current hook`);
+      assert.ok(prompt.includes(hookA.text) && prompt.includes(hookB.text), `${action} sees all hooks`);
+    }
+  }
+});

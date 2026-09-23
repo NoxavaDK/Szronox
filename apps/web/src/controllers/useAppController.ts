@@ -27,6 +27,12 @@ export interface ConflictState {
   changes: ReelPatchRequest['changes'];
   serverReel: Reel;
 }
+/**
+ * An inline hook edit in progress (HOOKS-SELECT-EDIT). Held apart from the Reel, so a refresh,
+ * conflict or failed save never replaces the user's text; only Gotowe/Anuluj ends it.
+ * `base` is the server text the draft was written against, to name a concurrent change.
+ */
+export interface HookEdit { reelId: string; text: string; base: string; saving: boolean; error: string | null }
 export interface CaptureForm {
   draft: CaptureDraft; kind: 'image' | 'url' | 'text'; blobs: Map<string, Blob>; showAdditional: boolean; showHook: boolean;
   /**
@@ -59,10 +65,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const [capture, setCapture] = useState<CaptureForm | null>(null);
   const [deleted, setDeleted] = useState<Reel[]>([]);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [hookEdits, setHookEdits] = useState<Record<string, HookEdit>>({});
+  const [hookSelecting, setHookSelecting] = useState(false);
+  const hookEditsRef = useRef<Record<string, HookEdit>>({});
   const saveTimer = useRef<number>();
   const currentRef = useRef<Reel | null>(null);
   const pendingPatch = useRef<{ reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | null>(null);
   useEffect(() => { currentRef.current = current; }, [current]);
+  useEffect(() => { hookEditsRef.current = hookEdits; }, [hookEdits]);
 
   /**
    * Report attachment progress.
@@ -382,11 +392,124 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     setCurrent(reel);
   }, []);
 
+  /**
+   * Show a server Reel without losing a debounced scalar edit that has not been sent yet.
+   *
+   * `own` marks the result of this client's hook mutation made from `before`. When nothing
+   * else happened in between (exactly one version later), the pending patch is rebased onto
+   * it, because that mutation touched only hooks/selection. A refreshed Reel is never
+   * rebased: a genuine concurrent change still surfaces as the ordinary conflict.
+   */
+  const acceptServerReel = useCallback((before: Reel, server: Reel, own: boolean) => {
+    const pending = pendingPatch.current?.reelId === server.id ? pendingPatch.current : null;
+    if (pending && own && pending.expectedVersion === before.version && server.version === before.version + 1) {
+      pending.expectedVersion = server.version;
+    }
+    // The user may have left this Reel while the request was in flight.
+    if (currentRef.current?.id !== server.id) return;
+    const next = pending ? { ...server, ...pending.changes } : server;
+    currentRef.current = next; setCurrent(next);
+  }, []);
+
   const removeHook = useCallback(async (hookId: string) => {
     if (!current || !user) return; const request = { operationId: crypto.randomUUID(), expectedVersion: current.version }; setSaveState('saving');
-    try { setCurrent(await api.removeHook(current.id, hookId, request)); setSaveState('saved'); }
+    try { acceptServerReel(current, await api.removeHook(current.id, hookId, request), true); setSaveState('saved'); }
     catch (error) { if (isAbandonedRequest(error)) return; await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'remove-hook', reelId: current.id, createdAt: Date.now(), state: error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'pending', payload: { hookId, request } }); setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'offline'); setMessage(polishError(error)); }
-  }, [api, current, store, user]);
+  }, [acceptServerReel, api, current, store, user]);
+
+  /** Re-read the Reel after a refused hook mutation, so the rendered selection is the server's. */
+  const refreshAfterRefusal = useCallback(async (before: Reel): Promise<Reel | null> => {
+    try { const server = await api.reel(before.id); acceptServerReel(before, server, false); return server; }
+    catch { return null; }
+  }, [acceptServerReel, api]);
+
+  /**
+   * Explicit selection from a HOOKI row. Selecting the chosen row again clears the choice.
+   * Not optimistic and not queued offline: the row shows the server's answer, and a failure
+   * says plainly that the choice was not saved.
+   */
+  const selectHook = useCallback(async (hookId: string | null) => {
+    const reel = currentRef.current;
+    if (!reel || !user) return;
+    const request = { operationId: crypto.randomUUID(), expectedVersion: reel.version, hookId };
+    setHookSelecting(true);
+    setSaveState((state) => (['conflict', 'offline', 'error'].includes(state) ? state : 'saving'));
+    try {
+      acceptServerReel(reel, await api.selectHook(reel.id, request), true);
+      setSaveState((state) => (state === 'saving' ? 'saved' : state));
+    } catch (error) {
+      if (isAbandonedRequest(error)) return;
+      setSaveState((state) => (state === 'saving' ? 'idle' : state));
+      if (error instanceof ClientApiError && (error.status === 409 || error.status === 404)) {
+        await refreshAfterRefusal(reel);
+        setMessage(error.status === 404
+          ? 'Tego hooka już nie ma. Wybór nie został zapisany.'
+          : 'Rolka zmieniła się na innym urządzeniu. Wybór hooka nie został zapisany — wybierz ponownie.');
+      } else {
+        setMessage(error instanceof ClientApiError ? `Wybór hooka nie został zapisany. ${polishError(error)}` : 'Brak połączenia. Wybór hooka nie został zapisany.');
+      }
+    } finally {
+      setHookSelecting(false);
+    }
+  }, [acceptServerReel, api, refreshAfterRefusal, user]);
+
+  const updateHookEdit = useCallback((hookId: string, update: (edit: HookEdit) => HookEdit | null) => {
+    const edits = { ...hookEditsRef.current };
+    const existing = edits[hookId];
+    if (!existing) return;
+    const next = update(existing);
+    if (next) edits[hookId] = next; else delete edits[hookId];
+    hookEditsRef.current = edits; setHookEdits(edits);
+  }, []);
+
+  const startHookEdit = useCallback((hookId: string) => {
+    const reel = currentRef.current;
+    const hook = reel?.hooks.find((entry) => entry.id === hookId);
+    if (!reel || !hook || hookEditsRef.current[hookId]) return;
+    const edits = { ...hookEditsRef.current, [hookId]: { reelId: reel.id, text: hook.text, base: hook.text, saving: false, error: null } };
+    hookEditsRef.current = edits; setHookEdits(edits);
+  }, []);
+
+  const changeHookEdit = useCallback((hookId: string, text: string) =>
+    updateHookEdit(hookId, (edit) => ({ ...edit, text })), [updateHookEdit]);
+
+  const cancelHookEdit = useCallback((hookId: string) => updateHookEdit(hookId, () => null), [updateHookEdit]);
+
+  /**
+   * Gotowe: save through the existing hook-edit endpoint. The draft is removed only after the
+   * server confirms; any refusal or network failure keeps it in the field with a reason.
+   */
+  const saveHookEdit = useCallback(async (hookId: string) => {
+    const reel = currentRef.current;
+    const edit = hookEditsRef.current[hookId];
+    if (!reel || !user || !edit || edit.saving) return;
+    const hook = reel.hooks.find((entry) => entry.id === hookId);
+    if (edit.text.trim() === '') { updateHookEdit(hookId, (x) => ({ ...x, error: 'Hook nie może być pusty.' })); return; }
+    if (!hook) { updateHookEdit(hookId, (x) => ({ ...x, error: 'Tego hooka już nie ma. Twój tekst pozostaje w polu — skopiuj go, jeśli chcesz go zachować.' })); return; }
+    if (hook.text === edit.text) { updateHookEdit(hookId, () => null); return; }
+    updateHookEdit(hookId, (x) => ({ ...x, saving: true, error: null }));
+    try {
+      const saved = await api.editHook(reel.id, hookId, { operationId: crypto.randomUUID(), expectedVersion: reel.version, text: edit.text });
+      acceptServerReel(reel, saved, true);
+      updateHookEdit(hookId, () => null);
+    } catch (error) {
+      if (isAbandonedRequest(error)) return;
+      let message = error instanceof ClientApiError
+        ? `Hook nie został zapisany. ${polishError(error)}`
+        : 'Brak połączenia. Hook nie został zapisany — tekst pozostaje w edycji.';
+      let base = edit.base;
+      if (error instanceof ClientApiError && (error.status === 409 || error.status === 404)) {
+        const server = await refreshAfterRefusal(reel);
+        const now = server?.hooks.find((entry) => entry.id === hookId);
+        if (server && !now) message = 'Ten hook został usunięty na innym urządzeniu. Twój tekst pozostaje w polu — skopiuj go, jeśli chcesz go zachować.';
+        else if (now && now.text !== edit.base) {
+          message = `Ktoś zmienił ten hook w międzyczasie. Twoja wersja jest zachowana; Gotowe zastąpi obecny tekst: „${now.text}”.`;
+          base = now.text;
+        } else if (error.status === 409) message = 'Rolka zmieniła się na innym urządzeniu. Twój tekst hooka jest zachowany — naciśnij Gotowe, aby zapisać ponownie.';
+      }
+      updateHookEdit(hookId, (x) => ({ ...x, base, saving: false, error: message }));
+    }
+  }, [acceptServerReel, api, refreshAfterRefusal, updateHookEdit, user]);
 
   const deleteCurrent = useCallback(async () => {
     if (!current || !user) return;
@@ -552,6 +675,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     pendingPatch.current = null;
     currentRef.current = null;
     setCurrent(null); setCapture(null); setReels([]); setDeleted([]); setConflict(null);
+    hookEditsRef.current = {}; setHookEdits({});
     setSaveState('idle'); setLoadState('idle'); setRoute({ name: 'list' });
   }, []);
 
@@ -599,7 +723,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     ['saving', 'conflict', 'offline', 'error'].includes(saveState) || conflict !== null, [conflict, saveState]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
+  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
+    hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
     patchReelById, removeReelById, copyReelLink, hasUnsavedChanges };
 }

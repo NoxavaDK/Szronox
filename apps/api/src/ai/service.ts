@@ -10,7 +10,8 @@ import { findEvidence, MAX_EVIDENCE_CANDIDATES, type ProgrammeEvidence, searchTe
 const MODEL = 'gemini-3.8-flash';
 // v2 (PUBLICATION-01): Opracuj without publication copy, plus generate_publication. Runs recorded
 // under v1 keep their label, so old output is never attributed to the split prompts.
-const PROMPT_ID = 'gemini-02-development-provisional-v2';
+// v3 (HOOKS-SELECT-EDIT): Opracuj receives the selected hook as its current-hook context.
+const PROMPT_ID = 'gemini-02-development-provisional-v3';
 export const ACTIONS: AiAction[] = ['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme', 'generate_publication'];
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sourceHash = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
@@ -233,6 +234,8 @@ export class AiService {
         reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput,
         script: reel.script, scriptRevision: reel.scriptRevision,
         hooks: reel.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
+        // Read in this same locked transaction, so it always names one of the hooks above.
+        selectedHookId: reel.selectedHookId,
         inputNote: reel.inputNote, publicationDescription: reel.publicationDescription,
         publicationHashtags: reel.publicationHashtags,
         attachments: reel.attachments.filter((attachment) => attachment.purpose === 'input'),

@@ -55,9 +55,12 @@ import {
   type ValidatedStoredObject,
 } from './storage.js';
 
+/** A composite selected-hook reference that names no hook of this Reel. */
+const PG_FOREIGN_KEY_VIOLATION = '23503';
+
 const REEL_COLUMNS = `
   id, version, title, status, priority, input_note, original_input, script, editing_notes,
-  script_revision, editor_id, current_export, verification, programme_state, programme_attachment,
+  script_revision, editor_id, selected_hook_id, current_export, verification, programme_state, programme_attachment,
   programme_input_hash, programme_document_version_id, kdrive_folder, editing_started_at,
   published_at, publication_urls, publication_description, publication_hashtags,
   feed_cover_done, created_by, created_at, updated_at, deleted_at
@@ -588,6 +591,8 @@ export class CoreRepository {
     const route = `DELETE /reels/${reelId}/hooks/${hookId}`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
       await this.bumpVersion(tx, reelId, request.expectedVersion);
+      // Deleting the selected hook clears `selected_hook_id` in this same statement through
+      // the ON DELETE SET NULL reference; any other selection is left exactly as it was.
       const removed = await tx.query<{ position: number }>(
         'delete from app.reel_hooks where id = $1 and reel_id = $2 returning position',
         [hookId, reelId],
@@ -600,6 +605,36 @@ export class CoreRepository {
         'update app.reel_hooks set position = position - 1 where reel_id = $1 and position > $2',
         [reelId, gone.position],
       );
+      return this.loadReel(tx, reelId);
+    });
+  }
+
+  /**
+   * Explicit hook selection (HOOKS-SELECT-EDIT). Only the ID is stored; `null` clears it.
+   *
+   * The version bump locks the Reel row first, so this serialises with hook deletion, which
+   * bumps the same row. The hook is then checked within this Reel so a wrong ID is a clear
+   * 404, and the composite foreign key refuses any other Reel's, deleted or invented hook
+   * regardless of interleaving. Re-selecting the current hook is still a recorded mutation.
+   * Script, `scriptRevision` and hook provenance are untouched.
+   */
+  async selectHook(
+    actor: Actor, reelId: string,
+    request: { operationId: string; expectedVersion: number; hookId: string | null },
+  ): Promise<Reel> {
+    const route = `PUT /reels/${reelId}/selected-hook`;
+    return this.idempotent(actor, request.operationId, route, request, async (tx) => {
+      await this.bumpVersion(tx, reelId, request.expectedVersion);
+      if (request.hookId !== null) {
+        const hook = await tx.query('select 1 from app.reel_hooks where id = $1 and reel_id = $2', [request.hookId, reelId]);
+        if (hook.rows.length === 0) throw notFound('Hook not found');
+      }
+      try {
+        await tx.query('update app.reels set selected_hook_id = $1 where id = $2', [request.hookId, reelId]);
+      } catch (error) {
+        if (pgErrorCode(error) === PG_FOREIGN_KEY_VIOLATION) throw notFound('Hook not found');
+        throw error;
+      }
       return this.loadReel(tx, reelId);
     });
   }

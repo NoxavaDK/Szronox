@@ -194,6 +194,11 @@ function DetailPreview() {
   const [editor, setEditor] = useState<EditorView | null>(fixtureCurrentUser);
   const [selectionError, setSelectionError] = useState<string | null>(null);
 
+  // HOOKI selection and inline edit, local to the preview (no mutation is sent).
+  const [selectedHookId, setSelectedHookId] = useState<string | null>(null);
+  const [hookEdits, setHookEdits] = useState<Record<string, { text: string; saving: boolean; error: string | null }>>({});
+  const dropHookEdit = (id: string) => setHookEdits(({ [id]: _dropped, ...rest }) => rest);
+
   // Sections.
   const [sourcesExpanded, setSourcesExpanded] = useState(true);
   const [inputNote, setInputNote] = useState('Ważny fragment od 0:42.');
@@ -251,7 +256,21 @@ function DetailPreview() {
       }}
       onOpenFeedCover={() => console.info('open feed cover')}
       hooks={hooks}
-      onRemoveHook={(id) => setHooks((current) => current.filter((hook) => hook.id !== id))}
+      onRemoveHook={(id) => {
+        setHooks((current) => current.filter((hook) => hook.id !== id));
+        if (selectedHookId === id) setSelectedHookId(null);
+      }}
+      selectedHookId={selectedHookId}
+      onSelectHook={(id) => setSelectedHookId((current) => (current === id ? null : id))}
+      hookSelectionPending={false}
+      hookEdits={hookEdits}
+      onStartHookEdit={(id) => setHookEdits((current) => ({ ...current, [id]: { text: hooks.find((hook) => hook.id === id)?.text ?? '', saving: false, error: null } }))}
+      onChangeHookEdit={(id, text) => setHookEdits((current) => ({ ...current, [id]: { ...current[id], text } }))}
+      onSaveHookEdit={(id) => {
+        setHooks((current) => current.map((hook) => (hook.id === id ? { ...hook, text: hookEdits[id]?.text ?? hook.text } : hook)));
+        dropHookEdit(id);
+      }}
+      onCancelHookEdit={dropHookEdit}
       script={script}
       onChangeScript={setScript}
       aiRowEnabled={false}

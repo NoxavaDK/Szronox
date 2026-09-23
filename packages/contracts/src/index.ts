@@ -126,6 +126,11 @@ export interface Reel {
   editingNotes: string;
   editorId: Id | null;
   hooks: ReelHook[];
+  /**
+   * HOOKS-SELECT-EDIT: the one explicitly chosen hook, or null. Always an ID of a hook in
+   * `hooks`; its text is read from that row. Never inferred, and cleared when that hook is deleted.
+   */
+  selectedHookId: Id | null;
   memeIds: Id[];
   attachments: AttachmentReference[];
   currentExport: ExportReference | null;
@@ -189,6 +194,10 @@ export interface ReelPatchRequest extends MutationContext {
 export interface AddHookRequest extends MutationContext { text: string; position?: number }
 export interface EditHookRequest extends MutationContext { text: string }
 export type RemoveHookRequest = MutationContext;
+/** Explicit selection; null clears it. The server resolves the hook within the same Reel. */
+export interface SelectHookRequest extends MutationContext { hookId: Id | null }
+/** The authoritative Reel after selection. */
+export type SelectHookResponse = Reel;
 export interface AttachMemeRequest extends MutationContext { memeId: Id }
 export type DetachMemeRequest = MutationContext;
 /** Validated private image asset; picker creation and attachment commit atomically. */
@@ -221,6 +230,8 @@ export interface AiInputSnapshot {
   script: string;
   scriptRevision: number;
   hooks: Array<Pick<ReelHook, 'id' | 'text' | 'source' | 'position'>>;
+  /** The selected hook at snapshot time; absent in runs recorded before HOOKS-SELECT-EDIT. */
+  selectedHookId?: Id | null;
   inputNote: string;
   publicationDescription: string;
   publicationHashtags: string;

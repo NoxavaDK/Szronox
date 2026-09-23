@@ -28,6 +28,7 @@ export interface ReelRow {
   script_revision: number;
   editing_notes: string;
   editor_id: string | null;
+  selected_hook_id: string | null;
   current_export: ExportReference | null;
   verification: VerificationRecord | null;
   programme_state: Reel['programmeState'];
@@ -138,6 +139,7 @@ export function toReel(
     editingNotes: row.editing_notes,
     editorId: row.editor_id,
     hooks: hooks.map(toHook),
+    selectedHookId: row.selected_hook_id,
     memeIds,
     attachments: attachments.map(toAttachment),
     currentExport: row.current_export,

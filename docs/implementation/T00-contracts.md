@@ -134,6 +134,7 @@ All application routes start `/api/v1`; JSON uses camelCase, SQL uses snake_case
 | POST /reels/:id/delete, /restore | Version-checked soft-delete/restore |
 | POST /reels/:id/hooks | Add user hook; optional insertion position, server validates order |
 | PATCH, DELETE /reels/:id/hooks/:hookId | Version-checked individual text edit/removal |
+| PUT /reels/:id/selected-hook | HOOKS-SELECT-EDIT: `{operationId, expectedVersion, hookId: Id \| null}`; idempotent, version-checked selection of a same-Reel hook or explicit clear; returns the authoritative Reel |
 | GET, POST /memes | Name/metadata search; create with required name and validated imageAssetId, optionally atomic attachToReel; no analytics |
 | POST /reels/:id/memes; DELETE /reels/:id/memes/:memeId | Explicit attach/detach with version check; no library deletion |
 | POST /reels/:id/current-export | Explicit reference replacement; increments export revision |
