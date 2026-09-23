@@ -106,7 +106,7 @@ test('enqueue snapshots every validated input image and refuses pending ones', a
     assert.equal(run.input.attachments.length, 1);
     assert.equal(run.input.attachments[0].storageKey, undefined);
     assert.equal(run.promptStage, 'development_provisional');
-    assert.equal(run.promptId, 'gemini-02-development-provisional-v2');
+    assert.equal(run.promptId, 'gemini-02-development-provisional-v3');
   } finally { await db.close(); }
 });
 
@@ -351,7 +351,9 @@ test('migration 0009 adds the action without touching historical runs', async ()
     await assert.rejects(insert('0b000000-0000-4000-8000-000000000001', 'generate_publication'), 'the previous schema refuses the action');
     await insert('0b000000-0000-4000-8000-000000000002', 'develop', 'succeeded', legacyDevelop);
     const before = await db.query('select * from app.ai_runs order by id');
-    const applied = await migrate(db);
+    // Staged up to 0009 only, so later migrations do not change what this test is about.
+    await copyFile(path.join(defaultMigrationsDir(), '0009_generate_publication_action.sql'), path.join(staged, '0009_generate_publication_action.sql'));
+    const applied = await migrate(db, staged);
     assert.deepEqual(applied.filter((item) => !item.alreadyApplied).map((item) => item.name), ['0009_generate_publication_action.sql']);
     assert.deepEqual((await db.query('select * from app.ai_runs order by id')).rows, before.rows, 'historical rows unchanged');
     await insert('0b000000-0000-4000-8000-000000000003', 'generate_publication');
@@ -363,7 +365,7 @@ test('migration 0009 adds the action without touching historical runs', async ()
     const constraints = await db.query<{ conname: string }>(
       "select conname from pg_constraint where conrelid='app.ai_runs'::regclass and contype='c' and pg_get_constraintdef(oid) like '%action%'");
     assert.deepEqual(constraints.rows.map((row) => row.conname), ['ai_runs_action_check'], 'exactly one action constraint');
-    assert.equal((await migrate(db)).every((item) => item.alreadyApplied), true);
+    assert.equal((await migrate(db, staged)).every((item) => item.alreadyApplied), true);
   } finally { await db.close(); await rm(staged, { recursive: true, force: true }); }
 });
 

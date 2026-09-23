@@ -118,29 +118,85 @@
 .hookRow {
   display: flex;
   align-items: center;
-  gap: var(--sz-space-2);
-  padding: var(--sz-space-2) 0;
+  gap: var(--sz-space-1);
   border-top: 1px solid var(--sz-color-divider);
 }
 
-.hookText {
+/*
+ * Selected: a thin cobalt edge and a faint tint, extended past the text column so the
+ * text itself stays aligned with its neighbours. The visible `✓ WYBRANY` label carries the
+ * meaning; colour is never the only signal and the text is never highlighted.
+ */
+.hookRowSelected {
+  margin: 0 calc(var(--sz-space-2) * -1);
+  padding: 0 0 0 var(--sz-space-2);
+  background: rgba(49, 91, 216, 0.05);
+  box-shadow: inset 2px 0 0 var(--sz-color-cobalt);
+}
+
+/* The whole text area of the row is one generous pointer/touch/keyboard target. */
+.hookSelect {
+  appearance: none;
+  border: none;
+  background: none;
   flex: 1;
+  min-width: 0;
+  min-height: var(--sz-touch-target);
+  padding: var(--sz-space-2) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  font-family: var(--sz-font-family);
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.hookSelect:focus-visible,
+.hookControl:focus-visible,
+.hookEditButton:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: -2px;
+}
+
+.hookSelect:disabled {
+  cursor: progress;
+}
+
+.hookText {
   min-width: 0;
   font-size: var(--sz-text-hook-size);
   line-height: var(--sz-text-hook-line);
   font-weight: var(--sz-text-hook-weight);
+  overflow-wrap: anywhere;
 }
 
+.hookTags {
+  display: inline-flex;
+  gap: var(--sz-space-2);
+}
+
+.hookSelectedTag,
 .hookOwnTag {
-  flex-shrink: 0;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.hookSelectedTag {
   color: var(--sz-color-cobalt);
 }
 
-.hookRemove {
+.hookOwnTag {
+  color: var(--sz-color-text-secondary);
+}
+
+/* Compact visible glyphs (✎, ×) on full-size touch targets. */
+.hookControl {
   appearance: none;
   border: none;
   background: none;
@@ -150,8 +206,76 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 16px;
   color: var(--sz-color-text-secondary);
   cursor: pointer;
+}
+
+.hookEditor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-1);
+  padding: var(--sz-space-2) 0;
+}
+
+.hookEditField {
+  border: none;
+  border-bottom: 1px solid var(--sz-color-cobalt);
+  background: none;
+  font-family: var(--sz-font-family);
+  font-size: var(--sz-text-hook-size);
+  line-height: var(--sz-text-hook-line);
+  font-weight: var(--sz-text-hook-weight);
+  color: var(--sz-color-text-primary);
+  padding: 0 0 2px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  field-sizing: content;
+}
+
+.hookEditField:focus {
+  outline: none;
+}
+
+.hookEditActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sz-space-1);
+}
+
+.hookEditError {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--sz-color-urgent);
+}
+
+.hookEditButton {
+  appearance: none;
+  border: none;
+  background: none;
+  min-height: var(--sz-touch-target);
+  padding: 0 var(--sz-space-2);
+  font-family: var(--sz-font-family);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sz-color-text-secondary);
+  cursor: pointer;
+}
+
+.hookEditDone {
+  color: var(--sz-color-cobalt);
+}
+
+.hookEditButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .scriptField {

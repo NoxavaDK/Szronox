@@ -557,6 +557,14 @@ export interface QuickAddScreenProps {
 
 export type HookView = Pick<ReelHook, 'id' | 'text' | 'source' | 'position'>;
 
+/** An inline edit of one existing hook, kept until Gotowe succeeds or the user cancels. */
+export interface HookEditView {
+  text: string;
+  saving: boolean;
+  /** Truthful Polish reason the last save did not land; the text above is still the user's. */
+  error: string | null;
+}
+
 export interface ReelDetailMetadataView {
   status: ReelStatus;
   statusLabel: string;
@@ -607,6 +615,23 @@ export interface ReelDetailScreenProps {
 
   hooks: HookView[];
   onRemoveHook: (id: Id) => void;
+  /**
+   * HOOKS-SELECT-EDIT. The one explicitly chosen hook, or null — valid and never inferred.
+   * A row tap/Enter/Space selects it; on the already selected row it clears the choice.
+   */
+  selectedHookId: Id | null;
+  onSelectHook: (id: Id) => void;
+  /** A selection request is in flight; rows do not accept another until it answers. */
+  hookSelectionPending: boolean;
+  /**
+   * Inline edits keyed by hook ID. A key with no matching hook is a draft whose hook was
+   * deleted elsewhere; it stays visible so the text is not silently lost.
+   */
+  hookEdits: Record<Id, HookEditView>;
+  onStartHookEdit: (id: Id) => void;
+  onChangeHookEdit: (id: Id, text: string) => void;
+  onSaveHookEdit: (id: Id) => void;
+  onCancelHookEdit: (id: Id) => void;
 
   script: string;
   onChangeScript: (value: string) => void;

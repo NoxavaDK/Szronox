@@ -3,6 +3,7 @@ import type {
   AiAction, AiRun, ApplyAiRequest, AttachMemeRequest, CreateMemeRequest, Meme, StartAiRunRequest,
   ErrorResponse, InitiateAttachmentRequest, InitiateAttachmentResponse, Reel, ReelListQuery,
   ReelPatchRequest, RemoveHookRequest, RenewAttachmentUploadResponse, ReplaceExportRequest,
+  SelectHookRequest, SelectHookResponse,
   UploadTransport, User, VerifyExportRequest,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
@@ -123,6 +124,7 @@ export class CoreApiClient {
   addHook = (id: string, body: AddHookRequest) => this.request<Reel>(`/reels/${id}/hooks`, { method: 'POST', body: JSON.stringify(body) });
   editHook = (id: string, hookId: string, body: EditHookRequest) => this.request<Reel>(`/reels/${id}/hooks/${hookId}`, { method: 'PATCH', body: JSON.stringify(body) });
   removeHook = (id: string, hookId: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/hooks/${hookId}`, { method: 'DELETE', body: JSON.stringify(body) });
+  selectHook = (id: string, body: SelectHookRequest) => this.request<SelectHookResponse>(`/reels/${id}/selected-hook`, { method: 'PUT', body: JSON.stringify(body) });
   remove = (id: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/delete`, { method: 'POST', body: JSON.stringify(body) });
   restore = (id: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/restore`, { method: 'POST', body: JSON.stringify(body) });
   replaceExport = (id: string, body: ReplaceExportRequest) => this.request<Reel>(`/reels/${id}/current-export`, { method: 'POST', body: JSON.stringify(body) });
