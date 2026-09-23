@@ -663,6 +663,13 @@ export interface PublicationSectionProps {
    */
   onCopyDescription: () => void;
 
+  /**
+   * `Wygeneruj opis` (PUBLICATION-01): opens the publication proposal view generated from the
+   * saved script. The host refuses, with an explanation, while any edit is unsaved.
+   */
+  onGeneratePublication?: () => void;
+  generatePublicationEnabled?: boolean;
+
   publishedAt: string | null;
   publicationLinks: PublicationLinkView[];
   onAddPublicationLink: () => void;

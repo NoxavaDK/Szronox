@@ -1,8 +1,13 @@
 import type { ApiError, ErrorCode } from '../../../../packages/contracts/src/index.js';
 
 export class ClientApiError extends Error {
-  constructor(public readonly status: number, public readonly api: ApiError) {
+  // Plain fields rather than parameter properties, so Node's type-stripping test runner can load this module.
+  readonly status: number;
+  readonly api: ApiError;
+  constructor(status: number, api: ApiError) {
     super(api.message);
+    this.status = status;
+    this.api = api;
   }
 }
 
@@ -32,8 +37,14 @@ const messages: Partial<Record<ErrorCode, string>> = {
   INSUFFICIENT_EVIDENCE: 'Brak zatwierdzonego źródła do sprawdzenia postulatu.',
   STALE_FACT_CLAIM: 'Ten fragment zmienił się od sprawdzenia. Sprawdź fakty ponownie.',
   STALE_LANGUAGE_RESULT: 'Skrypt zmienił się od sprawdzenia języka. Sprawdź ponownie.',
+  STALE_PUBLICATION_RESULT: 'Skrypt zmienił się od wygenerowania opisu. Wygeneruj opis ponownie.',
   INTERNAL_ERROR: 'Wystąpił błąd. Spróbuj ponownie.',
 };
+
+/** Shown both before a request (client check) and for the server's own refusal. */
+export const SCRIPT_REQUIRED = 'Najpierw zapisz skrypt. Opis powstaje z zapisanego skryptu.';
+/** Wygeneruj opis never saves or discards edits on the user's behalf. */
+export const UNSAVED_BEFORE_PUBLICATION = 'Najpierw zapisz zmiany. Opis powstaje z zapisanego skryptu, a Twoje zmiany zostały zachowane.';
 
 /**
  * True for a request that was cancelled because the active account changed.
@@ -48,6 +59,8 @@ export function isAbandonedRequest(error: unknown): boolean {
 
 export function polishError(error: unknown): string {
   if (error instanceof ClientApiError) {
+    if (error.api.details?.reason === 'script_required') return SCRIPT_REQUIRED;
+    if (error.api.details?.reason === 'wrong_action') return 'Tej propozycji nie można już zastosować. Użyj „Wygeneruj opis” w sekcji PUBLIKACJA.';
     if (error.api.details?.reason === 'programme_attached') return 'Przypięty postulat pozostaje. Odłącz go osobno, jeśli chcesz usunąć powiązanie.';
     return messages[error.api.code] ?? error.api.message;
   }

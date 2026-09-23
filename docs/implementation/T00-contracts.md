@@ -71,6 +71,15 @@ Use the browser clipboard capability from the explicit user action. Report succe
 
 Future implementation acceptance: the four cases above; exact separator and no added trailing blank lines; current unsaved values used without mutating either field; distinct editable fields retained; clipboard success/failure/unavailable states truthful; manual fallback matches the same composed text; cover pictogram uses neutral/check states and an accessible name without a permanent dense-metadata abbreviation. No other product change or implementation dispatch is authorized.
 
+## PUBLICATION-01 amendment — publication copy is generated separately from Opracuj
+
+Approved 2026-09-22 (`docs/implementation/PUBLICATION-01-opus-handoff.md`); supersedes the combined-generation wording above and in the visual spec for these two fields only. Workflow: `materiały → Opracuj → finalizacja skryptu → Wygeneruj opis → finalizacja publikacji`.
+
+- `Opracuj` (`develop`) no longer asks for, returns or applies publication copy. Its script stays a proposal until explicit `Zastosuj`. Title, hooks (additive), meme, priority and programme hint are unchanged. Historical develop results may still carry publication fields; they stay readable, are not rewritten, and new publication applications from them are rejected (`VALIDATION_ERROR`, `details.reason='wrong_action'`) while already recorded operation replays keep their outcome.
+- `Wygeneruj opis` in `PUBLIKACJA` enqueues the typed action `generate_publication` through the existing run lifecycle. Its only generation input is the saved script, snapshotted server-side with `scriptRevision`; no source retrieval, images or upload gate. An empty/whitespace saved script is refused before any run (`VALIDATION_ERROR`, `details.reason='script_required'`). The client refuses while any edit is unsaved and neither saves nor discards it.
+- Result `PublicationResult`: separate `publicationDescriptionSuggestion` / `publicationHashtagsSuggestion`. Completion writes nothing to the Reel. Each field is applied separately and explicitly with `expectedVersion`, `replaceCurrentValue` and `confirmReplacement`; a filled target asks before replacement. A changed script (text or revision, including edit-and-revert) rejects application with `STALE_PUBLICATION_RESULT`; regenerate. Applying one field does not invalidate the other beyond ordinary version refresh.
+- Prompts remain `development_provisional`. Migration `0009_generate_publication_action.sql` extends the action check additively.
+
 ## Correction 1 — persistent hook shortlist
 
 `ReelHook`: `id`, `reelId`, `text`, `source: user | ai`, `position`, `createdAt`. SQL names are snake_case. A Reel has zero or more active hooks; there is no singular authoritative `hook` field, selected-hook field or use-hook endpoint.

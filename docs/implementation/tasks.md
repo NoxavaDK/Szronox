@@ -56,3 +56,7 @@ Result: `.worktrees/vps-reconcile/docs/implementation/VPS-integration-result.md`
 ## VPS-04 continuation
 
 Dispatched /root/vps04_runtime on gpt-5.6-sol/high after explicit approval and Continue. Worktree .worktrees/vps-04-runtime, branch codex/vps-04-runtime. Existing Opus runtime commit 346f0e7 is preserved; root pinned clarifications at 77e33ba498284555b30b3fa74eedcf0f8531a0a8. Sol is limited to finishing approved work and concrete clarification gaps, with targeted checks only. After handoff root performs bounded review and prepares VPS-05 for explicit approval.
+
+## PUBLICATION-01
+
+Approved by the user on 2026-09-22 as a bounded manual Opus implementation with merge and DEV deployment (`PUBLICATION-01-opus-handoff.md`). Publication copy moves from Opracuj to the separate `generate_publication` action behind `Wygeneruj opis` in PUBLIKACJA; see the T00 PUBLICATION-01 amendment. Result: `PUBLICATION-01-result.md`.

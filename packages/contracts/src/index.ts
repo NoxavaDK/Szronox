@@ -212,7 +212,7 @@ export interface ReplaceExportRequest extends MutationContext {
 export interface VerifyExportRequest extends MutationContext { exportRevision: number }
 /** Explicit Odłącz: clear the programme association without starting search. */
 export type DetachProgrammeRequest = MutationContext;
-export type AiAction = 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme';
+export type AiAction = 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'generate_publication';
 export type AiJobState = 'queued' | 'running' | 'succeeded' | 'failed';
 export interface AiInputSnapshot {
   reelVersion: number;
@@ -231,14 +231,17 @@ export interface AiInputSnapshot {
   memeCandidates: Array<Pick<Meme, 'id' | 'name' | 'thumbnailRef'>>;
   programmeDocumentVersionId: Id | null;
 }
+/**
+ * PUBLICATION-01: Opracuj no longer drafts publication copy. Historical stored develop results
+ * may still carry publicationDescriptionSuggestion/publicationHashtagsSuggestion; they are
+ * ignored and can no longer be applied.
+ */
 export interface DevelopResult {
   titleSuggestion: string;
   eventSummary: string;
   verificationIssues: string[];
   hookAdditions: string[];
   scriptSuggestion: string;
-  publicationDescriptionSuggestion: string;
-  publicationHashtagsSuggestion: string;
   possibleProgrammeConnection: string | null;
   prioritySuggestion: { priority: Priority; rationale: string } | null;
   memeSuggestion: MemeSuggestion | null;
@@ -290,6 +293,11 @@ export interface FactCheckResult {
 }
 /** Version A starts from run.input.script; B from scriptSuggestion. Edits are local drafts. */
 export interface LanguageResult { scriptSuggestion: string; notes: string[] }
+/**
+ * Wygeneruj opis: two separate proposals from the server-snapshotted saved script. Neither is
+ * persisted until explicitly applied per field.
+ */
+export interface PublicationResult { publicationDescriptionSuggestion: string; publicationHashtagsSuggestion: string }
 /** Zero to three candidates; an empty result never mutates Reel programme state. */
 export interface ProgrammeResult { candidates: ProgrammeMatch[] }
 export interface AiResultMap {
@@ -298,6 +306,7 @@ export interface AiResultMap {
   fact_check: FactCheckResult;
   language_check: LanguageResult;
   find_programme: ProgrammeResult;
+  generate_publication: PublicationResult;
 }
 export interface StartAiRunRequest extends MutationContext { action: AiAction }
 export interface AiRunBase {
@@ -324,6 +333,7 @@ export type ApplyAiRequest = MutationContext & (
   | { selection: 'title'; text: string }
   | { selection: 'script'; text: string }
   | { selection: 'priority'; priority: Priority }
+  /** Publication selections apply only generate_publication runs, never legacy develop runs. */
   | { selection: 'publication_description'; text: string; replaceCurrentValue: string; confirmReplacement: true }
   | { selection: 'publication_hashtags'; text: string; replaceCurrentValue: string; confirmReplacement: true }
   | { selection: 'programme_match'; candidateId: Id }
@@ -340,6 +350,7 @@ export type ErrorCode =
   | 'EDITOR_REQUIRED'
   | 'STALE_FACT_CLAIM'
   | 'STALE_LANGUAGE_RESULT'
+  | 'STALE_PUBLICATION_RESULT'
   | 'SOURCE_UNSUPPORTED' | 'SOURCE_UNAVAILABLE' | 'SOURCE_ACCESS_DENIED'
   | 'SOURCE_TOO_LARGE' | 'SOURCE_TEXT_TOO_LONG' | 'SOURCE_TEXT_UNAVAILABLE'
   | 'UPLOAD_INCOMPLETE' | 'UNSUPPORTED_INPUT' | 'PROVIDER_UNAVAILABLE'

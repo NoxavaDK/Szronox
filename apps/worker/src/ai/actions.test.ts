@@ -3,7 +3,9 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import type { Pool } from 'pg';
 import { executeAction, type WorkRun } from './actions.js';
+import { finishRun } from './jobs.js';
 
 const candidate = (value: unknown) => ({
   candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(value) }] } }],
@@ -16,28 +18,73 @@ function run(action: string): WorkRun {
       memeCandidates: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Znany mem' }], programmeEvidence: [] } };
 }
 
-test('develop validates the bounded candidate ID and preserves separate publication drafts', async () => {
+test('develop validates the bounded candidate ID and no longer drafts publication copy', async () => {
   const storageRoot = await mkdtemp(path.join(tmpdir(), 'szronox-ai-actions-'));
   try {
     await mkdir(path.join(storageRoot, 'objects'));
     const input = run('develop');
-    let inspected = false;
+    let prompt = '';
+    let schema = '';
     const work = await executeAction(input, { storageRoot, call: async (_model, request) => {
-      inspected = true;
       assert.equal((request.generationConfig as { responseMimeType: string }).responseMimeType, 'application/json');
+      prompt = (request.contents as Array<{ parts: Array<{ text: string }> }>)[0].parts[0].text;
+      schema = JSON.stringify((request.generationConfig as { responseJsonSchema: unknown }).responseJsonSchema);
+      // A model that still volunteers publication copy has it dropped, never passed on.
       return candidate({ titleSuggestion: 'Tytuł', eventSummary: 'Zdarzenie', verificationIssues: [],
         hookAdditions: ['Hook 1', 'Hook 2'], scriptSuggestion: 'Scenariusz',
-        publicationDescriptionSuggestion: 'Osobny opis', publicationHashtagsSuggestion: '#osobno',
+        publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag',
         possibleProgrammeConnection: null, prioritySuggestion: null,
         memeSuggestion: { memeId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', rationale: 'Powód' } });
     } });
-    assert.equal(inspected, true);
-    const result = work.result as { memeSuggestion: unknown; publicationDescriptionSuggestion: string; publicationHashtagsSuggestion: string; hookAdditions: string[] };
+    const result = work.result as Record<string, unknown>;
     assert.equal(result.memeSuggestion, null, 'unlisted meme ID cannot escape as a suggestion');
-    assert.equal(result.publicationDescriptionSuggestion, 'Osobny opis');
-    assert.equal(result.publicationHashtagsSuggestion, '#osobno');
     assert.deepEqual(result.hookAdditions, ['Hook 1', 'Hook 2']);
+    assert.equal('publicationDescriptionSuggestion' in result, false);
+    assert.equal('publicationHashtagsSuggestion' in result, false);
+    assert.equal(/publication|hashtag/i.test(prompt), false, 'prompt no longer asks for publication copy');
+    assert.equal(/publication/i.test(schema), false, 'schema no longer carries publication fields');
   } finally { await rm(storageRoot, { recursive: true, force: true }); }
+});
+
+test('generate_publication writes from the saved script only, without source retrieval or images', async () => {
+  const input = run('generate_publication');
+  input.input_snapshot.script = 'Zapisany skrypt o tramwajach.';
+  input.input_snapshot.originalInput = { text: 'Materiał źródłowy XYZ', url: 'http://127.0.0.1/private' };
+  // Would fail if read: the storage root is relative and the object does not exist.
+  input.input_snapshot.imageObjects = [{ id: 'i', storageKey: 'missing', mimeType: 'image/png', byteSize: 1 }];
+  const requests: Array<Record<string, unknown>> = [];
+  const work = await executeAction(input, { storageRoot: 'relative', call: async (_model, request) => {
+    requests.push(request);
+    return candidate({ publicationDescriptionSuggestion: 'Opis rolki', publicationHashtagsSuggestion: '#tramwaje', titleSuggestion: 'Ignoruj' });
+  } });
+  assert.equal(requests.length, 1);
+  const parts = (requests[0].contents as Array<{ parts: Array<{ text?: string; inlineData?: unknown }> }>)[0].parts;
+  assert.equal(parts.length, 1, 'no image parts');
+  assert.ok(parts[0].text?.includes('Zapisany skrypt o tramwajach.'));
+  assert.equal(parts[0].text?.includes('Materiał źródłowy XYZ'), false, 'original materials are not substituted');
+  assert.ok(parts[0].text?.startsWith('Provisional development prompt.'));
+  assert.deepEqual(work.result, { publicationDescriptionSuggestion: 'Opis rolki', publicationHashtagsSuggestion: '#tramwaje' });
+  assert.equal((work.provenance as { source: unknown }).source, null);
+  assert.deepEqual((work.provenance as { images: unknown[] }).images, []);
+  await assert.rejects(executeAction(input, { storageRoot: 'relative', call: async () =>
+    candidate({ publicationDescriptionSuggestion: '  ', publicationHashtagsSuggestion: '#x' }) }),
+  (error: { code?: string }) => error.code === 'INVALID_AI_RESULT');
+});
+
+test('finalizing generate_publication stores the result and mutates no Reel content', async () => {
+  const statements: string[] = [];
+  const query = async (sql: string) => {
+    statements.push(sql.replace(/\s+/g, ' ').trim());
+    if (sql.startsWith('select state,lease_token')) return { rows: [{ state: 'running', lease_token: 'token' }], rowCount: 1 };
+    if (sql.startsWith('select id,deleted_at')) return { rows: [{ id: 'reel', deleted_at: null }], rowCount: 1 };
+    return { rows: [], rowCount: 1 };
+  };
+  const pool = { connect: async () => ({ query, release: () => undefined }), query } as unknown as Pool;
+  const claimed = { ...run('generate_publication'), lease_token: 'token', attempt_count: 1, reel_id: 'reel' };
+  const result = { publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' };
+  assert.equal(await finishRun(pool, claimed, { result, warnings: [], provenance: {} }), true);
+  assert.equal(statements.some((sql) => /reel_hooks|update app\.reels/.test(sql)), false, 'no hook append or Reel write');
+  assert.ok(statements.some((sql) => sql.startsWith("update app.ai_runs set state='succeeded'")));
 });
 
 test('fact check downgrades unsupported factual status while retaining exact checked span', async () => {
