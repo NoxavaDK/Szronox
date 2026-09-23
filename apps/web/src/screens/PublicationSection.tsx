@@ -14,7 +14,7 @@ export function PublicationSection(props: PublicationSectionProps) {
     feedCoverDone, hasFeedCoverAsset, onToggleFeedCoverDone, onAddOrChangeFeedCoverAsset, onOpenFeedCoverAsset,
     description, onChangeDescription,
     hashtags, onChangeHashtags,
-    onCopyDescription,
+    onCopyDescription, onGeneratePublication, generatePublicationEnabled,
     publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
   } = props;
 
@@ -57,6 +57,9 @@ export function PublicationSection(props: PublicationSectionProps) {
       </div>
 
       <TextAction onClick={onCopyDescription}>Kopiuj opis</TextAction>
+      {onGeneratePublication ? (
+        <TextAction onClick={onGeneratePublication} disabled={!generatePublicationEnabled}>Wygeneruj opis</TextAction>
+      ) : null}
 
       <div className={styles.block}>
         <span className={styles.label}>Po publikacji</span>

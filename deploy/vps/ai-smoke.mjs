@@ -126,9 +126,11 @@ if (developRun.state === 'succeeded') {
   ok('S2 result carries all frozen fields',
     typeof r.titleSuggestion === 'string' && typeof r.eventSummary === 'string' &&
     Array.isArray(r.verificationIssues) && Array.isArray(r.hookAdditions) &&
-    typeof r.scriptSuggestion === 'string' && typeof r.publicationDescriptionSuggestion === 'string' &&
-    typeof r.publicationHashtagsSuggestion === 'string',
+    typeof r.scriptSuggestion === 'string',
     `hooks=${r.hookAdditions.length} scriptChars=${r.scriptSuggestion.length}`);
+  // PUBLICATION-01: Opracuj no longer drafts publication copy.
+  ok('S2 develop result carries no publication proposals',
+    !('publicationDescriptionSuggestion' in r) && !('publicationHashtagsSuggestion' in r), '');
   ok('S2 at most three hook additions', r.hookAdditions.length <= 3, `count=${r.hookAdditions.length}`);
   ok('S2 meme suggestion is null or a real candidate',
     r.memeSuggestion === null || developRun.input.memeCandidateIds.includes(r.memeSuggestion.memeId),
@@ -167,16 +169,38 @@ if (developRun.state === 'succeeded') {
     `status=${appliedTitle.status}`);
   current = appliedTitle.json;
 
-  const wrongBaseline = await call('POST', `/api/v1/ai-runs/${developRun.id}/apply`, {
+  const fromDevelop = await call('POST', `/api/v1/ai-runs/${developRun.id}/apply`, {
     operationId: randomUUID(), expectedVersion: current.version, selection: 'publication_description',
-    text: r.publicationDescriptionSuggestion, replaceCurrentValue: 'coś zupełnie innego', confirmReplacement: true,
+    text: 'z Opracuj', replaceCurrentValue: AUTHORED_DESCRIPTION, confirmReplacement: true,
+  });
+  ok('S3 publication apply REFUSED from an Opracuj run',
+    fromDevelop.status === 422 && fromDevelop.json?.error?.details?.reason === 'wrong_action',
+    `status=${fromDevelop.status} code=${fromDevelop.json?.error?.code}`);
+
+  // Wygeneruj opis: a separate action over the saved script.
+  const publicationQueued = await call('POST', `/api/v1/reels/${textReelId}/ai-runs`, {
+    operationId: randomUUID(), expectedVersion: current.version, action: 'generate_publication',
+  });
+  const publicationRun = await waitForRun(publicationQueued.json?.id);
+  ok('S3 generate_publication completed', publicationRun.state === 'succeeded',
+    `state=${publicationRun.state} error=${publicationRun.error?.code ?? 'none'}`);
+  const p = publicationRun.result ?? { publicationDescriptionSuggestion: '', publicationHashtagsSuggestion: '' };
+  ok('S3 publication run snapshots the saved script', publicationRun.input?.script === AUTHORED_SCRIPT, '');
+  const untouched = (await call('GET', `/api/v1/reels/${textReelId}`)).json;
+  ok('S3 generation persisted nothing',
+    untouched.publicationDescription === AUTHORED_DESCRIPTION && untouched.publicationHashtags === '' &&
+    untouched.version === current.version, '');
+
+  const wrongBaseline = await call('POST', `/api/v1/ai-runs/${publicationRun.id}/apply`, {
+    operationId: randomUUID(), expectedVersion: current.version, selection: 'publication_description',
+    text: p.publicationDescriptionSuggestion, replaceCurrentValue: 'coś zupełnie innego', confirmReplacement: true,
   });
   ok('S3 publication replacement REFUSED on a stale baseline',
     wrongBaseline.status === 409 && wrongBaseline.json?.error?.code === 'EDIT_CONFLICT',
     `status=${wrongBaseline.status} code=${wrongBaseline.json?.error?.code}`);
-  const unconfirmed = await call('POST', `/api/v1/ai-runs/${developRun.id}/apply`, {
+  const unconfirmed = await call('POST', `/api/v1/ai-runs/${publicationRun.id}/apply`, {
     operationId: randomUUID(), expectedVersion: current.version, selection: 'publication_description',
-    text: r.publicationDescriptionSuggestion, replaceCurrentValue: AUTHORED_DESCRIPTION,
+    text: p.publicationDescriptionSuggestion, replaceCurrentValue: AUTHORED_DESCRIPTION,
   });
   ok('S3 publication replacement REFUSED without explicit confirmation',
     unconfirmed.status === 422 && unconfirmed.json?.error?.code === 'VALIDATION_ERROR',
@@ -184,14 +208,22 @@ if (developRun.state === 'succeeded') {
   const stillThere = (await call('GET', `/api/v1/reels/${textReelId}`)).json;
   ok('S3 authored description survived both refusals', stillThere.publicationDescription === AUTHORED_DESCRIPTION, '');
 
-  const confirmed = await call('POST', `/api/v1/ai-runs/${developRun.id}/apply`, {
+  const confirmed = await call('POST', `/api/v1/ai-runs/${publicationRun.id}/apply`, {
     operationId: randomUUID(), expectedVersion: stillThere.version, selection: 'publication_description',
-    text: r.publicationDescriptionSuggestion, replaceCurrentValue: AUTHORED_DESCRIPTION, confirmReplacement: true,
+    text: p.publicationDescriptionSuggestion, replaceCurrentValue: AUTHORED_DESCRIPTION, confirmReplacement: true,
   });
   ok('S3 confirmed publication replacement applies',
-    confirmed.status === 200 && confirmed.json.publicationDescription === r.publicationDescriptionSuggestion,
+    confirmed.status === 200 && confirmed.json.publicationDescription === p.publicationDescriptionSuggestion,
     `status=${confirmed.status}`);
   current = confirmed.json;
+  const hashtags = await call('POST', `/api/v1/ai-runs/${publicationRun.id}/apply`, {
+    operationId: randomUUID(), expectedVersion: current.version, selection: 'publication_hashtags',
+    text: p.publicationHashtagsSuggestion, replaceCurrentValue: '', confirmReplacement: true,
+  });
+  ok('S3 hashtags from the same run apply after the description',
+    hashtags.status === 200 && hashtags.json.publicationHashtags === p.publicationHashtagsSuggestion &&
+    hashtags.json.script === AUTHORED_SCRIPT, `status=${hashtags.status}`);
+  if (hashtags.status === 200) current = hashtags.json;
 
   // ── S4. Wygeneruj więcej — additive hooks ───────────────────────────────────
   const hooksBefore = current.hooks.map((hook) => ({ id: hook.id, text: hook.text, position: hook.position }));

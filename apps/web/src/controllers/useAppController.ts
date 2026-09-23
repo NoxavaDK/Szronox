@@ -590,8 +590,16 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     await recover();
   }, [auth, clearAccountView, recover]);
 
+  /**
+   * Whether any Reel edit has not reached the server yet: debounced, in flight, conflicted,
+   * queued or held offline. Server-side generation reads only saved content, so it is refused
+   * rather than run against text the user no longer sees — and the edit itself is kept.
+   */
+  const hasUnsavedChanges = useCallback(() => pendingPatch.current !== null ||
+    ['saving', 'conflict', 'offline', 'error'].includes(saveState) || conflict !== null, [conflict, saveState]);
+
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
   return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, deleteCurrent, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
-    patchReelById, removeReelById, copyReelLink };
+    patchReelById, removeReelById, copyReelLink, hasUnsavedChanges };
 }

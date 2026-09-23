@@ -5,7 +5,7 @@ import { CoreError, internalError, validationError } from '../core/errors.js';
 import { readArchivedFile } from './corpus/archive.js';
 import { resolveActiveRelease } from './corpus/repository.js';
 import { resolveArchivedSource } from './corpus/retrieval.js';
-import { AiService } from './service.js';
+import { ACTIONS, AiService } from './service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function uuid(value: unknown): string {
@@ -93,7 +93,7 @@ export function registerAiRoutes(app: FastifyInstance, dependencies: CoreDepende
     const actor = await dependencies.authenticate(request);
     const id = uuid((request.params as { id: string }).id);
     const action = (request.query as { action?: AiAction })?.action;
-    if (action && !['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme'].includes(action)) {
+    if (action && !ACTIONS.includes(action)) {
       throw validationError('Unknown AI action');
     }
     return { run: await service.latest(actor, id, action) };

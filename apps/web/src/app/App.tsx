@@ -8,6 +8,7 @@ import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import type { AttachmentRecovery } from '../data/attachment-recovery.js';
 import { reelLabel } from '../data/reel-label.js';
+import { SCRIPT_REQUIRED, UNSAVED_BEFORE_PUBLICATION } from '../data/errors.js';
 import { useAppController } from '../controllers/useAppController.js';
 import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
@@ -121,7 +122,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
    * `Opracuj` path sets the new route and then `aiView` in a later microtask, and a passive
    * effect would run after both and wipe the workspace the user explicitly asked for.
    */
-  const [aiView, setAiView] = useState<{ reelId: string; view: 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'attached_programme'; autoStart: boolean } | null>(null);
+  const [aiView, setAiView] = useState<{ reelId: string; view: 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'generate_publication' | 'attached_programme'; autoStart: boolean } | null>(null);
   const [memeReelId, setMemeReelId] = useState<string | null>(null);
   const [memeNames, setMemeNames] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -434,6 +435,15 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         hashtags: reel.publicationHashtags,
         onChangeHashtags: (publicationHashtags) => c.changeReel({ publicationHashtags }),
         onCopyDescription: () => void c.copyPublication(),
+        generatePublicationEnabled: aiCapability.enabled,
+        onGeneratePublication: () => {
+          // Generation reads the saved script only: unsaved edits are neither saved nor
+          // discarded here, and an empty saved script is refused before any request.
+          if (c.hasUnsavedChanges()) { c.setMessage(UNSAVED_BEFORE_PUBLICATION); return; }
+          if (reel.script.trim().length === 0) { c.setMessage(SCRIPT_REQUIRED); return; }
+          c.setMessage(null);
+          setAiView({ reelId: reel.id, view: 'generate_publication', autoStart: false });
+        },
         publishedAt: reel.publishedAt,
         publicationLinks: reel.publicationUrls.map((url, index) => ({ id: `${index}`, url })),
         onAddPublicationLink: () => {

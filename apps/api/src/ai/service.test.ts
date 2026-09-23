@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { pgliteDatabase } from '../db/client.js';
-import { migrate } from '../db/migrate.js';
+import { mkdtemp, readdir, copyFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { payloadHash } from '../core/repository.js';
+import { defaultMigrationsDir, migrate } from '../db/migrate.js';
 import { AiService } from './service.js';
 
 const user = '11111111-1111-4111-8111-111111111111';
@@ -105,31 +109,261 @@ test('enqueue snapshots every validated input image and refuses pending ones', a
   } finally { await db.close(); }
 });
 
+const publicationProposal = { publicationDescriptionSuggestion: 'Opis AI', publicationHashtagsSuggestion: '#AI' };
+const legacyDevelop = { titleSuggestion: 'Tytuł', eventSummary: 'Podsumowanie', verificationIssues: [], hookAdditions: [],
+  scriptSuggestion: 'Nowy skrypt.', publicationDescriptionSuggestion: 'Opis z Opracuj', publicationHashtagsSuggestion: '#stare',
+  possibleProgrammeConnection: null, prioritySuggestion: null, memeSuggestion: null };
+const reelRow = async (db: Awaited<ReturnType<typeof setup>>['db']) => (await db.query<{
+  version: number; script: string; script_revision: number; publication_description: string; publication_hashtags: string; title: string;
+}>('select version,script,script_revision,publication_description,publication_hashtags,title from app.reels where id=$1', [reelId])).rows[0];
+const code = (expected: string) => (error: { code?: string }) => error.code === expected;
+
+async function publicationRun(db: Awaited<ReturnType<typeof setup>>['db'], service: AiService, operationId: string, expectedVersion = 1) {
+  const run = await service.enqueue(actor, reelId, { operationId, expectedVersion, action: 'generate_publication' });
+  await db.query("update app.ai_runs set state='succeeded',result=$2,completed_at=now() where id=$1", [run.id, JSON.stringify(publicationProposal)]);
+  return run.id;
+}
+
 test('publication application requires explicit current-value confirmation after a changed saved field', async () => {
   const { db, service } = await setup();
   try {
-    await readyInput(db);
-    const run = await service.enqueue(actor, reelId, {
-      operationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', expectedVersion: 1, action: 'develop',
-    });
-    await db.query(`update app.ai_runs set state='succeeded',result=$2,completed_at=now() where id=$1`, [run.id,
-      JSON.stringify({ titleSuggestion: 'Tytuł', eventSummary: 'Podsumowanie', verificationIssues: [], hookAdditions: [],
-        scriptSuggestion: 'Nowy skrypt.', publicationDescriptionSuggestion: 'Opis AI', publicationHashtagsSuggestion: '#AI',
-        possibleProgrammeConnection: null, prioritySuggestion: null, memeSuggestion: null })]);
+    const runId = await publicationRun(db, service, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd');
     await db.query("update app.reels set publication_description='Opis użytkownika',version=2 where id=$1", [reelId]);
-    await assert.rejects(service.apply(actor, run.id, {
+    await assert.rejects(service.apply(actor, runId, {
       operationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', expectedVersion: 2,
       selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
-    }), (error: { code?: string }) => error.code === 'EDIT_CONFLICT');
-    const value = await db.query<{ publication_description: string }>('select publication_description from app.reels where id=$1', [reelId]);
-    assert.equal(value.rows[0].publication_description, 'Opis użytkownika');
-    const saved = await service.apply(actor, run.id, {
+    }), code('EDIT_CONFLICT'));
+    assert.equal((await reelRow(db)).publication_description, 'Opis użytkownika');
+    const saved = await service.apply(actor, runId, {
       operationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', expectedVersion: 2,
       selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: 'Opis użytkownika', confirmReplacement: true,
     });
     assert.equal(saved.publicationDescription, 'Opis AI');
     assert.equal(saved.version, 3);
   } finally { await db.close(); }
+});
+
+test('generate_publication snapshots the saved script only and ignores incomplete uploads', async () => {
+  const { db, service } = await setup();
+  try {
+    // The input image is still pending: irrelevant to a script-based action.
+    const queued = await service.enqueue(actor, reelId, {
+      operationId: '05000000-0000-4000-8000-000000000001', expectedVersion: 1, action: 'generate_publication',
+    });
+    const stored = await db.query<{ action: string; input_snapshot: { script: string; scriptRevision: number; imageObjects: unknown[] } }>(
+      'select action,input_snapshot from app.ai_runs where id=$1', [queued.id]);
+    assert.equal(stored.rows[0].action, 'generate_publication');
+    assert.equal(stored.rows[0].input_snapshot.script, 'Stary skrypt.');
+    assert.equal(stored.rows[0].input_snapshot.scriptRevision, 0);
+    assert.deepEqual(stored.rows[0].input_snapshot.imageObjects, []);
+    // Other actions keep their upload gate.
+    await assert.rejects(service.enqueue(actor, reelId, {
+      operationId: '05000000-0000-4000-8000-000000000002', expectedVersion: 1, action: 'develop',
+    }), code('UPLOAD_INCOMPLETE'));
+    const latest = await service.latest(actor, reelId, 'generate_publication');
+    assert.equal(latest?.id, queued.id);
+    assert.equal((await service.latest(actor, reelId, 'develop')), null);
+  } finally { await db.close(); }
+});
+
+test('an empty or whitespace-only saved script is refused before any run exists', async () => {
+  const { db, service } = await setup();
+  try {
+    for (const [index, script] of ['', '  \n\t '].entries()) {
+      await db.query('update app.reels set script=$2 where id=$1', [reelId, script]);
+      await assert.rejects(service.enqueue(actor, reelId, {
+        operationId: `05000000-0000-4000-8000-00000000001${index}`, expectedVersion: 1, action: 'generate_publication',
+      }), (error: { code?: string; details?: { reason?: string } }) => error.code === 'VALIDATION_ERROR' && error.details?.reason === 'script_required');
+    }
+    const runs = await db.query('select id from app.ai_runs');
+    assert.equal(runs.rows.length, 0);
+  } finally { await db.close(); }
+});
+
+test('completion writes nothing; each field applies separately and the second survives the first version bump', async () => {
+  const { db, service } = await setup();
+  try {
+    const runId = await publicationRun(db, service, '06000000-0000-4000-8000-000000000001');
+    const before = await reelRow(db);
+    assert.equal(before.publication_description, '');
+    assert.equal(before.publication_hashtags, '');
+    assert.equal(before.version, 1);
+    const run = await service.get(actor, runId);
+    assert.equal(run.isStale, false);
+    assert.deepEqual(Object.keys(run.result ?? {}).sort(), ['publicationDescriptionSuggestion', 'publicationHashtagsSuggestion']);
+    // Empty target, edited output, explicit application of one field only.
+    const description = await service.apply(actor, runId, {
+      operationId: '06000000-0000-4000-8000-000000000002', expectedVersion: 1,
+      selection: 'publication_description', text: 'Opis AI (poprawiony)', replaceCurrentValue: '', confirmReplacement: true,
+    });
+    assert.equal(description.publicationDescription, 'Opis AI (poprawiony)');
+    assert.equal(description.publicationHashtags, '');
+    // The browser's old version is refused; refreshed authoritative state succeeds.
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '06000000-0000-4000-8000-000000000003', expectedVersion: 1,
+      selection: 'publication_hashtags', text: '#AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('EDIT_CONFLICT'));
+    const hashtags = await service.apply(actor, runId, {
+      operationId: '06000000-0000-4000-8000-000000000004', expectedVersion: description.version,
+      selection: 'publication_hashtags', text: '#AI', replaceCurrentValue: '', confirmReplacement: true,
+    });
+    assert.equal(hashtags.publicationDescription, 'Opis AI (poprawiony)');
+    assert.equal(hashtags.publicationHashtags, '#AI');
+    const after = await reelRow(db);
+    assert.equal(after.script, 'Stary skrypt.');
+    assert.equal(after.script_revision, 0);
+    assert.equal(after.title, before.title);
+    // Unconfirmed replacement is refused.
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '06000000-0000-4000-8000-000000000005', expectedVersion: hashtags.version,
+      selection: 'publication_hashtags', text: '#Inne', replaceCurrentValue: '#AI',
+    } as never), code('VALIDATION_ERROR'));
+    // A publication run cannot apply script, title or priority.
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '06000000-0000-4000-8000-000000000006', expectedVersion: hashtags.version,
+      selection: 'script', text: 'Obcy skrypt.',
+    }), code('STALE_FACT_CLAIM'));
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '06000000-0000-4000-8000-000000000007', expectedVersion: hashtags.version,
+      selection: 'title', text: 'Obcy tytuł',
+    }), code('STALE_FACT_CLAIM'));
+    assert.equal((await reelRow(db)).script, 'Stary skrypt.');
+  } finally { await db.close(); }
+});
+
+test('an intervening target edit is protected and the proposal stays applicable after refresh', async () => {
+  const { db, service } = await setup();
+  try {
+    const runId = await publicationRun(db, service, '07000000-0000-4000-8000-000000000001');
+    // Another device writes hashtags between generation and application.
+    await db.query("update app.reels set publication_hashtags='#ręczne',version=version+1 where id=$1", [reelId]);
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '07000000-0000-4000-8000-000000000002', expectedVersion: 2,
+      selection: 'publication_hashtags', text: '#AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('EDIT_CONFLICT'));
+    assert.equal((await reelRow(db)).publication_hashtags, '#ręczne');
+    const replaced = await service.apply(actor, runId, {
+      operationId: '07000000-0000-4000-8000-000000000003', expectedVersion: 2,
+      selection: 'publication_hashtags', text: '#AI', replaceCurrentValue: '#ręczne', confirmReplacement: true,
+    });
+    assert.equal(replaced.publicationHashtags, '#AI');
+  } finally { await db.close(); }
+});
+
+test('a script change, including edit-and-revert, invalidates publication application', async () => {
+  const { db, service } = await setup();
+  try {
+    const runId = await publicationRun(db, service, '08000000-0000-4000-8000-000000000001');
+    await db.query("update app.reels set script='Inny.',script_revision=script_revision+1,version=version+1 where id=$1", [reelId]);
+    assert.equal((await service.get(actor, runId)).isStale, true);
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '08000000-0000-4000-8000-000000000002', expectedVersion: 2,
+      selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
+    await db.query("update app.reels set script='Stary skrypt.',script_revision=script_revision+1,version=version+1 where id=$1", [reelId]);
+    assert.equal((await service.get(actor, runId)).isStale, true, 'revision detects edit-and-revert');
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '08000000-0000-4000-8000-000000000003', expectedVersion: 3,
+      selection: 'publication_hashtags', text: '#AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
+    const row = await reelRow(db);
+    assert.equal(row.publication_description, '');
+    assert.equal(row.publication_hashtags, '');
+    // An unrelated metadata change is ordinary version handling, not staleness.
+    const fresh = await publicationRun(db, service, '08000000-0000-4000-8000-000000000004', 3);
+    await db.query("update app.reels set priority='urgent',version=version+1 where id=$1", [reelId]);
+    assert.equal((await service.get(actor, fresh)).isStale, false);
+    const applied = await service.apply(actor, fresh, {
+      operationId: '08000000-0000-4000-8000-000000000005', expectedVersion: 4,
+      selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
+    });
+    assert.equal(applied.publicationDescription, 'Opis AI');
+  } finally { await db.close(); }
+});
+
+test('publication apply replays a duplicate operation and refuses a changed payload', async () => {
+  const { db, service } = await setup();
+  try {
+    const runId = await publicationRun(db, service, '09000000-0000-4000-8000-000000000001');
+    const request = { operationId: '09000000-0000-4000-8000-000000000002', expectedVersion: 1,
+      selection: 'publication_description' as const, text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true as const };
+    const first = await service.apply(actor, runId, request);
+    const replay = await service.apply(actor, runId, request);
+    assert.equal(replay.version, first.version);
+    assert.equal((await reelRow(db)).version, 2, 'a replay writes nothing');
+    await assert.rejects(service.apply(actor, runId, { ...request, text: 'Inny opis' }), code('IDEMPOTENCY_CONFLICT'));
+    const enqueue = { operationId: '09000000-0000-4000-8000-000000000003', expectedVersion: 2, action: 'generate_publication' as const };
+    const queued = await service.enqueue(actor, reelId, enqueue);
+    assert.equal((await service.enqueue(actor, reelId, enqueue)).id, queued.id);
+    await assert.rejects(service.enqueue(actor, reelId, { ...enqueue, action: 'language_check' }), code('IDEMPOTENCY_CONFLICT'));
+  } finally { await db.close(); }
+});
+
+test('legacy develop publication drafts stay readable, cannot be newly applied, and keep recorded replays', async () => {
+  const { db, service } = await setup();
+  try {
+    await readyInput(db);
+    const legacy = await service.enqueue(actor, reelId, {
+      operationId: '0a000000-0000-4000-8000-000000000001', expectedVersion: 1, action: 'develop',
+    });
+    await db.query("update app.ai_runs set state='succeeded',result=$2,completed_at=now() where id=$1", [legacy.id, JSON.stringify(legacyDevelop)]);
+    const read = await service.get(actor, legacy.id);
+    assert.equal(read.action, 'develop');
+    assert.equal((read.result as unknown as Record<string, unknown>).publicationDescriptionSuggestion, 'Opis z Opracuj', 'stored result is not rewritten');
+    await assert.rejects(service.apply(actor, legacy.id, {
+      operationId: '0a000000-0000-4000-8000-000000000002', expectedVersion: 1,
+      selection: 'publication_description', text: 'Opis z Opracuj', replaceCurrentValue: '', confirmReplacement: true,
+    }), (error: { code?: string; details?: { reason?: string } }) => error.code === 'VALIDATION_ERROR' && error.details?.reason === 'wrong_action');
+    assert.equal((await reelRow(db)).publication_description, '');
+    // An application recorded by the previous release still replays its outcome.
+    const recorded = { operationId: '0a000000-0000-4000-8000-000000000003', expectedVersion: 1,
+      selection: 'publication_hashtags' as const, text: '#stare', replaceCurrentValue: '', confirmReplacement: true as const };
+    const outcome = { id: reelId, publicationHashtags: '#stare', version: 2 };
+    await db.query('insert into app.operations(operation_id,actor_id,route,payload_hash,result) values($1,$2,$3,$4,$5)',
+      [recorded.operationId, user, 'POST /ai-runs/:id/apply', payloadHash({ runId: legacy.id, ...recorded }), JSON.stringify(outcome)]);
+    assert.deepEqual(await service.apply(actor, legacy.id, recorded), outcome);
+    // Script application from Opracuj is unchanged and explicit.
+    const applied = await service.apply(actor, legacy.id, {
+      operationId: '0a000000-0000-4000-8000-000000000004', expectedVersion: 1, selection: 'script', text: 'Nowy skrypt.',
+    });
+    assert.equal(applied.script, 'Nowy skrypt.');
+    assert.equal(applied.publicationDescription, '');
+    assert.equal(applied.publicationHashtags, '');
+  } finally { await db.close(); }
+});
+
+test('migration 0009 adds the action without touching historical runs', async () => {
+  const staged = await mkdtemp(path.join(tmpdir(), 'szronox-migrations-'));
+  const instance = new PGlite();
+  const db = pgliteDatabase(instance);
+  try {
+    const all = (await readdir(defaultMigrationsDir())).filter((name) => name.endsWith('.sql')).sort();
+    assert.ok(all.includes('0009_generate_publication_action.sql'));
+    for (const name of all.filter((name) => name < '0009')) await copyFile(path.join(defaultMigrationsDir(), name), path.join(staged, name));
+    await migrate(db, staged);
+    await db.query("insert into app.users(id,name) values($1,'NOXAVA')", [user]);
+    await db.query('insert into app.reels(id,original_input,created_by) values($1,$2,$3)', [reelId, JSON.stringify({ text: 'x', images: [] }), user]);
+    const insert = (id: string, action: string, state = 'queued', result: unknown = null) => db.query(
+      `insert into app.ai_runs(id,reel_id,requested_by,action,state,input_snapshot,input_hash,model,prompt_id,prompt_stage,result,completed_at)
+       values($1,$2,$3,$4,$5,'{}'::jsonb,$6,'m','p','development_provisional',$7,case when $5='succeeded' then now() end)`,
+      [id, reelId, user, action, state, 'a'.repeat(64), result === null ? null : JSON.stringify(result)]);
+    await assert.rejects(insert('0b000000-0000-4000-8000-000000000001', 'generate_publication'), 'the previous schema refuses the action');
+    await insert('0b000000-0000-4000-8000-000000000002', 'develop', 'succeeded', legacyDevelop);
+    const before = await db.query('select * from app.ai_runs order by id');
+    const applied = await migrate(db);
+    assert.deepEqual(applied.filter((item) => !item.alreadyApplied).map((item) => item.name), ['0009_generate_publication_action.sql']);
+    assert.deepEqual((await db.query('select * from app.ai_runs order by id')).rows, before.rows, 'historical rows unchanged');
+    await insert('0b000000-0000-4000-8000-000000000003', 'generate_publication');
+    await assert.rejects(insert('0b000000-0000-4000-8000-000000000004', 'invented_action'));
+    // Every action the previous release writes is still accepted.
+    for (const [index, action] of ['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme'].entries()) {
+      await insert(`0b000000-0000-4000-8000-00000000001${index}`, action);
+    }
+    const constraints = await db.query<{ conname: string }>(
+      "select conname from pg_constraint where conrelid='app.ai_runs'::regclass and contype='c' and pg_get_constraintdef(oid) like '%action%'");
+    assert.deepEqual(constraints.rows.map((row) => row.conname), ['ai_runs_action_check'], 'exactly one action constraint');
+    assert.equal((await migrate(db)).every((item) => item.alreadyApplied), true);
+  } finally { await db.close(); await rm(staged, { recursive: true, force: true }); }
 });
 
 test('fact corrections remap separate claims and reject a second claim in the edited sentence', async () => {

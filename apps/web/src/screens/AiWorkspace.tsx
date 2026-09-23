@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AiAction, AiRun, ApplyAiRequest, DevelopResult, FactCheckResult, LanguageResult, Meme, ProgrammeResult, Reel } from '../../../../packages/contracts/src/index.js';
+import type { AiAction, AiRun, ApplyAiRequest, DevelopResult, FactCheckResult, LanguageResult, Meme, ProgrammeResult, PublicationResult, Reel } from '../../../../packages/contracts/src/index.js';
 import type { CoreApiClient } from '../data/api.js';
 import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { reelLabel } from '../data/reel-label.js';
@@ -9,11 +9,12 @@ type View = AiAction | 'attached_programme';
 const title: Record<View, string> = {
   develop: 'Opracowanie', generate_hooks: 'Hooki', fact_check: 'Sprawdź fakty',
   language_check: 'Sprawdź język', find_programme: 'Sprawdź postulat',
-  attached_programme: 'Postulat',
+  generate_publication: 'Opis publikacji', attached_programme: 'Postulat',
 };
 const actionLabel: Record<AiAction, string> = {
   develop: 'Opracuj', generate_hooks: 'Wygeneruj więcej', fact_check: 'Sprawdź fakty',
   language_check: 'Sprawdź język', find_programme: 'Sprawdź postulat',
+  generate_publication: 'Wygeneruj opis',
 };
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return <section className={styles.section}><h2>{label}</h2>{children}</section>;
@@ -38,6 +39,8 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
       const current = await api.reel(reel.id);
       onReel(current);
       const queued = await api.startAi(current.id, { operationId, expectedVersion: current.version, action: next });
+      // Edits made to a previous publication proposal do not carry over to a new one.
+      if (next === 'generate_publication') { setDrafts({}); setConfirmField(null); }
       setRun(await api.aiRun(queued.id));
     } catch (error) { if (!isAbandonedRequest(error)) setMessage(polishError(error)); }
     finally { setBusy(false); }
@@ -58,7 +61,9 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
         } else {
           const latest = await api.latestAi(reel.id, action);
           if (!live) return;
-          if (latest.run) setRun(latest.run);
+          // A publication proposal written from a script that has since changed can no
+          // longer be applied, so Wygeneruj opis generates afresh instead of reopening it.
+          if (latest.run && !(action === 'generate_publication' && latest.run.isStale)) setRun(latest.run);
           else {
             const current = await api.reel(reel.id);
             if (!live) return;
@@ -118,7 +123,15 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
           setConfirmField(selection);
           setMessage('Zapisany tekst zmienił się. Sprawdź jego aktualną wersję i potwierdź zastąpienie ponownie.');
         } catch (refreshError) { if (!isAbandonedRequest(refreshError)) setMessage(polishError(refreshError)); }
-      } else setMessage(polishError(error));
+      } else {
+        setMessage(polishError(error));
+        // A stale publication result is shown as such; the proposal text stays editable.
+        if (error instanceof ClientApiError && error.api.code === 'STALE_PUBLICATION_RESULT') {
+          setConfirmField(null);
+          try { onReel(await api.reel(reel.id)); setRun(await api.aiRun(run.id)); }
+          catch (refreshError) { if (!isAbandonedRequest(refreshError)) setMessage(polishError(refreshError)); }
+        }
+      }
     }
     finally { setBusy(false); }
   }
@@ -146,6 +159,27 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
   const f = run?.action === 'fact_check' && run.result ? run.result as FactCheckResult : null;
   const l = run?.action === 'language_check' && run.result ? run.result as LanguageResult : null;
   const p = run?.action === 'find_programme' && run.result ? run.result as ProgrammeResult : null;
+  const pub = run?.action === 'generate_publication' && run.result ? run.result as PublicationResult : null;
+  /**
+   * One publication field: an editable proposal, the saved value beside it, and explicit
+   * application. An empty target applies on Zastosuj; a filled one asks first. Nothing is
+   * written by generation itself, and cancelling keeps the saved text.
+   */
+  const publicationField = (selection: 'publication_description' | 'publication_hashtags', key: string, suggestion: string) => {
+    const description = selection === 'publication_description';
+    const current = description ? reel.publicationDescription : reel.publicationHashtags;
+    const text = fieldDraft(key, suggestion);
+    const submit = () => void apply(selection, { text, replaceCurrentValue: current, confirmReplacement: true });
+    return <Section label={description ? 'OPIS' : 'HASHTAGI'}>
+      <textarea aria-label={description ? 'Propozycja opisu' : 'Propozycja hashtagów'} value={text} onChange={(event) => edit(key, event.target.value)} />
+      {current ? <p className={styles.quiet}>{description ? 'Zapisany opis' : 'Zapisane hashtagi'}: {current}</p> : null}
+      {confirmField === selection ? <div className={styles.confirm}>
+        <p>{description ? 'Zastąpić obecny opis tą propozycją?' : 'Zastąpić obecne hashtagi tą propozycją?'}</p>
+        <button type="button" disabled={busy} onClick={submit}>{description ? 'Zastąp opis' : 'Zastąp hashtagi'}</button>
+        <button type="button" onClick={() => setConfirmField(null)}>{description ? 'Zachowaj obecny' : 'Zachowaj obecne'}</button>
+      </div> : <button type="button" disabled={busy || run?.isStale} onClick={() => { if (current) setConfirmField(selection); else submit(); }}>Zastosuj</button>}
+    </Section>;
+  };
   const label = reelLabel(reel).text;
   const fieldDraft = (key: string, initial: string) => drafts[key] ?? initial;
   const edit = (key: string, value: string) => setDrafts((previous) => ({ ...previous, [key]: value }));
@@ -175,7 +209,9 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
     {action && !run && !busy && message ? <button type="button" onClick={() => void begin()}>{actionLabel[action]}</button> : null}
     {run?.state === 'queued' || run?.state === 'running' ? <p className={styles.quiet} role="status">Trwa opracowywanie… Wynik będzie dostępny po ponownym otwarciu.</p> : null}
     {run?.state === 'failed' ? <><p className={styles.message} role="alert">Nie udało się ukończyć. {run.error ? polishError(new ClientApiError(503, run.error)) : ''}</p><button type="button" onClick={() => void begin()}>Spróbuj ponownie</button></> : null}
-    {run?.isStale ? <p className={styles.message}>Treść rolki zmieniła się od tego opracowania. Przed użyciem propozycji sprawdź aktualny tekst.</p> : null}
+    {run?.isStale ? <p className={styles.message}>{run.action === 'generate_publication'
+      ? 'Skrypt zmienił się od wygenerowania opisu. Wygeneruj opis ponownie.'
+      : 'Treść rolki zmieniła się od tego opracowania. Przed użyciem propozycji sprawdź aktualny tekst.'}</p> : null}
     {run?.warnings.map((warning, index) => <p className={styles.message} key={index}>{warning}</p>)}
 
     {d ? <>
@@ -185,20 +221,8 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
         {reel.hooks.map((hook) => <div className={styles.hook} key={hook.id}><p>{hook.source === 'user' ? <span className={styles.minor}>TWÓJ HOOK · </span> : null}{hook.text}</p><button type="button" disabled={busy} aria-label="Usuń hook" onClick={() => void removeHook(hook.id)}>×</button></div>)}
         <button type="button" disabled={busy} onClick={() => onSwitch('generate_hooks', true)}>+ Wygeneruj więcej</button>
       </Section>
-      <Section label="SCENARIUSZ"><p className={styles.preserve}>{d.scriptSuggestion}</p><button type="button" disabled={busy} onClick={() => void apply('script', { text: d.scriptSuggestion })}>Użyj scenariusza</button></Section>
+      <Section label="SCENARIUSZ"><p className={styles.preserve}>{d.scriptSuggestion}</p><button type="button" disabled={busy} onClick={() => void apply('script', { text: d.scriptSuggestion })}>Zastosuj</button></Section>
       <Section label="MEM">{d.memeSuggestion && suggestedMeme ? <><div className={styles.meme}><img src={suggestedMeme.thumbnailRef ?? undefined} alt="" /><p>{suggestedMeme.name}</p></div><p className={styles.quiet}>{d.memeSuggestion.rationale}</p>{d.memeSuggestion.relevantFragment ? <p className={styles.quiet}>{d.memeSuggestion.relevantFragment}</p> : null}<button type="button" disabled={busy} onClick={() => void attachMeme(d.memeSuggestion!.memeId)}>+ Dodaj</button></> : <p className={styles.quiet}>Brak propozycji z biblioteki memów.</p>}</Section>
-      <Section label="OPIS DO PUBLIKACJI">
-        <textarea aria-label="Propozycja opisu do publikacji" value={fieldDraft('description', d.publicationDescriptionSuggestion)} onChange={(event) => edit('description', event.target.value)} />
-        {reel.publicationDescription ? <p className={styles.quiet}>Zapisany opis: {reel.publicationDescription}</p> : null}
-        {confirmField === 'publication_description' ? <div className={styles.confirm}><p>Zastąpić obecny opis tą propozycją?</p><button type="button" onClick={() => void apply('publication_description', { text: fieldDraft('description', d.publicationDescriptionSuggestion), replaceCurrentValue: reel.publicationDescription, confirmReplacement: true })}>Zastąp opis</button><button type="button" onClick={() => setConfirmField(null)}>Zachowaj obecny</button></div> :
-          <button type="button" disabled={busy} onClick={() => setConfirmField('publication_description')}>Użyj propozycji</button>}
-      </Section>
-      <Section label="HASHTAGI">
-        <textarea aria-label="Propozycja hashtagów" value={fieldDraft('hashtags', d.publicationHashtagsSuggestion)} onChange={(event) => edit('hashtags', event.target.value)} />
-        {reel.publicationHashtags ? <p className={styles.quiet}>Zapisane hashtagi: {reel.publicationHashtags}</p> : null}
-        {confirmField === 'publication_hashtags' ? <div className={styles.confirm}><p>Zastąpić obecne hashtagi tą propozycją?</p><button type="button" onClick={() => void apply('publication_hashtags', { text: fieldDraft('hashtags', d.publicationHashtagsSuggestion), replaceCurrentValue: reel.publicationHashtags, confirmReplacement: true })}>Zastąp hashtagi</button><button type="button" onClick={() => setConfirmField(null)}>Zachowaj obecne</button></div> :
-          <button type="button" disabled={busy} onClick={() => setConfirmField('publication_hashtags')}>Użyj propozycji</button>}
-      </Section>
       <Section label="TYTUŁ ROBOCZY"><input aria-label="Propozycja tytułu" value={fieldDraft('title', d.titleSuggestion)} onChange={(event) => edit('title', event.target.value)} /><button type="button" disabled={busy} onClick={() => void apply('title', { text: fieldDraft('title', d.titleSuggestion) })}>Zapisz tytuł</button></Section>
       <Section label="PRIORYTET">{d.prioritySuggestion ? <><p>{d.prioritySuggestion.priority === 'urgent' ? 'Pilne' : d.prioritySuggestion.priority === 'normal' ? 'Normalne' : 'Ponadczasowe'}</p><p className={styles.quiet}>{d.prioritySuggestion.rationale}</p><button type="button" disabled={busy} onClick={() => void apply('priority', { priority: d.prioritySuggestion!.priority })}>Ustaw {d.prioritySuggestion.priority === 'urgent' ? 'Pilne' : d.prioritySuggestion.priority === 'normal' ? 'Normalne' : 'Ponadczasowe'}</button></> : <p className={styles.quiet}>Bez zmiany priorytetu.</p>}</Section>
       <Section label="PROGRAM ZIELONYCH"><p>{d.possibleProgrammeConnection ?? 'Brak wstępnej propozycji.'}</p><button type="button" disabled={!programmeIndexed} onClick={() => onSwitch('find_programme', true)}>Sprawdź postulat</button>{!programmeIndexed ? <p className={styles.quiet}>Zatwierdzony indeks programu nie jest jeszcze dostępny.</p> : null}</Section>
@@ -206,6 +230,12 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
     </> : null}
 
     {run?.action === 'generate_hooks' && run.state === 'succeeded' ? <Section label="HOOKI">{reel.hooks.map((hook) => <p key={hook.id}>{hook.text}</p>)}<button type="button" disabled={busy} onClick={() => void begin('generate_hooks')}>+ Wygeneruj więcej</button></Section> : null}
+
+    {pub ? <>
+      {publicationField('publication_description', 'description', pub.publicationDescriptionSuggestion)}
+      {publicationField('publication_hashtags', 'hashtags', pub.publicationHashtagsSuggestion)}
+      <button type="button" className={styles.bottom} disabled={busy} onClick={() => void begin('generate_publication')}>Wygeneruj ponownie</button>
+    </> : null}
 
     {l ? <>
       <Section label="DO POPRAWY">{l.notes.map((note, index) => <p key={index}>{note}</p>)}</Section>

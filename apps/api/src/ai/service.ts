@@ -9,10 +9,10 @@ import { findEvidence, MAX_EVIDENCE_CANDIDATES, type ProgrammeEvidence, searchTe
 
 const MODEL = 'gemini-3.8-flash';
 const PROMPT_ID = 'gemini-02-development-provisional-v1';
-const ACTIONS: AiAction[] = ['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme'];
+export const ACTIONS: AiAction[] = ['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme', 'generate_publication'];
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sourceHash = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
-const stale = (code: 'STALE_FACT_CLAIM' | 'STALE_LANGUAGE_RESULT' = 'STALE_FACT_CLAIM') =>
+const stale = (code: 'STALE_FACT_CLAIM' | 'STALE_LANGUAGE_RESULT' | 'STALE_PUBLICATION_RESULT' = 'STALE_FACT_CLAIM') =>
   new CoreError({ status: 409, code, message: 'AI source changed; run a new check' });
 
 interface ImageObject {
@@ -96,7 +96,9 @@ function visibleSnapshot(snapshot: InternalSnapshot): AiInputSnapshot {
 
 function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | null }, action: AiAction): unknown {
   const hooks = snapshot.hooks.map(({ id, text, source, position }) => ({ id, text, source, position }));
-  if (action === 'language_check') return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
+  // Publication copy is written from the saved script alone; the target fields are guarded
+  // per application by replaceCurrentValue, so editing them does not stale the proposal.
+  if (action === 'language_check' || action === 'generate_publication') return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
   if (action === 'fact_check') return { script: snapshot.script, hooks };
   if (action === 'find_programme') {
     return {
@@ -109,8 +111,6 @@ function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | nu
   return {
     title: snapshot.title, originalInput: snapshot.originalInput, inputNote: snapshot.inputNote,
     script: snapshot.script, hooks, priority: snapshot.priority,
-    publicationDescription: snapshot.publicationDescription,
-    publicationHashtags: snapshot.publicationHashtags,
     attachedMemeIds: snapshot.attachedMemeIds,
     attachments: snapshot.attachments.map(({ id, state }) => ({ id, state })),
   };
@@ -202,12 +202,17 @@ export class AiService {
       if (!locked.rows[0]) throw notFound('Reel not found');
       if (locked.rows[0].version !== body.expectedVersion) throw editConflict(locked.rows[0].version);
       const reel = await this.core.loadReel(tx, reelId);
+      // Checked before any image gate or provider call: the saved script is the only input.
+      const publication = body.action === 'generate_publication';
+      if (publication && reel.script.trim().length === 0) {
+        throw validationError('A saved script is required to generate publication copy', { reason: 'script_required' });
+      }
       const images = await tx.query<ImageObject & { state: string; purpose: string; validated_mime_type: string | null; validated_at: string | null }>(
         `select id, storage_key as "storageKey", coalesce(validated_mime_type, mime_type) as "mimeType",
                 stored_byte_size as "byteSize", validated_at as "validatedAt", state, purpose,
                 validated_mime_type, validated_at
            from app.attachments where reel_id=$1 and kind='image' and purpose='input'`, [reelId]);
-      if (images.rows.some((image) => image.state !== 'ready' || !image.storageKey || !image.validated_mime_type || !image.validated_at)) {
+      if (!publication && images.rows.some((image) => image.state !== 'ready' || !image.storageKey || !image.validated_mime_type || !image.validated_at)) {
         throw new CoreError({ status: 422, code: 'UPLOAD_INCOMPLETE', message: 'Input images must be completed and validated' });
       }
       const memes = await tx.query<{ id: string; name: string; thumbnail_ref: string | null }>(
@@ -237,7 +242,8 @@ export class AiService {
         // each candidate carries its own version, because there is no single answer.
         programmeDocumentVersionId: release?.documentVersionIds.length === 1 ? release.documentVersionIds[0] : null,
         programmeReleaseId: release?.releaseId ?? null,
-        programmeEvidence, imageObjects: images.rows.map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
+        // The publication action never reads images, so it snapshots none.
+        programmeEvidence, imageObjects: publication ? [] : images.rows.map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
       };
       const id = randomUUID();
       await tx.query(
@@ -292,7 +298,11 @@ export class AiService {
         if (run.action !== 'develop' || !suggestion || suggestion.priority !== body.priority || live.priority !== input.priority) throw stale();
         await tx.query('update app.reels set priority=$2,version=version+1,updated_at=now() where id=$1', [run.reel_id, body.priority]);
       } else if (body.selection === 'publication_description' || body.selection === 'publication_hashtags') {
-        if (run.action !== 'develop' || typeof body.text !== 'string' || body.text.length > 10000) throw validationError('Invalid publication draft');
+        // Legacy develop runs may still hold publication drafts; they are no longer applicable.
+        if (run.action !== 'generate_publication') throw validationError('Publication copy is applied only from Wygeneruj opis', { reason: 'wrong_action' });
+        if (typeof body.text !== 'string' || body.text.length > 10000) throw validationError('Invalid publication draft');
+        // Text and revision: an edit-and-revert of the script also invalidates the proposal.
+        if (live.script !== input.script || live.script_revision !== input.scriptRevision) throw stale('STALE_PUBLICATION_RESULT');
         const description = body.selection === 'publication_description';
         if (body.confirmReplacement !== true || typeof body.replaceCurrentValue !== 'string') {
           throw validationError('Explicit publication replacement confirmation is required');
