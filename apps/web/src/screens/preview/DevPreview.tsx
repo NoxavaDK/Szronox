@@ -140,6 +140,7 @@ function QuickAddPreview() {
   const [selectedKind, setSelectedKind] = useState<CaptureKind>('url');
   const [url, setUrl] = useState('https://example.com/artykul');
   const [text, setText] = useState('');
+  const [textMode, setTextMode] = useState<'idea' | 'script'>('idea');
   const [showAccompanyingText, setShowAccompanyingText] = useState(false);
   const [accompanyingText, setAccompanyingText] = useState('');
   const [showHookField, setShowHookField] = useState(false);
@@ -160,6 +161,8 @@ function QuickAddPreview() {
       onRemoveImage={(id) => console.info('remove image', id)}
       text={text}
       onChangeText={setText}
+      textMode={textMode}
+      onChangeTextMode={setTextMode}
       showAccompanyingText={showAccompanyingText}
       onRevealAccompanyingText={() => setShowAccompanyingText(true)}
       accompanyingText={accompanyingText}

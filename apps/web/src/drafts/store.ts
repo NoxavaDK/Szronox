@@ -17,6 +17,8 @@ export interface CaptureDraft {
   operationId: string;
   reelId: string;
   input: CaptureInput;
+  /** Meaning of the main TEKST field; absent legacy drafts remain Pomysł. */
+  textMode?: 'idea' | 'script';
   initialHook?: string;
   priority: Priority;
   fileNames: Record<string, string>;

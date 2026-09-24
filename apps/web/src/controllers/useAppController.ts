@@ -6,6 +6,7 @@ import type { AttachmentRecovery, AttachmentProgress } from '../data/attachment-
 import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { composePublicationText } from '../data/publication.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
+import { createRequestFromDraft } from '../drafts/create-request.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import { claimIncomingShare, clearIncomingSignal, readIncomingSignal, shareFailureMessage } from '../share/pending.js';
 
@@ -318,7 +319,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     if (!capture || !user) return null; setSaveState('saving');
     try {
       await store.saveCapture({ ...capture.draft, state: 'queued' }, capture.blobs);
-      await store.enqueue({ id: capture.draft.operationId, accountId: user.id, kind: 'create', reelId: capture.draft.reelId, createdAt: Date.now(), state: 'pending', payload: { operationId: capture.draft.operationId, reelId: capture.draft.reelId, input: capture.draft.input, initialHook: capture.draft.initialHook || undefined, priority: capture.draft.priority } });
+      await store.enqueue({ id: capture.draft.operationId, accountId: user.id, kind: 'create', reelId: capture.draft.reelId, createdAt: Date.now(), state: 'pending', payload: createRequestFromDraft(capture.draft) });
       await queue.flush(); const remaining = await store.queue(user.id); const item = remaining.find((x) => x.id === capture.draft.operationId);
       if (item) { setSaveState(item.state === 'conflict' ? 'conflict' : navigator.onLine ? 'error' : 'offline'); return null; }
       // The Reel exists now, so the images can go. The draft and its blobs stay until

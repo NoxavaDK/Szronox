@@ -19,6 +19,7 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
     onBack, detectedKind, selectedKind, onChangeKind,
     url, onChangeUrl, images, onAddImage, onRemoveImage,
     text, onChangeText,
+    textMode, onChangeTextMode,
     showAccompanyingText, onRevealAccompanyingText, accompanyingText, onChangeAccompanyingText,
     showHookField, onRevealHookField, initialHook, onChangeInitialHook,
     priority, onChangePriority,
@@ -93,9 +94,15 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
 
       {selectedKind === 'text' ? (
         <div className={styles.section}>
+          <CompactTabs
+            label="Znaczenie tekstu"
+            options={[{ value: 'idea', label: 'Pomysł' }, { value: 'script', label: 'Gotowy skrypt' }]}
+            value={textMode}
+            onChange={onChangeTextMode}
+          />
           <textarea
             className={styles.textField}
-            aria-label="Tekst"
+            aria-label={textMode === 'script' ? 'Gotowy skrypt' : 'Pomysł'}
             placeholder="Wpisz treść"
             value={text}
             onChange={(event) => onChangeText(event.target.value)}

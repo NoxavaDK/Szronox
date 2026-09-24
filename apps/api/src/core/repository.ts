@@ -338,7 +338,7 @@ export class CoreRepository {
    */
   async createReel(
     actor: Actor,
-    request: { operationId: string; reelId: string; input: CaptureInput; initialHook?: string; priority?: Priority },
+    request: { operationId: string; reelId: string; input: CaptureInput; initialScript?: string; initialHook?: string; priority?: Priority },
   ): Promise<Reel> {
     const images = request.input.images ?? [];
     const ids = images.map((image) => image.attachmentId);
@@ -353,15 +353,23 @@ export class CoreRepository {
       images.length > 0,
     );
     if (!usable) throw validationError('Capture has no text, URL or supported image');
+    if (request.initialScript !== undefined && (
+      typeof request.initialScript !== 'string' ||
+      request.initialScript.trim() === '' ||
+      request.input.text !== request.initialScript
+    )) {
+      throw validationError('initialScript must be nonempty and exactly match input.text');
+    }
 
     return this.idempotent(actor, request.operationId, 'POST /reels', request, async (tx) => {
       await tx.query(
-        `insert into app.reels (id, original_input, input_note, priority, created_by)
-         values ($1, $2, $3, coalesce($4, 'normal'), $5)`,
+        `insert into app.reels (id, original_input, input_note, script, script_revision, priority, created_by)
+         values ($1, $2, $3, $4, 0, coalesce($5, 'normal'), $6)`,
         [
           request.reelId,
           JSON.stringify(request.input),
-          request.input.text ?? '',
+          request.initialScript === undefined ? request.input.text ?? '' : '',
+          request.initialScript ?? '',
           request.priority ?? null,
           actor.id,
         ],

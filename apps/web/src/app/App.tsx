@@ -237,6 +237,8 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       })}
       text={form.draft.input.text ?? ''}
       onChangeText={(text) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, input: { ...x.draft.input, text } } }))}
+      textMode={form.draft.textMode ?? 'idea'}
+      onChangeTextMode={(textMode) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, textMode } }))}
       showAccompanyingText={form.showAdditional}
       onRevealAccompanyingText={() => c.updateCapture((x) => ({ ...x, showAdditional: true }))}
       accompanyingText={form.draft.input.additionalText ?? ''}

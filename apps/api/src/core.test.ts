@@ -195,6 +195,36 @@ test('capture creates one Reel plus every pending image and the initial hook ato
   }
 });
 
+test('direct-script capture preserves original input and creates the editable script atomically', async () => {
+  const { db, repo } = await fixture();
+  try {
+    const script = 'Pierwsze zdanie.\n\nDrugie zdanie.  ';
+    const request = capture({ input: { text: script, url: 'https://example.com/context', images: [] }, initialScript: script });
+    const reel = await repo.createReel(NOXAVA, request as never);
+
+    assert.deepEqual(reel.originalInput, request.input);
+    assert.equal(reel.script, script, 'script content and whitespace are kept exactly');
+    assert.equal(reel.scriptRevision, 0);
+    assert.equal(reel.inputNote, '', 'script is not duplicated into the mutable input note');
+    assert.deepEqual(await repo.createReel(NOXAVA, request as never), reel, 'same-operation replay returns the recorded created Reel');
+  } finally {
+    await db.close();
+  }
+});
+
+test('direct-script capture rejects blank and mismatched values without creating partial data', async () => {
+  const { db, repo } = await fixture();
+  try {
+    const request = capture({ input: { text: 'Gotowy tekst', images: [] } });
+    await expectCode(() => repo.createReel(NOXAVA, { ...request, initialScript: '   ' } as never), 'VALIDATION_ERROR', 422);
+    await expectCode(() => repo.createReel(NOXAVA, { ...request, initialScript: 'Inny tekst' } as never), 'VALIDATION_ERROR', 422);
+    const rows = await db.query('select id from app.reels where id=$1', [request.reelId]);
+    assert.equal(rows.rows.length, 0, 'invalid direct-script requests leave no Reel behind');
+  } finally {
+    await db.close();
+  }
+});
+
 test('a failing capture rolls back completely, leaving no truncated subset', async () => {
   const { db, repo } = await fixture();
   try {

@@ -529,6 +529,8 @@ export interface QuickAddScreenProps {
 
   text: string;
   onChangeText: (value: string) => void;
+  textMode: 'idea' | 'script';
+  onChangeTextMode: (value: 'idea' | 'script') => void;
 
   /** Optional accompanying text/hook fields are hidden until requested. */
   showAccompanyingText: boolean;

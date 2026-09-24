@@ -145,11 +145,15 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     if (input === null || typeof input !== 'object') throw validationError('input is required');
     const capture = input as Record<string, unknown>;
     if (!Array.isArray(capture.images)) throw validationError('input.images must be an array');
+    if (body.initialScript !== undefined && typeof body.initialScript !== 'string') {
+      throw validationError('initialScript must be a string');
+    }
 
     const reel = await repository.createReel(actor, {
       operationId,
       reelId,
       input: capture as never,
+      initialScript: body.initialScript as string | undefined,
       initialHook: typeof body.initialHook === 'string' ? body.initialHook : undefined,
       priority: body.priority as never,
     });
