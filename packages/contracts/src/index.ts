@@ -182,6 +182,8 @@ export interface CreateReelRequest {
   operationId: Id;
   reelId: Id;
   input: CaptureInput;
+  /** Explicit ready-script capture: must exactly match nonempty input.text. */
+  initialScript?: string;
   initialHook?: string;
   priority?: Priority;
 }
