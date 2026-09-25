@@ -16,6 +16,10 @@ import { ReelListScreen } from '../screens/ReelListScreen.js';
 import { DeletedReelsScreen } from '../screens/DeletedReelsScreen.js';
 import { AiWorkspace } from '../screens/AiWorkspace.js';
 import { MemePicker } from '../screens/MemePicker.js';
+import { PlannerPane } from '../screens/PlannerPane.js';
+import { ScheduleSheet } from '../screens/ScheduleSheet.js';
+import { localIsoDate, planLabel, planOf } from '../data/planner.js';
+import { useWorkspaceLayout } from '../ui/workspace-layout.js';
 import {
   COPY,
   STATUS_LABELS,
@@ -44,6 +48,33 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [aiCapability, setAiCapability] = useState({ enabled: false, programmeIndexed: false });
+
+  // ── CONTENT-PLANNER-01 ────────────────────────────────────────────────────
+  const layout = useWorkspaceLayout();
+  const { setLayout } = c;
+  useEffect(() => { setLayout(layout); }, [layout, setLayout]);
+  const [today, setToday] = useState(() => localIsoDate(new Date()));
+  // Keeps DZIŚ honest across midnight in a tab left open.
+  useEffect(() => { const timer = window.setInterval(() => setToday(localIsoDate(new Date())), 60_000); return () => window.clearInterval(timer); }, []);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [scheduleFor, setScheduleFor] = useState<string | null>(null);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const openSchedule = (id: string) => { setScheduleError(null); setScheduleSaving(false); setScheduleFor(id); };
+  const closeSchedule = () => { setScheduleFor(null); setScheduleError(null); setScheduleSaving(false); };
+  const applySchedule = async (id: string, date: string | null, time: string | null) => {
+    setScheduleSaving(true); setScheduleError(null);
+    const result = await c.scheduleReel(id, date, time);
+    setScheduleSaving(false);
+    if (result.ok) closeSchedule();
+    else if (result.message) setScheduleError(result.message);
+  };
+  /** Desktop drag and drop: a new day keeps the Reel's explicit time; NIEZAPLANOWANE clears both. */
+  const moveReel = async (id: string, date: string | null) => {
+    const reel = c.planReels.find((item) => item.id === id);
+    const result = await c.scheduleReel(id, date, date === null ? null : reel ? planOf(reel).time : null);
+    if (!result.ok && result.message) c.setMessage(result.message);
+  };
 
   // ── LIST-01: list-row quick actions (long-press / swipe) ──────────────────
   const [quickOpenReelId, setQuickOpenReelId] = useState<string | null>(null);
@@ -199,6 +230,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       programmeState: reel.programmeState,
       memeName: null,
       feedCoverDone: reel.feedCoverDone,
+      planLabel: planLabel(planOf(reel), today),
     };
   };
 
@@ -270,14 +302,16 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     /></>;
   }
 
-  if (c.route.name === 'detail' && c.current) {
+  /** The open Reel — Detail or one of its overlays — for the full screen or the centre pane. */
+  const renderDetail = (): JSX.Element | null => {
+    if (!(c.route.name === 'detail' && c.current)) return null;
     const reel = c.current;
     // Both overlays are honoured only for the Reel that opened them.
-    if (memeReelId === reel.id) return <>{notice}<MemePicker api={api} reel={reel} onClose={() => setMemeReelId(null)} onReel={c.acceptReel} /></>;
-    if (aiView?.reelId === reel.id) return <>{notice}<AiWorkspace key={aiView.view} api={api} reel={reel}
+    if (memeReelId === reel.id) return <MemePicker api={api} reel={reel} onClose={() => setMemeReelId(null)} onReel={c.acceptReel} />;
+    if (aiView?.reelId === reel.id) return <AiWorkspace key={aiView.view} api={api} reel={reel}
       initialView={aiView.view} autoStart={aiView.autoStart} programmeIndexed={aiCapability.programmeIndexed}
       onClose={() => setAiView(null)} onReel={c.acceptReel} onRefresh={() => c.openDetail(reel.id)}
-      onSwitch={(view, autoStart = false) => setAiView({ reelId: reel.id, view, autoStart })} /></>;
+      onSwitch={(view, autoStart = false) => setAiView({ reelId: reel.id, view, autoStart })} />;
     const editor = editorOf(reel.editorId);
     const peerName = c.peer?.name ?? '';
 
@@ -311,11 +345,13 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
               ? { kind: 'awaiting_peer', peerName }
               : { kind: 'unverified_by_me' };
 
-    return <>{notice}<ReelDetailScreen
+    return <ReelDetailScreen
+      key={reel.id}
       onBack={c.leaveDetail}
       title={reel.title}
       onChangeTitle={(title) => c.changeReel({ title })}
       titlePlaceholder={label.derived ? label.text : undefined}
+      plan={reel.deletedAt ? undefined : { label: planLabel(planOf(reel), today), onOpen: () => openSchedule(reel.id) }}
       metadata={{
         status: reel.status,
         statusLabel: STATUS_LABELS[reel.status],
@@ -465,18 +501,21 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       }}
       saveState={c.saveState}
       conflict={c.conflict && !['script', 'inputNote', 'editingNotes'].includes(c.conflict.field) ? conflictView() : undefined}
-    /></>;
-  }
+    />;
+  };
 
-  return <>{notice}<ReelListScreen
-    currentUser={c.user}
+  const renderList = (embedded: boolean) => <ReelListScreen
+    embedded={embedded}
+    onOpenPlan={c.layout === 'single' ? () => c.setRoute({ name: 'plan' }) : undefined}
+    currentUser={c.user!}
     statusTabs={(Object.keys(STATUS_TAB_LABELS) as ReelStatus[]).map((value) => ({
       status: value, label: STATUS_TAB_LABELS[value], count: c.counts[value],
     }))}
     selectedStatus={c.status}
     onSelectStatus={c.setStatus}
     loadState={c.loadState}
-    items={c.reels.map(toListItem)}
+    // The open Reel is synced into the list; one whose status just changed leaves this tab.
+    items={c.reels.filter((reel) => reel.status === c.status).map(toListItem)}
     onOpenReel={(id) => void c.openDetail(id)}
     onAddNew={c.startCapture}
     onRetry={() => void c.loadList()}
@@ -493,6 +532,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onSelectEditor: (id, editorId) => void applyQuickEditor(id, editorId),
       onQuickAdvanceStatus: (id, status) => void applyQuickStatus(id, status),
       onCopyLink: (id) => void c.copyReelLink(id),
+      onOpenSchedule: (id) => { closeQuickActions(); openSchedule(id); },
       kdriveEnabled: KDRIVE_ENABLED,
       onOpenKdrive: () => c.setMessage(COPY.kdriveUnavailable),
       onRequestDelete: (id) => setQuickConfirmDeleteId(id),
@@ -503,5 +543,62 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       saveState: quickSaveState,
       undo: undo ? { message: undo.message, onUndo: () => void onUndoStatus(), saveState: undoSaveState } : null,
     }}
-  /><button className="sign-out" onClick={() => void c.signOut()}>Wyloguj</button></>;
+  />;
+
+  const signOut = <button className="sign-out" onClick={() => void c.signOut()}>Wyloguj</button>;
+
+  const renderPlanner = (variant: 'pane' | 'screen') => <PlannerPane
+    variant={variant}
+    reels={c.planReels}
+    today={today}
+    weekOffset={weekOffset}
+    onChangeWeek={setWeekOffset}
+    loadState={c.planLoadState}
+    onRetry={() => void c.loadPlanner()}
+    selectedReelId={c.route.name === 'detail' ? c.current?.id ?? null : null}
+    onOpenReel={(id) => void c.openDetail(id)}
+    onSchedule={openSchedule}
+    onMove={variant === 'pane' ? (id, date) => void moveReel(id, date) : undefined}
+    onOpenReels={variant === 'screen' ? () => c.setRoute({ name: 'list' }) : undefined}
+  />;
+
+  const scheduleReel = scheduleFor === null ? null
+    : (c.current?.id === scheduleFor ? c.current : null)
+      ?? c.planReels.find((reel) => reel.id === scheduleFor)
+      ?? c.reels.find((reel) => reel.id === scheduleFor)
+      ?? null;
+  const scheduleSheet = scheduleReel ? <ScheduleSheet
+    key={scheduleReel.id}
+    reelTitle={reelLabel(scheduleReel).text}
+    plan={planOf(scheduleReel)}
+    today={today}
+    saving={scheduleSaving}
+    error={scheduleError}
+    onDismiss={closeSchedule}
+    onConfirm={(date, time) => void applySchedule(scheduleReel.id, date, time)}
+    onClear={() => void applySchedule(scheduleReel.id, null, null)}
+  /> : null;
+
+  if (c.layout === 'single') {
+    if (c.route.name === 'detail' && c.current) return <>{notice}{renderDetail()}{scheduleSheet}</>;
+    if (c.route.name === 'plan') return <>{notice}{renderPlanner('screen')}{scheduleSheet}</>;
+    return <>{notice}{renderList(false)}{signOut}{scheduleSheet}</>;
+  }
+
+  // Wide layouts (CONTENT-PLANNER-01): PLAN | CURRENT REEL | REELS. On `two`, REELS folds into
+  // the centre whenever no Reel is open, so the Reel being worked on always keeps the width.
+  const detail = renderDetail();
+  const centre = detail ?? (c.layout === 'two'
+    ? renderList(true)
+    : <div className="workspace-empty"><p>Wybierz rolkę z planu albo z listy.</p></div>);
+  return <>
+    {notice}
+    <div className="workspace" data-layout={c.layout}>
+      <aside className="workspace-pane workspace-plan">{renderPlanner('pane')}</aside>
+      <main className="workspace-pane workspace-centre">{centre}</main>
+      {c.layout === 'three' ? <aside className="workspace-pane workspace-reels">{renderList(true)}</aside> : null}
+    </div>
+    {c.layout === 'three' || detail === null ? signOut : null}
+    {scheduleSheet}
+  </>;
 }

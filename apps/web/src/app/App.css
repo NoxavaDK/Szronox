@@ -14,3 +14,16 @@ button, input, textarea { font: inherit; }
 .app-notice { position: fixed; z-index: 30; left: 12px; right: 12px; bottom: 76px; max-width: 520px; margin: auto; display: flex; gap: 12px; justify-content: space-between; background: #171717; color: white; padding: 12px 14px; white-space: pre-wrap; font-size: 13px; }
 .app-notice button { border: 0; background: none; color: white; font-size: 20px; }
 .sign-out { position: fixed; top: 18px; right: 56px; border: 0; background: transparent; color: #625f59; font-size: 12px; }
+
+/*
+ * CONTENT-PLANNER-01 wide workspace: PLAN | CURRENT REEL | REELS. Only rendered at the
+ * thresholds in ui/workspace-layout.ts; each pane scrolls on its own so the plan stays in
+ * view while a Reel is being worked on. Pane widths match PLAN_PANE_WIDTH/REELS_PANE_WIDTH.
+ */
+.workspace { display: grid; height: 100vh; height: 100dvh; background: var(--sz-color-background, #f7f7f5); }
+.workspace[data-layout='two'] { grid-template-columns: 320px minmax(0, 1fr); }
+.workspace[data-layout='three'] { grid-template-columns: 320px minmax(0, 1fr) 380px; }
+.workspace-pane { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.workspace-plan { border-right: 1px solid var(--sz-color-divider, #e4e4e1); }
+.workspace-reels { border-left: 1px solid var(--sz-color-divider, #e4e4e1); }
+.workspace-empty { height: 100%; display: grid; place-items: center; padding: 24px; box-sizing: border-box; color: var(--sz-color-text-secondary, #636360); font-size: 14px; }

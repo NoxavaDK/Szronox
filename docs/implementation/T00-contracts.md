@@ -314,3 +314,11 @@ Active Reel overflow has only Usuń rolkę. Use the exact confirmation and Anulu
 Usunięte is a quiet secondary Rolki menu entry, never a sixth status/main tab/permanent primary navigation item. Compact existing list language; no permanent delete, purge/retention, bulk trash or separate trash architecture.
 
 Acceptance: confirmed/cancelled/failed deletion, active-list exclusion, deleted-list retrieval, status-preserving restore and concurrent/idempotent delete/restore; external/shared data untouched.
+
+## CONTENT-PLANNER-01 — publication plan (user-authorized 2026-09-25)
+
+The user explicitly authorized a deliberately simple Content Planner. It supersedes the earlier "no calendar" exclusion only for this bounded scope; autopublishing, analytics and new workflow states remain out.
+
+A plan is scheduling metadata on the existing Reel, never a separate planner/event record: SQL `planned_publication_date date null` and `planned_publication_time time(0) null` (check: time requires date), JSON `plannedPublicationDate: 'YYYY-MM-DD' | null` and `plannedPublicationTime: 'HH:MM' | null`. Exactly one current plan per Reel. Both are ordinary version-checked PATCH fields; clearing the date alone also clears the time; a time without a date is refused. A plan change never changes `status`, `scriptRevision` or any other field. Existing Reels are unplanned (null).
+
+The PLAN view, the list `Zaplanuj` quick action and Reel Detail `Zaplanuj publikację` all write the same two fields. NIEZAPLANOWANE = not deleted, no planned date, status in `to_record | editing | ready` (ideas and published history excluded; ideas may still be planned explicitly). Past-dated unpublished plans show as `Po terminie` in the current week. Wide browser layouts show PLAN | CURRENT REEL | REELS (≥1280px) or PLAN | centre (≥960px); mobile keeps one full-width view at a time.

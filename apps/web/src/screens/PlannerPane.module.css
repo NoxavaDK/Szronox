@@ -1,0 +1,257 @@
+/* PLAN (CONTENT-PLANNER-01). The list's flat editorial language: thin dividers, small
+   uppercase labels, compact rows — no calendar grid, no cards with shadows. */
+
+.planner {
+  font-family: var(--sz-font-family);
+  color: var(--sz-color-text-primary);
+  background: var(--sz-color-background);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sz-space-3);
+}
+
+.planner[data-variant='screen'] {
+  min-height: 100%;
+  max-width: var(--sz-content-max-width);
+  margin: 0 auto;
+  padding: var(--sz-space-4) var(--sz-space-4) 96px;
+}
+
+.planner[data-variant='pane'] {
+  padding: var(--sz-space-4) var(--sz-space-4) var(--sz-space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-3);
+}
+
+.title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--sz-text-screen-title-size);
+  line-height: var(--sz-text-screen-title-line);
+  font-weight: var(--sz-text-screen-title-weight);
+}
+
+.headerLink {
+  appearance: none;
+  border: 0;
+  background: none;
+  min-height: var(--sz-touch-target);
+  padding: 0 var(--sz-space-1);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sz-color-cobalt);
+  cursor: pointer;
+}
+
+.weekSwitcher {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-1);
+  font-size: var(--sz-text-metadata-size);
+  line-height: var(--sz-text-metadata-line);
+  color: var(--sz-color-text-secondary);
+}
+
+.weekStep {
+  appearance: none;
+  border: 0;
+  background: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
+}
+
+.weekLabel {
+  flex: 1;
+  text-align: center;
+  font-weight: 600;
+  color: var(--sz-color-text-primary);
+}
+
+.weekRange {
+  font-weight: 500;
+  color: var(--sz-color-text-secondary);
+}
+
+.weekToday {
+  appearance: none;
+  border: 0;
+  background: none;
+  min-height: 36px;
+  padding: 0 var(--sz-space-1);
+  font: inherit;
+  font-weight: 600;
+  color: var(--sz-color-cobalt);
+  cursor: pointer;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--sz-color-divider);
+  padding-top: var(--sz-space-2);
+  border-radius: var(--sz-radius-sm);
+  transition: background-color 120ms ease;
+}
+
+.group[data-drop='true'] {
+  background: rgba(49, 91, 216, 0.07);
+  outline: 1px dashed var(--sz-color-cobalt);
+  outline-offset: 2px;
+}
+
+.dayLabel,
+.groupLabel {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sz-space-2);
+  margin: 0 0 var(--sz-space-1);
+  font-size: var(--sz-text-section-label-size);
+  line-height: var(--sz-text-section-label-line);
+  font-weight: var(--sz-text-section-label-weight);
+  letter-spacing: var(--sz-text-section-label-tracking);
+  text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+}
+
+.group[data-today='true'] .dayLabel {
+  color: var(--sz-color-cobalt);
+}
+
+.group[data-tone='overdue'] .groupLabel {
+  color: var(--sz-color-warning);
+}
+
+.dayDate {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.count {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.unscheduled {
+  margin-top: var(--sz-space-2);
+}
+
+.emptyDay {
+  margin: 0 0 var(--sz-space-1);
+  min-height: 24px;
+  font-size: var(--sz-text-metadata-size);
+  line-height: var(--sz-text-metadata-line);
+  color: var(--sz-color-text-secondary);
+}
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--sz-color-divider);
+  background: var(--sz-color-background);
+}
+
+.cards > .card:last-child {
+  border-bottom: none;
+}
+
+.card[draggable='true'] {
+  cursor: grab;
+}
+
+.card[data-selected='true'] {
+  background: var(--sz-color-surface);
+  box-shadow: inset 3px 0 0 var(--sz-color-cobalt);
+}
+
+.cardMain {
+  appearance: none;
+  border: 0;
+  background: none;
+  flex: 1;
+  min-width: 0;
+  min-height: var(--sz-touch-target);
+  padding: 6px var(--sz-space-1) 6px var(--sz-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cardMain:focus-visible,
+.cardSchedule:focus-visible {
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: -2px;
+}
+
+.cardTitle {
+  font-size: 14.5px;
+  line-height: 19px;
+  font-weight: var(--sz-text-reel-title-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardTitleDerived {
+  color: var(--sz-color-text-secondary);
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-2);
+  font-size: var(--sz-text-metadata-size);
+  line-height: var(--sz-text-metadata-line);
+  color: var(--sz-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cardMeta [data-status='ready'] {
+  color: var(--sz-color-success);
+}
+
+.cardTime {
+  font-weight: 650;
+  color: var(--sz-color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cardSchedule {
+  appearance: none;
+  border: 0;
+  background: none;
+  flex-shrink: 0;
+  width: var(--sz-touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sz-color-text-secondary);
+  cursor: pointer;
+}
+
+.cardSchedule:hover {
+  color: var(--sz-color-cobalt);
+}

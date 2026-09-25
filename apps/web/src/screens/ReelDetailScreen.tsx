@@ -1,7 +1,7 @@
 import '../ui/tokens.css';
 import type { HookEditView, ReelDetailScreenProps } from '../ui/screen-contracts.js';
 import { Avatar, CoverIndicator, SectionRow } from '../ui/primitives.js';
-import { BackArrowIcon, CloseIcon } from '../ui/icons.js';
+import { BackArrowIcon, CalendarIcon, CloseIcon } from '../ui/icons.js';
 import {
   ConflictNotice,
   EditingNotesSection,
@@ -24,7 +24,7 @@ import styles from './ReelDetailScreen.module.css';
 export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
     onBack, title, onChangeTitle, titlePlaceholder,
-    metadata, selectors, overflow, onOpenFeedCover, restore,
+    metadata, plan, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook, selectedHookId, onSelectHook, hookSelectionPending,
     hookEdits, onStartHookEdit, onChangeHookEdit, onSaveHookEdit, onCancelHookEdit,
     script, onChangeScript, scriptConflict,
@@ -58,6 +58,13 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
 
       {/* Controlled STATUS / PRIORYTET / MONTUJE (frozen batch sec. 3). */}
       <MetadataSelectors {...selectors} />
+
+      {plan ? (
+        <button type="button" className={styles.planRow} onClick={plan.onOpen} data-planned={plan.label ? 'true' : undefined}>
+          <CalendarIcon />
+          {plan.label ? <span>Publikacja: <strong>{plan.label}</strong></span> : <span>Zaplanuj publikację</span>}
+        </button>
+      ) : null}
 
       {metadata.programmeState !== 'unchecked' ? (
         <button type="button" className={styles.metadataProgramme} onClick={onOpenProgramme}>

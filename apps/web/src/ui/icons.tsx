@@ -110,3 +110,13 @@ export function WarningIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Publication plan (CONTENT-PLANNER-01): a plain outline calendar sheet. */
+export function CalendarIcon(props: IconProps) {
+  return (
+    <svg {...base(props.size ?? 16, props)}>
+      <rect x="3.5" y="4.5" width="13" height="12" rx="1.5" />
+      <path d="M3.5 8.5h13M7 3v3M13 3v3" />
+    </svg>
+  );
+}

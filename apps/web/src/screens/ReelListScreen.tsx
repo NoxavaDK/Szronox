@@ -26,9 +26,12 @@ export function ReelListScreen(props: ReelListScreenProps) {
     : null;
 
   return (
-    <div className={styles.screen}>
+    <div className={styles.screen} data-embedded={props.embedded ? 'true' : undefined}>
       <header className={styles.header}>
         <h1 className={styles.title}>Rolki</h1>
+        {props.onOpenPlan ? (
+          <button type="button" className={styles.planLink} onClick={props.onOpenPlan}>Plan</button>
+        ) : null}
         {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}
         <button type="button" onClick={props.onOpenDeleted} aria-label="Usunięte">⋮</button>
         <Avatar user={currentUser} size={32} />
@@ -213,6 +216,9 @@ function ReelRow({
               >
                 {item.verificationState === 'verified' ? 'Zweryfikowano' : item.verificationState === 'outdated' ? 'Nieaktualne' : 'Nie sprawdzone'}
               </span>
+            ) : null}
+            {item.planLabel ? (
+              <span className={`${styles.metaItem} ${styles.metaPlan}`}>{item.planLabel}</span>
             ) : null}
             {item.programmeState === 'matched' ? (
               <span className={`${styles.metaItem} ${styles.metaProgramme}`}>Program</span>

@@ -32,7 +32,7 @@ export function ReelQuickActionsSheet({
 }) {
   const {
     open, onOpenStatus, onOpenAssign, onDismiss, editorOptions, onSelectStatus, onSelectEditor,
-    onCopyLink, kdriveEnabled, onOpenKdrive, onRequestDelete, confirmingDeleteId, onCancelDelete,
+    onCopyLink, onOpenSchedule, kdriveEnabled, onOpenKdrive, onRequestDelete, confirmingDeleteId, onCancelDelete,
     onConfirmDelete, selectionError, saveState,
   } = quickActions;
 
@@ -159,6 +159,14 @@ export function ReelQuickActionsSheet({
                   {COPY.assignEditor}
                 </button>
               </li>
+              {onOpenSchedule ? (
+                <li>
+                  <button type="button" className={styles.option} onClick={() => onOpenSchedule(item.id)}>
+                    <span>{COPY.schedule}</span>
+                    {item.planLabel ? <span className={styles.quiet}>{item.planLabel}</span> : null}
+                  </button>
+                </li>
+              ) : null}
               <li>
                 <button type="button" className={styles.option} onClick={() => onCopyLink(item.id)}>
                   {COPY.copyLink}

@@ -274,12 +274,14 @@ test('migration 0010 keeps every existing Reel unselected, including Reels with 
     await db.query("insert into app.reels(id,original_input,created_by) values($1,'{}',$2)", [reelId, NOXAVA.id]);
     await db.query("insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$2,'Stary','user',0)", [randomUUID(), reelId]);
 
-    const applied = await migrate(db);
+    // Staged up to 0010 only, so later migrations do not change what this test is about.
+    await copyFile(path.join(defaultMigrationsDir(), '0010_selected_hook.sql'), path.join(staged, '0010_selected_hook.sql'));
+    const applied = await migrate(db, staged);
     assert.deepEqual(applied.filter((item) => !item.alreadyApplied).map((item) => item.name), ['0010_selected_hook.sql']);
     const row = (await db.query<{ selected_hook_id: string | null; version: number }>(
       'select selected_hook_id, version from app.reels where id = $1', [reelId])).rows[0];
     assert.deepEqual(row, { selected_hook_id: null, version: 1 });
-    assert.equal((await migrate(db)).every((item) => item.alreadyApplied), true);
+    assert.equal((await migrate(db, staged)).every((item) => item.alreadyApplied), true);
   } finally {
     await rm(staged, { recursive: true, force: true });
     await db.close();
