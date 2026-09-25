@@ -74,3 +74,7 @@ Proposed bounded fix for later approval: define which original capture fields co
 ## CAPTURE-SCRIPT-01 — integrated and deployed to DEV
 
 User requested direct entry of a ready script in Quick Add on 2026-09-24 and explicitly selected Luna 6.0 for implementation. T00 pins a compact `Pomysł` / `Gotowy skrypt` choice on the main TEKST field and atomic creation with `CreateReelRequest.initialScript`, preserving the exact original input. The bounded implementation was integrated locally at `489a592`; its acceptance evidence and limits are in `CAPTURE-SCRIPT-01-result.md`. Root reviewed the diff and passed integrated contracts/API build and web typecheck. The user authorized DEV deployment on 2026-09-25; release `d75c94e` is live, with checks recorded in `CAPTURE-SCRIPT-01-deployment-result.md`.
+
+## UX-PUBLICATION-02 — approved for Luna implementation
+
+On 2026-09-26 the user authorized one Luna implementation of the Astra-reviewed mobile/desktop hierarchy corrections and bounded PUBLICATION-02 generation correction, followed by manual Opus verification and Astra's final UI check. Root pins shared contracts and integration; Luna works only in a separate assigned worktree and file allowlist. Exact scope and acceptance: [UX-PUBLICATION-02-dispatch.md](UX-PUBLICATION-02-dispatch.md). CONTENT-PLANNER-01 is already integrated and deployed to DEV; this task revises its interface rather than adding another planner model. No merge or deployment is authorized by this dispatch.

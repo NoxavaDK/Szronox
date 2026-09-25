@@ -240,6 +240,8 @@ export interface AiInputSnapshot {
   originalInput: CaptureInput;
   script: string;
   scriptRevision: number;
+  /** PUBLICATION-02: new grounded publication runs; absent on legacy script-only runs. */
+  publicationContextVersion?: 2;
   hooks: Array<Pick<ReelHook, 'id' | 'text' | 'source' | 'position'>>;
   /** The selected hook at snapshot time; absent in runs recorded before HOOKS-SELECT-EDIT. */
   selectedHookId?: Id | null;
