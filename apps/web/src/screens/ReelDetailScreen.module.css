@@ -83,6 +83,14 @@
   gap: 4px;
 }
 
+.contextAction {
+  align-self: flex-start; min-height: 40px; padding: 0 2px; border: 0; background: none;
+  color: var(--sz-color-cobalt); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer;
+}
+.contextAction:focus-visible { outline: 2px solid var(--sz-color-cobalt); outline-offset: 2px; }
+.otherHooks { border-top: 1px solid var(--sz-color-divider); }
+.otherHooks summary { display: flex; align-items: center; min-height: 44px; color: var(--sz-color-text-secondary); font-size: 13px; cursor: pointer; }
+
 .metadataVerified {
   color: var(--sz-color-success);
 }
@@ -289,7 +297,7 @@
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
-  min-height: 120px;
+  min-height: 78px;
   field-sizing: content;
 }
 

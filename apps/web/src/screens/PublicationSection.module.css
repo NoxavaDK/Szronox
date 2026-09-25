@@ -4,6 +4,7 @@
   gap: var(--sz-space-5);
   padding-top: var(--sz-space-3);
 }
+.publishedSummary { margin: 0; color: var(--sz-color-text-secondary); font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
 
 .block {
   display: flex;
@@ -46,6 +47,16 @@
   gap: var(--sz-space-3);
   margin-left: auto;
 }
+
+.planRow {
+  appearance: none; display: flex; align-items: center; gap: var(--sz-space-2);
+  min-height: 44px; width: 100%; padding: 0; border: 0; border-top: 1px solid var(--sz-color-divider);
+  background: transparent; color: var(--sz-color-cobalt); font: inherit; text-align: left; cursor: pointer;
+}
+.planRow[data-planned='true'] { color: var(--sz-color-text-primary); }
+.planRow strong { font-weight: 600; }
+.generateRow { display: grid; gap: 2px; justify-items: start; }
+.prerequisite { margin: 0; color: var(--sz-color-text-secondary); font-size: 12px; line-height: 17px; }
 
 .textField {
   border: none;

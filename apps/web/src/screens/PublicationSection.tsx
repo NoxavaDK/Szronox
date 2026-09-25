@@ -1,7 +1,7 @@
 import '../ui/tokens.css';
 import type { PublicationSectionProps } from '../ui/screen-contracts.js';
 import { CoverIndicator, TextAction } from '../ui/primitives.js';
-import { ExternalLinkIcon } from '../ui/icons.js';
+import { CalendarIcon, ExternalLinkIcon } from '../ui/icons.js';
 import styles from './PublicationSection.module.css';
 
 /**
@@ -14,16 +14,21 @@ export function PublicationSection(props: PublicationSectionProps) {
     feedCoverDone, hasFeedCoverAsset, onToggleFeedCoverDone, onAddOrChangeFeedCoverAsset, onOpenFeedCoverAsset,
     description, onChangeDescription,
     hashtags, onChangeHashtags,
-    onCopyDescription, onGeneratePublication, generatePublicationEnabled,
+    onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished,
     publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
   } = props;
 
   return (
     <div className={styles.section}>
+      {isPublished ? <p className={styles.publishedSummary}>
+        {description.trim() || hashtags.trim()
+          ? [description.trim().slice(0, 120), hashtags.trim().slice(0, 60)].filter(Boolean).join(' · ')
+          : 'Opublikowano · brak opisu i hashtagów'}
+      </p> : null}
       <div className={styles.block}>
         <span className={styles.label}>Okładka do feedu</span>
         <div className={styles.coverRow}>
-          <button type="button" className={styles.coverToggle} onClick={onToggleFeedCoverDone}>
+          <button type="button" className={styles.coverToggle} data-feed-cover-toggle onClick={onToggleFeedCoverDone}>
             <CoverIndicator done={feedCoverDone} size={22} />
             <span>{feedCoverDone ? 'Gotowa' : 'Nie gotowa'}</span>
           </button>
@@ -35,6 +40,16 @@ export function PublicationSection(props: PublicationSectionProps) {
           </div>
         </div>
       </div>
+
+      {plan ? <button type="button" className={styles.planRow} onClick={plan.onOpen} data-planned={plan.label ? 'true' : undefined}>
+        <CalendarIcon />
+        {plan.label ? <span>Termin: <strong>{plan.label}</strong> · Zmień termin</span> : <span>Zaplanuj</span>}
+      </button> : null}
+
+      {onGeneratePublication ? <div className={styles.generateRow}>
+        <TextAction onClick={onGeneratePublication} disabled={!generatePublicationEnabled}>Wygeneruj opis</TextAction>
+        {generatePublicationHint ? <p className={styles.prerequisite}>{generatePublicationHint}</p> : null}
+      </div> : null}
 
       <div className={styles.block}>
         <span className={styles.label}>Opis</span>
@@ -57,11 +72,7 @@ export function PublicationSection(props: PublicationSectionProps) {
       </div>
 
       <TextAction onClick={onCopyDescription}>Kopiuj opis</TextAction>
-      {onGeneratePublication ? (
-        <TextAction onClick={onGeneratePublication} disabled={!generatePublicationEnabled}>Wygeneruj opis</TextAction>
-      ) : null}
-
-      <div className={styles.block}>
+      {isPublished || publishedAt || publicationLinks.length ? <div className={styles.block}>
         <span className={styles.label}>Po publikacji</span>
         <div className={styles.postPublication}>
           {publishedAt ? <span className={styles.publishedAt}>{publishedAt}</span> : null}
@@ -78,7 +89,7 @@ export function PublicationSection(props: PublicationSectionProps) {
           ))}
           <TextAction onClick={onAddPublicationLink}>+ Dodaj link</TextAction>
         </div>
-      </div>
+      </div> : null}
     </div>
   );
 }

@@ -37,7 +37,7 @@ const messages: Partial<Record<ErrorCode, string>> = {
   INSUFFICIENT_EVIDENCE: 'Brak zatwierdzonego źródła do sprawdzenia postulatu.',
   STALE_FACT_CLAIM: 'Ten fragment zmienił się od sprawdzenia. Sprawdź fakty ponownie.',
   STALE_LANGUAGE_RESULT: 'Skrypt zmienił się od sprawdzenia języka. Sprawdź ponownie.',
-  STALE_PUBLICATION_RESULT: 'Skrypt zmienił się od wygenerowania opisu. Wygeneruj opis ponownie.',
+  STALE_PUBLICATION_RESULT: 'Skrypt, wybrany hook lub źródła zmieniły się od wygenerowania opisu. Wygeneruj opis ponownie.',
   INTERNAL_ERROR: 'Wystąpił błąd. Spróbuj ponownie.',
 };
 

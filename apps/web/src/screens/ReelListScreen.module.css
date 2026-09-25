@@ -28,6 +28,22 @@
   flex-direction: column;
 }
 
+.search {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  margin: 4px 0 0;
+  border: 0;
+  border-bottom: 1px solid var(--sz-color-divider);
+  border-radius: 0;
+  background: transparent;
+  color: var(--sz-color-text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.search:focus { outline: none; border-bottom-color: var(--sz-color-cobalt); }
+
 /*
  * Swipe-reveal wrapper (LIST-01). `.row` translates on top of `.revealTrack`; giving `.row`
  * an opaque background is what makes the reveal actions invisible until the row actually

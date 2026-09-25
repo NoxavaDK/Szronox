@@ -71,6 +71,46 @@ test('generate_publication writes from the saved script only, without source ret
   (error: { code?: string }) => error.code === 'INVALID_AI_RESULT');
 });
 
+test('PUBLICATION-02 prompt includes only saved textual context with provenance and selected hook text', async () => {
+  const input = run('generate_publication');
+  input.input_snapshot.publicationContextVersion = 2;
+  input.input_snapshot.script = 'Skrypt o tramwajach.';
+  input.input_snapshot.hooks = [
+    { id: 'chosen', text: 'Wybrany hook', source: 'user', position: 0 },
+    { id: 'other', text: 'Nie wybrany hook', source: 'ai', position: 1 },
+  ];
+  input.input_snapshot.selectedHookId = 'chosen';
+  input.input_snapshot.originalInput = {
+    text: 'Przechwycony tekst', additionalText: 'Dodatkowy tekst', url: 'https://example.invalid/nie-pobieraj',
+    originalShare: { fields: [{ name: 'title', value: 'Tytuł wykluczony' }, { name: 'text', value: 'Oryginalne pole tekstowe' }] },
+  };
+  input.input_snapshot.inputNote = 'Notatka do źródła';
+  input.input_snapshot.imageObjects = [{ id: 'i', storageKey: 'missing', mimeType: 'image/png', byteSize: 1 }];
+  let prompt = '';
+  const work = await executeAction(input, { storageRoot: 'relative', call: async (_model, request) => {
+    prompt = promptOf(request as Record<string, unknown>);
+    return candidate({ publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tramwaj' });
+  } });
+  assert.ok(prompt.includes('Wybrany hook'));
+  assert.ok(prompt.includes('Przechwycony tekst'));
+  assert.ok(prompt.includes('Dodatkowy tekst'));
+  assert.ok(prompt.includes('Oryginalne pole tekstowe'));
+  assert.ok(prompt.includes('Notatka do źródła'));
+  for (const excluded of ['Nie wybrany hook', 'https://example.invalid/nie-pobieraj', 'Tytuł wykluczony', 'missing']) {
+    assert.equal(prompt.includes(excluded), false, `excludes ${excluded}`);
+  }
+  assert.match(prompt, /tone only/i);
+  assert.deepEqual(work.provenance && (work.provenance as { images: unknown[] }).images, []);
+  input.input_snapshot.selectedHookId = null;
+  let nullHookPrompt = '';
+  await executeAction(input, { storageRoot: 'relative', call: async (_model, request) => {
+    nullHookPrompt = promptOf(request as Record<string, unknown>);
+    return candidate({ publicationDescriptionSuggestion: 'Krótki opis', publicationHashtagsSuggestion: '#tramwaj' });
+  } });
+  assert.match(nullHookPrompt, /Selected hook \(tone only\): null/);
+  assert.equal(nullHookPrompt.includes('Wybrany hook'), false, 'null selection does not guess from the candidate list');
+});
+
 test('finalizing generate_publication stores the result and mutates no Reel content', async () => {
   const statements: string[] = [];
   const query = async (sql: string) => {

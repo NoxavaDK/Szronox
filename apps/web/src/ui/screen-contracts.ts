@@ -260,6 +260,7 @@ export interface SourceAttachmentView {
 export interface SourcesSectionProps {
   expanded: boolean;
   onToggle: () => void;
+  summary?: string | null;
 
   /** Original captured URL, if the Reel came from a link. Never rewritten. */
   originalUrl: string | null;
@@ -362,7 +363,7 @@ export interface MaterialsSectionProps {
 // ---------------------------------------------------------------------------
 
 export interface StatusTabView {
-  status: ReelStatus;
+  status: ReelStatus | 'all';
   label: string;
   /** Omit to render the tab without a count (spec shows Gotowe/Opublikowane bare). */
   count?: number;
@@ -459,8 +460,10 @@ export interface ReelQuickActionsProps {
 export interface ReelListScreenProps {
   currentUser: EditorView;
   statusTabs: StatusTabView[];
-  selectedStatus: ReelStatus;
-  onSelectStatus: (status: ReelStatus) => void;
+  selectedStatus: ReelStatus | 'all';
+  onSelectStatus: (status: ReelStatus | 'all') => void;
+  searchQuery?: string;
+  onChangeSearchQuery?: (value: string) => void;
   /** Count of items needing attention across all statuses; omit/0 hides the strip. */
   attentionCount?: number;
   onOpenAttention?: () => void;
@@ -617,6 +620,8 @@ export interface ReelDetailScreenProps {
   titlePlaceholder?: string;
 
   metadata: ReelDetailMetadataView;
+  /** One phase-relevant shortcut to existing work; never changes status by itself. */
+  contextAction?: { label: string; onClick: () => void };
   /**
    * CONTENT-PLANNER-01 `Zaplanuj publikację`: the Reel's one plan, read from the Reel itself.
    * `label` is null when unplanned. Optional so fixtures without planning still render.
@@ -704,6 +709,8 @@ export interface PublicationSectionProps {
    * failure handling are T08's responsibility (T08 sec. 8), not this component's.
    */
   onCopyDescription: () => void;
+  plan?: { label: string | null; onOpen: () => void };
+  isPublished?: boolean;
 
   /**
    * `Wygeneruj opis` (PUBLICATION-01): opens the publication proposal view generated from the
@@ -711,6 +718,7 @@ export interface PublicationSectionProps {
    */
   onGeneratePublication?: () => void;
   generatePublicationEnabled?: boolean;
+  generatePublicationHint?: string;
 
   publishedAt: string | null;
   publicationLinks: PublicationLinkView[];

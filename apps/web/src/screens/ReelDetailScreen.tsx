@@ -1,7 +1,8 @@
+import { useRef } from 'react';
 import '../ui/tokens.css';
 import type { HookEditView, ReelDetailScreenProps } from '../ui/screen-contracts.js';
 import { Avatar, CoverIndicator, SectionRow } from '../ui/primitives.js';
-import { BackArrowIcon, CalendarIcon, CloseIcon } from '../ui/icons.js';
+import { BackArrowIcon, CloseIcon } from '../ui/icons.js';
 import {
   ConflictNotice,
   EditingNotesSection,
@@ -24,7 +25,7 @@ import styles from './ReelDetailScreen.module.css';
 export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
     onBack, title, onChangeTitle, titlePlaceholder,
-    metadata, plan, selectors, overflow, onOpenFeedCover, restore,
+    metadata, plan, contextAction, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook, selectedHookId, onSelectHook, hookSelectionPending,
     hookEdits, onStartHookEdit, onChangeHookEdit, onSaveHookEdit, onCancelHookEdit,
     script, onChangeScript, scriptConflict,
@@ -33,6 +34,38 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
     saveState, conflict,
     aiRowEnabled, onAiAction, onOpenMeme, onDetachMeme, attachedMemes, onOpenProgramme,
   } = props;
+  const publicationRef = useRef<HTMLDivElement>(null);
+  const openFeedCover = () => {
+    onOpenFeedCover();
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const target = publicationRef.current?.querySelector<HTMLElement>('[data-feed-cover-toggle]');
+      target?.scrollIntoView({ block: 'center' });
+      target?.focus();
+    }));
+  };
+  const renderHook = (hook: typeof hooks[number]) => {
+    const selected = hook.id === selectedHookId;
+    const edit = hookEdits[hook.id];
+    return (
+      <li key={hook.id} className={selected ? `${styles.hookRow} ${styles.hookRowSelected}` : styles.hookRow}>
+        {edit ? (
+          <HookEditor edit={edit} onChange={(text) => onChangeHookEdit(hook.id, text)} onSave={() => onSaveHookEdit(hook.id)} onCancel={() => onCancelHookEdit(hook.id)} />
+        ) : <>
+          <button type="button" className={styles.hookSelect} aria-pressed={selected} disabled={hookSelectionPending} onClick={() => onSelectHook(hook.id)}>
+            <span className={styles.hookText}>{hook.text}</span>
+            {selected || hook.source === 'user' ? <span className={styles.hookTags}>
+              {selected ? <span className={styles.hookSelectedTag}>✓ WYBRANY</span> : null}
+              {hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}
+            </span> : null}
+          </button>
+          <button type="button" className={styles.hookControl} onClick={() => onStartHookEdit(hook.id)} aria-label="Edytuj hook"><span aria-hidden="true">✎</span></button>
+          <button type="button" className={styles.hookControl} onClick={() => onRemoveHook(hook.id)} aria-label="Usuń hook"><CloseIcon /></button>
+        </>}
+      </li>
+    );
+  };
+  const selectedHook = hooks.find((hook) => hook.id === selectedHookId);
+  const otherHooks = selectedHook ? hooks.filter((hook) => hook.id !== selectedHook.id) : hooks;
 
   return (
     <div className={styles.screen}>
@@ -49,7 +82,7 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           placeholder={titlePlaceholder}
           onChange={(event) => onChangeTitle(event.target.value)}
         />
-        <CoverIndicator done={metadata.feedCoverDone} onClick={onOpenFeedCover} />
+        <CoverIndicator done={metadata.feedCoverDone} onClick={openFeedCover} />
         <ReelOverflow {...overflow} />
       </header>
 
@@ -58,13 +91,6 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
 
       {/* Controlled STATUS / PRIORYTET / MONTUJE (frozen batch sec. 3). */}
       <MetadataSelectors {...selectors} />
-
-      {plan ? (
-        <button type="button" className={styles.planRow} onClick={plan.onOpen} data-planned={plan.label ? 'true' : undefined}>
-          <CalendarIcon />
-          {plan.label ? <span>Publikacja: <strong>{plan.label}</strong></span> : <span>Zaplanuj publikację</span>}
-        </button>
-      ) : null}
 
       {metadata.programmeState !== 'unchecked' ? (
         <button type="button" className={styles.metadataProgramme} onClick={onOpenProgramme}>
@@ -76,61 +102,17 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
         <button type="button" onClick={onOpenMeme}>{attachedMemes?.length ? '+ kolejny' : '+ Mem'}</button>
       </div>
 
-      <section className={styles.contentBlock}>
+      {contextAction ? <button type="button" className={styles.contextAction} onClick={contextAction.onClick}>{contextAction.label}</button> : null}
+      <SourcesSection {...sources} />
+
+      <section className={styles.contentBlock} data-hooks-section>
         <h2 className={styles.sectionLabel}>Hooki</h2>
         <ul className={styles.hookList}>
-          {hooks.map((hook) => {
-            const selected = hook.id === selectedHookId;
-            const edit = hookEdits[hook.id];
-            return (
-              <li key={hook.id} className={selected ? `${styles.hookRow} ${styles.hookRowSelected}` : styles.hookRow}>
-                {edit ? (
-                  <HookEditor
-                    edit={edit}
-                    onChange={(text) => onChangeHookEdit(hook.id, text)}
-                    onSave={() => onSaveHookEdit(hook.id)}
-                    onCancel={() => onCancelHookEdit(hook.id)}
-                  />
-                ) : (
-                  <>
-                    {/* The row itself is the selection target. Edit and delete are siblings,
-                        not children, so neither can also select. */}
-                    <button
-                      type="button"
-                      className={styles.hookSelect}
-                      aria-pressed={selected}
-                      disabled={hookSelectionPending}
-                      onClick={() => onSelectHook(hook.id)}
-                    >
-                      <span className={styles.hookText}>{hook.text}</span>
-                      {selected || hook.source === 'user' ? (
-                        <span className={styles.hookTags}>
-                          {selected ? <span className={styles.hookSelectedTag}>✓ WYBRANY</span> : null}
-                          {hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}
-                        </span>
-                      ) : null}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.hookControl}
-                      onClick={() => onStartHookEdit(hook.id)}
-                      aria-label="Edytuj hook"
-                    >
-                      <span aria-hidden="true">✎</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.hookControl}
-                      onClick={() => onRemoveHook(hook.id)}
-                      aria-label="Usuń hook"
-                    >
-                      <CloseIcon />
-                    </button>
-                  </>
-                )}
-              </li>
-            );
-          })}
+          {selectedHook ? renderHook(selectedHook) : null}
+          {otherHooks.length > 0 ? selectedHook ? <li className={styles.otherHooks}><details>
+            <summary>Pozostałe hooki ({otherHooks.length})</summary>
+            <ul className={styles.hookList}>{otherHooks.map(renderHook)}</ul>
+          </details></li> : otherHooks.map(renderHook) : null}
           {/* A draft whose hook was deleted elsewhere: still shown, so the text is not lost. */}
           {Object.entries(hookEdits)
             .filter(([id]) => !hooks.some((hook) => hook.id === id))
@@ -148,7 +130,7 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           className={styles.scriptField}
           aria-label="Skrypt"
           value={script}
-          rows={8}
+          rows={4}
           onChange={(event) => onChangeScript(event.target.value)}
         />
         {scriptConflict ? <ConflictNotice conflict={scriptConflict} /> : null}
@@ -161,11 +143,14 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       </div>
 
       <div className={styles.secondarySections}>
-        <SourcesSection {...sources} />
-        <EditingNotesSection {...editingNotes} />
         <MaterialsSection {...materials} />
-        <SectionRow label="PUBLIKACJA" onClick={onTogglePublication} />
-        {publicationExpanded ? <PublicationSection {...publication} /> : null}
+        <EditingNotesSection {...editingNotes} />
+        <SectionRow label="PUBLIKACJA" summary={publicationExpanded ? undefined : metadata.status === 'published'
+          ? `Opublikowano · Okładka ${publication.feedCoverDone ? 'gotowa' : 'do zrobienia'}`
+          : publication.description.trim() ? 'Opis gotowy · Otwórz publikację'
+            : metadata.status === 'ready' ? 'Wygeneruj opis' : `Okładka ${publication.feedCoverDone ? 'gotowa' : 'do zrobienia'}`}
+          onClick={onTogglePublication} />
+        {publicationExpanded ? <div ref={publicationRef}><PublicationSection {...publication} plan={plan} /></div> : null}
       </div>
 
       {conflict ? <ConflictNotice conflict={conflict} /> : null}

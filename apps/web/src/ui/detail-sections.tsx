@@ -219,7 +219,7 @@ export function MetadataSelectors(props: MetadataSelectorsProps) {
  */
 export function SourcesSection(props: SourcesSectionProps) {
   const {
-    expanded, onToggle, originalUrl, originalText, additionalText,
+    expanded, onToggle, summary, originalUrl, originalText, additionalText,
     attachments, onOpenAttachment, inputNote, onChangeInputNote,
     inputNoteSaveState, inputNoteConflict, onOpenSource,
   } = props;
@@ -227,6 +227,7 @@ export function SourcesSection(props: SourcesSectionProps) {
   return (
     <section className={styles.section}>
       <SectionHeader heading={COPY.sourcesHeading} expanded={expanded} onToggle={onToggle} />
+      {!expanded && summary ? <p className={styles.sourceSummary}>{summary}</p> : null}
       {expanded ? (
         <div className={styles.sectionBody}>
           {originalUrl || originalText ? (
@@ -411,7 +412,7 @@ export function MaterialsSection(props: MaterialsSectionProps) {
                   Otwórz <ExternalLinkIcon aria-hidden="true" />
                 </TextAction>
                 {/* Every explicit replacement makes a new revision, same file or not. */}
-                <TextAction onClick={onReplaceExport}>{COPY.exportReplace}</TextAction>
+                <TextAction onClick={onReplaceExport}>{currentExport.label ? COPY.exportReplace : 'Dodaj eksport'}</TextAction>
               </div>
             )}
           </div>

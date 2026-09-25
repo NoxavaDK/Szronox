@@ -144,18 +144,20 @@ test('publication application requires explicit current-value confirmation after
   } finally { await db.close(); }
 });
 
-test('generate_publication snapshots the saved script only and ignores incomplete uploads', async () => {
+test('new generate_publication snapshots versioned grounded context and ignores incomplete uploads', async () => {
   const { db, service } = await setup();
   try {
     // The input image is still pending: irrelevant to a script-based action.
     const queued = await service.enqueue(actor, reelId, {
       operationId: '05000000-0000-4000-8000-000000000001', expectedVersion: 1, action: 'generate_publication',
     });
-    const stored = await db.query<{ action: string; input_snapshot: { script: string; scriptRevision: number; imageObjects: unknown[] } }>(
-      'select action,input_snapshot from app.ai_runs where id=$1', [queued.id]);
+    const stored = await db.query<{ action: string; prompt_id: string; input_snapshot: { script: string; scriptRevision: number; publicationContextVersion?: number; imageObjects: unknown[] } }>(
+      'select action,input_snapshot,prompt_id from app.ai_runs where id=$1', [queued.id]);
     assert.equal(stored.rows[0].action, 'generate_publication');
     assert.equal(stored.rows[0].input_snapshot.script, 'Stary skrypt.');
     assert.equal(stored.rows[0].input_snapshot.scriptRevision, 0);
+    assert.equal(stored.rows[0].input_snapshot.publicationContextVersion, 2);
+    assert.equal(stored.rows[0].prompt_id, 'gemini-02-publication-provisional-v2');
     assert.deepEqual(stored.rows[0].input_snapshot.imageObjects, []);
     // Other actions keep their upload gate.
     await assert.rejects(service.enqueue(actor, reelId, {
@@ -164,6 +166,87 @@ test('generate_publication snapshots the saved script only and ignores incomplet
     const latest = await service.latest(actor, reelId, 'generate_publication');
     assert.equal(latest?.id, queued.id);
     assert.equal((await service.latest(actor, reelId, 'develop')), null);
+  } finally { await db.close(); }
+});
+
+test('PUBLICATION-02 freshness follows selected hook and eligible saved text, not unrelated metadata', async () => {
+  const { db, service } = await setup();
+  const hookId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc';
+  try {
+    await db.query('insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$2,$3,$4,0)',
+      [hookId, reelId, 'Wybrany hook', 'user']);
+    await db.query('update app.reels set selected_hook_id=$2,original_input=$3,input_note=$4 where id=$1', [reelId,
+      hookId, JSON.stringify({ text: 'Przechwycony tekst', additionalText: 'Dodatkowy tekst', url: 'https://example.invalid', images: [],
+        originalShare: { fields: [{ name: 'title', value: 'Tytuł' }, { name: 'text', value: 'Tekst z udostępnienia' }], files: [] } }), 'Notatka']);
+    const runId = await publicationRun(db, service, '05100000-0000-4000-8000-000000000001');
+    const stored = await db.query<{ input_snapshot: { publicationContextVersion: number; inputNote: string; selectedHookId: string; hooks: Array<{ id: string; text: string }>; originalInput: { url?: string } } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [runId]);
+    const snapshot = stored.rows[0].input_snapshot;
+    assert.equal(snapshot.publicationContextVersion, 2);
+    assert.equal(snapshot.selectedHookId, hookId);
+    assert.ok(snapshot.hooks.some((hook) => hook.id === hookId && hook.text === 'Wybrany hook'));
+    assert.deepEqual(snapshot.originalInput, {
+      text: 'Przechwycony tekst', additionalText: 'Dodatkowy tekst', url: 'https://example.invalid', images: [],
+      originalShare: { fields: [{ name: 'title', value: 'Tytuł' }, { name: 'text', value: 'Tekst z udostępnienia' }], files: [] },
+    });
+    assert.equal(stored.rows[0].input_snapshot.inputNote, 'Notatka');
+    assert.equal((await service.get(actor, runId)).isStale, false);
+
+    await db.query("update app.reels set priority='urgent',version=version+1 where id=$1", [reelId]);
+    assert.equal((await service.get(actor, runId)).isStale, false);
+    await db.query("update app.reels set input_note='Zmiana notatki',version=version+1 where id=$1", [reelId]);
+    assert.equal((await service.get(actor, runId)).isStale, true);
+    await assert.rejects(service.apply(actor, runId, {
+      operationId: '05100000-0000-4000-8000-000000000002', expectedVersion: 3,
+      selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
+  } finally { await db.close(); }
+});
+
+test('PUBLICATION-02 selected-hook identity, text edits and deletion stale a proposal', async () => {
+  const { db, service } = await setup();
+  const firstHook = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+  const nextHook = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2';
+  try {
+    await db.query('insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$3,$4,$5,0),($2,$3,$6,$5,1)',
+      [firstHook, nextHook, reelId, 'Hook pierwszy', 'user', 'Hook następny']);
+    await db.query('update app.reels set selected_hook_id=$2 where id=$1', [reelId, firstHook]);
+
+    const selectionRun = await publicationRun(db, service, '05200000-0000-4000-8000-000000000001');
+    await db.query('update app.reels set selected_hook_id=$2,version=version+1 where id=$1', [reelId, nextHook]);
+    assert.equal((await service.get(actor, selectionRun)).isStale, true, 'changing to another valid hook ID stales');
+    await assert.rejects(service.apply(actor, selectionRun, {
+      operationId: '05200000-0000-4000-8000-000000000002', expectedVersion: 2,
+      selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
+
+    const editRun = await publicationRun(db, service, '05200000-0000-4000-8000-000000000003', 2);
+    await db.query("update app.reel_hooks set text='Hook zmieniony' where id=$1", [nextHook]);
+    await db.query('update app.reels set version=version+1 where id=$1', [reelId]);
+    assert.equal((await service.get(actor, editRun)).isStale, true, 'selected hook text is exact freshness input');
+    await assert.rejects(service.apply(actor, editRun, {
+      operationId: '05200000-0000-4000-8000-000000000004', expectedVersion: 3,
+      selection: 'publication_hashtags', text: '#AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
+
+    const deleteRun = await publicationRun(db, service, '05200000-0000-4000-8000-000000000005', 3);
+    await db.query('delete from app.reel_hooks where id=$1', [nextHook]);
+    assert.equal((await service.get(actor, deleteRun)).isStale, true, 'deleting the selected hook clears selection and stales');
+    await assert.rejects(service.apply(actor, deleteRun, {
+      operationId: '05200000-0000-4000-8000-000000000006', expectedVersion: 3,
+      selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
+
+    const newHookRun = await publicationRun(db, service, '05200000-0000-4000-8000-000000000007', 3);
+    const addedHook = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3';
+    await db.query('insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$2,$3,$4,2)',
+      [addedHook, reelId, 'Nowy hook po wygenerowaniu', 'user']);
+    await db.query('update app.reels set selected_hook_id=$2,version=version+1 where id=$1', [reelId, addedHook]);
+    assert.equal((await service.get(actor, newHookRun)).isStale, true, 'selecting a newly added hook stales even though it was absent from the run snapshot');
+    await assert.rejects(service.apply(actor, newHookRun, {
+      operationId: '05200000-0000-4000-8000-000000000008', expectedVersion: 4,
+      selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
+    }), code('STALE_PUBLICATION_RESULT'));
   } finally { await db.close(); }
 });
 

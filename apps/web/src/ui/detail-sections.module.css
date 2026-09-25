@@ -9,6 +9,7 @@
 .chevron, .chevronOpen { display: inline-flex; transition: transform .15s ease; }
 .chevronOpen { transform: rotate(90deg); }
 .sectionBody { padding-bottom: .75rem; display: grid; gap: .9rem; }
+.sourceSummary { margin: -.25rem 0 .65rem; color: var(--sz-color-text-secondary); font-size: 12.5px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subsection { display: grid; gap: .35rem; }
 .subheading { margin: 0; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; opacity: .6; font-weight: 600; }
 .microLabel { font-size: .65rem; letter-spacing: .08em; text-transform: uppercase; opacity: .55; }
