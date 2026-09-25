@@ -98,6 +98,8 @@ export const ATTENTION_THRESHOLD_HOURS: Record<Priority, number> = {
 };
 
 export const COPY = {
+  /** CONTENT-PLANNER-01 list quick action. */
+  schedule: 'Zaplanuj',
   /** sec. 3 — the editor may legitimately be null. */
   editorNone: 'Brak',
   editorSectionLabel: 'MONTUJE',
@@ -395,6 +397,8 @@ export interface ReelListItemView {
   /** Name of the single attached meme, if any; the list shows at most one. */
   memeName: string | null;
   feedCoverDone: boolean;
+  /** CONTENT-PLANNER-01: short plan label (`Jutro, 18:00`), or null/absent when unplanned. */
+  planLabel?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +440,8 @@ export interface ReelQuickActionsProps {
   /** The unambiguous swipe-right pill commits directly, without opening the sheet. */
   onQuickAdvanceStatus: (id: Id, status: ReelStatus) => void;
   onCopyLink: (id: Id) => void;
+  /** `Zaplanuj` (CONTENT-PLANNER-01): opens the shared plan sheet for this Reel. Optional. */
+  onOpenSchedule?: (id: Id) => void;
   /** kDrive integration is not yet enabled anywhere in the product; the row states that honestly. */
   kdriveEnabled: boolean;
   onOpenKdrive: (id: Id) => void;
@@ -468,6 +474,10 @@ export interface ReelListScreenProps {
    * never a sixth status and never a primary tab.
    */
   onOpenDeleted: () => void;
+  /** CONTENT-PLANNER-01: the mobile entry to the PLAN view. Absent when PLAN is already on screen. */
+  onOpenPlan?: () => void;
+  /** Rendered as a side pane: the fixed Nowy pomysł button stays within the pane's own column. */
+  embedded?: boolean;
 
   /** Long-press / swipe-reveal quick actions (LIST-01). Optional: omitting it disables gestures cleanly. */
   quickActions?: ReelQuickActionsProps;
@@ -607,6 +617,11 @@ export interface ReelDetailScreenProps {
   titlePlaceholder?: string;
 
   metadata: ReelDetailMetadataView;
+  /**
+   * CONTENT-PLANNER-01 `Zaplanuj publikację`: the Reel's one plan, read from the Reel itself.
+   * `label` is null when unplanned. Optional so fixtures without planning still render.
+   */
+  plan?: { label: string | null; onOpen: () => void };
   /** Controlled status/priority/MONTUJE selection (sec. 3). */
   selectors: MetadataSelectorsProps;
   overflow: ReelOverflowProps;

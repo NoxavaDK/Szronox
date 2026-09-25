@@ -1,0 +1,145 @@
+/* Zaplanuj sheet (CONTENT-PLANNER-01). Sits on the LIST-01 sheet shell; only the day
+   shortcuts, the two native inputs and the action row are its own. */
+
+.days {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: var(--sz-space-1);
+}
+
+.day {
+  appearance: none;
+  border: 1px solid var(--sz-color-divider);
+  background: var(--sz-color-background);
+  border-radius: var(--sz-radius-sm);
+  min-height: var(--sz-touch-target);
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  font: inherit;
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
+}
+
+.day[aria-pressed='true'] {
+  border-color: var(--sz-color-cobalt);
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+}
+
+.dayName {
+  font-size: var(--sz-text-section-label-size);
+  font-weight: var(--sz-text-section-label-weight);
+  letter-spacing: var(--sz-text-section-label-tracking);
+}
+
+.dayDate {
+  font-size: var(--sz-text-metadata-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sz-space-3);
+  margin-top: var(--sz-space-2);
+}
+
+.field {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--sz-text-metadata-size);
+  color: var(--sz-color-text-secondary);
+}
+
+.field[data-active='true'] > span:first-child {
+  color: var(--sz-color-cobalt);
+  font-weight: 650;
+}
+
+.field input {
+  min-height: 40px;
+  border: 0;
+  border-bottom: 1px solid var(--sz-color-divider);
+  background: transparent;
+  font: inherit;
+  font-size: var(--sz-text-body-size);
+  color: var(--sz-color-text-primary);
+  padding: 0 2px;
+}
+
+.field input:disabled {
+  color: var(--sz-color-text-secondary);
+}
+
+.timeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-1);
+}
+
+.timeRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+.clearTime {
+  appearance: none;
+  border: 0;
+  background: none;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+  color: var(--sz-color-text-secondary);
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sz-space-3);
+  margin-top: var(--sz-space-3);
+}
+
+.primaryActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sz-space-4);
+}
+
+.clear {
+  appearance: none;
+  border: 0;
+  background: none;
+  min-height: var(--sz-touch-target);
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--sz-color-urgent);
+  cursor: pointer;
+}
+
+.done {
+  appearance: none;
+  border: 0;
+  border-radius: var(--sz-radius-sm);
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+  min-height: 40px;
+  padding: 0 var(--sz-space-4);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.done:disabled,
+.clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

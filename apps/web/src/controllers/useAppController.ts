@@ -5,6 +5,7 @@ import type { CoreApiClient } from '../data/api.js';
 import type { AttachmentRecovery, AttachmentProgress } from '../data/attachment-recovery.js';
 import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { composePublicationText } from '../data/publication.js';
+import { planChanges } from '../data/planner.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import { createRequestFromDraft } from '../drafts/create-request.js';
 import type { SyncQueue } from '../drafts/queue.js';
@@ -15,7 +16,15 @@ export type Route =
   | { name: 'capture'; draftId: string }
   | { name: 'detail'; reelId: string }
   /** `Usunięte` — a secondary view, never a sixth status (frozen batch sec. 8). */
-  | { name: 'deleted' };
+  | { name: 'deleted' }
+  /** CONTENT-PLANNER-01: the full-width PLAN view on single-pane (mobile) layouts. */
+  | { name: 'plan' };
+
+/**
+ * How many workspace panes the viewport holds (CONTENT-PLANNER-01). `single` is the mobile
+ * one-view-at-a-time app; `two` keeps PLAN beside the centre; `three` adds REELS on the right.
+ */
+export type WorkspaceLayout = 'single' | 'two' | 'three';
 
 /**
  * A 409 keeps the local draft and offers an explicit choice. Nothing is resolved
@@ -68,10 +77,22 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [hookEdits, setHookEdits] = useState<Record<string, HookEdit>>({});
   const [hookSelecting, setHookSelecting] = useState(false);
+  const [layout, setLayout] = useState<WorkspaceLayout>('single');
+  const layoutRef = useRef<WorkspaceLayout>('single');
+  useEffect(() => { layoutRef.current = layout; }, [layout]);
+  /** Every active Reel, for the planner view. The plan itself lives on each Reel. */
+  const [planReels, setPlanReels] = useState<Reel[]>([]);
+  const [planLoadState, setPlanLoadState] = useState<'idle' | 'loading' | 'loaded' | 'error' | 'offline'>('idle');
+  /** Where Wstecz from Detail returns on a single-pane layout: the list or the plan. */
+  const lastPrimary = useRef<'list' | 'plan'>('list');
+  const primaryRoute = (): Route => (lastPrimary.current === 'plan' ? { name: 'plan' } : { name: 'list' });
+  useEffect(() => { if (route.name === 'list' || route.name === 'plan') lastPrimary.current = route.name; }, [route]);
   const hookEditsRef = useRef<Record<string, HookEdit>>({});
   const saveTimer = useRef<number>();
   const currentRef = useRef<Reel | null>(null);
   const pendingPatch = useRef<{ reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | null>(null);
+  /** Sends a debounced edit now; set while one is waiting for its timer. */
+  const flushPending = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => { currentRef.current = current; }, [current]);
   useEffect(() => { hookEditsRef.current = hookEdits; }, [hookEdits]);
 
@@ -204,7 +225,50 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     try { const page = await api.list({ status }); setReels(page.items); setLoadState('loaded'); }
     catch (error) { reportLoadFailure(error); }
   }, [api, reportLoadFailure, status, user]);
-  useEffect(() => { if (route.name === 'list') void loadList(); }, [loadList, route.name]);
+  // On the three-pane layout REELS is always on screen, so it loads regardless of the route.
+  const listShown = layout === 'three' || route.name === 'list';
+  useEffect(() => { if (listShown) void loadList(); }, [loadList, listShown]);
+
+  /**
+   * The planner reads every active Reel (all statuses) and derives days and NIEZAPLANOWANE
+   * from their plan fields. A reload keeps the previous items on screen instead of blanking.
+   */
+  const loadPlanner = useCallback(async () => {
+    if (!user) return;
+    setPlanLoadState((state) => (state === 'loaded' ? state : 'loading'));
+    try {
+      const items: Reel[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 50; page += 1) {
+        const result = await api.list({ limit: 100, cursor });
+        items.push(...result.items);
+        if (!result.nextCursor) break;
+        cursor = result.nextCursor;
+      }
+      setPlanReels(items); setPlanLoadState('loaded');
+    } catch (error) {
+      if (isAbandonedRequest(error)) return;
+      setPlanLoadState(navigator.onLine ? 'error' : 'offline');
+    }
+  }, [api, user]);
+  const planShown = layout !== 'single' || route.name === 'plan';
+  useEffect(() => { if (planShown) void loadPlanner(); }, [loadPlanner, planShown]);
+  /** Refresh after a change the planner cannot derive locally (capture, delete, restore). */
+  const refreshPlanner = useCallback(() => { if (planShown) void loadPlanner(); }, [loadPlanner, planShown]);
+
+  /**
+   * The open Reel is the freshest copy of itself (including unsent local edits), so the
+   * planner and the list show it rather than their last fetched copy. This is how a plan set
+   * in Reel Detail appears in the planner immediately, and how later list/planner writes
+   * against this Reel use its current version.
+   */
+  useEffect(() => {
+    if (!current) return;
+    const sync = (list: Reel[]) => (list.some((item) => item.id === current.id && item !== current)
+      ? list.map((item) => (item.id === current.id && current.version >= item.version ? current : item))
+      : list);
+    setPlanReels(sync); setReels(sync);
+  }, [current]);
 
   /**
    * Re-fetches the currently selected status tab without touching `loadState` (LIST-01).
@@ -249,7 +313,16 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * on a failure keeps that retry meaningful instead of stranding the user on a dead route.
    */
   const openDetail = useCallback(async (reelId: string) => {
-    setLoadState('loading');
+    // With PLAN/REELS on screen beside the centre, switching Reels must not blank the list
+    // into "Wczytywanie…": the load is quiet and a failure is reported as a notice instead.
+    const quiet = layoutRef.current !== 'single';
+    // Switching straight to another Reel (one click in PLAN/REELS) sends the previous Reel's
+    // debounced edit now rather than letting the next Reel's edit replace it unsent.
+    if (pendingPatch.current && pendingPatch.current.reelId !== reelId && flushPending.current) {
+      window.clearTimeout(saveTimer.current);
+      void flushPending.current();
+    }
+    if (!quiet) setLoadState('loading');
     try {
       const reel = await api.reel(reelId, { includeDeleted: true });
       // Drafts are read for the account that is active now, and the id is part of
@@ -257,13 +330,16 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       const draft = user ? await store.reel(user.id, reelId) : undefined;
       const resolved = draft ? { ...reel, ...draft.changes } : reel;
       currentRef.current = resolved;
-      setCurrent(resolved); setSaveState(draft ? 'offline' : 'idle'); setLoadState('loaded');
+      setCurrent(resolved); setSaveState(draft ? 'offline' : 'idle'); if (!quiet) setLoadState('loaded');
       setRoute({ name: 'detail', reelId });
       // `route` alone is in-memory and vanishes on reload. `Kopiuj link` (LIST-01) and
       // reloading while a Reel is open both need the address bar to actually name it.
       const path = `/reels/${encodeURIComponent(reelId)}`;
       if (typeof history !== 'undefined' && location.pathname !== path) history.pushState({ reelId }, '', path);
-    } catch (error) { reportLoadFailure(error); }
+    } catch (error) {
+      if (quiet) { if (!isAbandonedRequest(error)) setMessage(polishError(error)); return; }
+      reportLoadFailure(error);
+    }
   }, [api, reportLoadFailure, store, user]);
 
   /** Reads a deep link (`/reels/:id`) on first load, once the session is confirmed. */
@@ -284,7 +360,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
         const id = decodeURIComponent(match[1]);
         if (!(currentRef.current?.id === id && route.name === 'detail')) void openDetail(id);
       } else if (route.name === 'detail') {
-        setRoute({ name: 'list' });
+        setRoute(primaryRoute());
       }
     };
     window.addEventListener('popstate', onPopState);
@@ -296,7 +372,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     if (typeof history !== 'undefined' && location.pathname !== '/') history.pushState({}, '', '/');
   }, []);
 
-  const leaveDetail = useCallback(() => { setRoute({ name: 'list' }); syncListUrl(); }, [syncListUrl]);
+  const leaveDetail = useCallback(() => { setRoute(primaryRoute()); syncListUrl(); }, [syncListUrl]);
 
   const startCapture = useCallback(() => {
     if (!user) return; const reelId = crypto.randomUUID();
@@ -337,10 +413,11 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
         return reel;
       }
       setRoute({ name: 'list' });
+      refreshPlanner();
       reportAttachments(progress);
       return null;
     } catch (error) { if (isAbandonedRequest(error)) return null; setSaveState('error'); setMessage(polishError(error)); return null; }
-  }, [api, attachments, capture, queue, reportAttachments, store, user]);
+  }, [api, attachments, capture, queue, refreshPlanner, reportAttachments, store, user]);
 
   const changeReel = useCallback((changes: ReelPatchRequest['changes']) => {
     const reel = currentRef.current;
@@ -350,12 +427,31 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     const next = { ...reel, ...changes }; currentRef.current = next; setCurrent(next); setSaveState('saving');
     const draft: ReelDraft = { id: `${user.id}:${reel.id}`, accountId: user.id, reelId: reel.id, expectedVersion: pending.expectedVersion, changes: pending.changes, updatedAt: Date.now() };
     void store.saveReel(draft).then(() => {
-      window.clearTimeout(saveTimer.current); saveTimer.current = window.setTimeout(async () => {
+      window.clearTimeout(saveTimer.current);
+      const send = async () => {
+        flushPending.current = null;
         const sending = pendingPatch.current;
         if (!sending) return;
         pendingPatch.current = null;
         const request = { operationId: crypto.randomUUID(), expectedVersion: sending.expectedVersion, changes: sending.changes };
-        try { const saved = await api.patch(sending.reelId, request); currentRef.current = saved; setCurrent(saved); await store.deleteReel(user.id, sending.reelId); setSaveState('saved'); }
+        try {
+          const saved = await api.patch(sending.reelId, request);
+          // The user may have switched to another Reel while this save was debounced or in
+          // flight (one click away in the planner/list panes): it must not replace that one.
+          if (currentRef.current?.id === saved.id) {
+            // Edits typed while this save was in flight were based on the same version; our
+            // own save is the only change in between, so they are rebased and kept visible.
+            const latest = pendingPatch.current as typeof sending | null;
+            const typed = latest?.reelId === saved.id ? latest : null;
+            if (typed && typed.expectedVersion === sending.expectedVersion) typed.expectedVersion = saved.version;
+            const next = typed ? { ...saved, ...typed.changes } : saved;
+            currentRef.current = next; setCurrent(next);
+          } else {
+            const upsert = (list: Reel[]) => list.map((item) => (item.id === saved.id ? saved : item));
+            setPlanReels(upsert); setReels(upsert);
+          }
+          await store.deleteReel(user.id, sending.reelId); setSaveState('saved');
+        }
         catch (error) {
           // Abandoned after an account switch: the draft stays in this account's
           // partition untouched, and nothing is queued or shown against the new one.
@@ -384,7 +480,9 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
           else { await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'patch', reelId: sending.reelId, createdAt: Date.now(), state: 'pending', payload: request }); setSaveState(navigator.onLine ? 'error' : 'offline'); }
           setMessage(polishError(error));
         }
-      }, 600);
+      };
+      flushPending.current = send;
+      saveTimer.current = window.setTimeout(send, 600);
     }).catch((error) => { setSaveState('error'); setMessage(polishError(error)); });
   }, [api, store, user]);
 
@@ -515,7 +613,11 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const deleteCurrent = useCallback(async () => {
     if (!current || !user) return;
     const request = { operationId: crypto.randomUUID(), expectedVersion: current.version }; setSaveState('saving');
-    try { await api.remove(current.id, request); setCurrent(null); setRoute({ name: 'list' }); syncListUrl(); setSaveState('saved'); }
+    try {
+      await api.remove(current.id, request);
+      setPlanReels((list) => list.filter((item) => item.id !== current.id));
+      setCurrent(null); setRoute(primaryRoute()); syncListUrl(); setSaveState('saved');
+    }
     catch (error) {
       if (isAbandonedRequest(error)) return;
       const conflict = error instanceof ClientApiError && error.status === 409;
@@ -526,13 +628,13 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
 
   const restore = useCallback(async (reel: Reel) => {
     if (!user) return; const request = { operationId: crypto.randomUUID(), expectedVersion: reel.version };
-    try { await api.restore(reel.id, request); setRoute({ name: 'list' }); syncListUrl(); }
+    try { await api.restore(reel.id, request); setRoute({ name: 'list' }); syncListUrl(); refreshPlanner(); }
     catch (error) {
       if (isAbandonedRequest(error)) return;
       const conflict = error instanceof ClientApiError && error.status === 409;
       await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'restore', reelId: reel.id, createdAt: Date.now(), state: conflict ? 'conflict' : 'pending', payload: request }); setMessage(polishError(error));
     }
-  }, [api, store, syncListUrl, user]);
+  }, [api, refreshPlanner, store, syncListUrl, user]);
 
   /**
    * Version-checked patch against a Reel that may not be `current` (LIST-01 list quick
@@ -557,6 +659,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     try {
       const saved = await api.patch(id, request);
       if (currentRef.current?.id === id) { currentRef.current = saved; setCurrent(saved); }
+      setPlanReels((list) => (list.some((item) => item.id === id) ? list.map((item) => (item.id === id ? saved : item)) : [...list, saved]));
       if (changes.status !== undefined) await refreshFilteredList();
       else setReels((list) => list.map((item) => (item.id === id ? saved : item)));
       return { ok: true, reel: saved };
@@ -580,6 +683,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     try {
       await api.remove(id, request);
       setReels((list) => list.filter((item) => item.id !== id));
+      setPlanReels((list) => list.filter((item) => item.id !== id));
       if (currentRef.current?.id === id) { currentRef.current = null; setCurrent(null); }
       return { ok: true };
     } catch (error) {
@@ -594,6 +698,26 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       return { ok: false, conflict: false, queued: true, message: 'Brak sieci. Usunięcie zostanie wysłane po powrocie sieci.' };
     }
   }, [api, store, user]);
+
+  /**
+   * Set, move or clear one Reel's publication plan (CONTENT-PLANNER-01). Every surface —
+   * planner, list quick action, Reel Detail — calls this, and it only ever writes the two
+   * plan fields of that Reel through the ordinary PATCH: no planner record, no status change.
+   *
+   * The open Reel goes through `changeReel`, the same debounced, draft-backed save as every
+   * other Detail edit, so a plan change cannot race an unsent script edit into a conflict.
+   * Any other Reel uses the list's version-checked `patchReelById`.
+   */
+  const scheduleReel = useCallback(async (id: string, date: string | null, time: string | null): Promise<{ ok: boolean; message: string }> => {
+    const changes = planChanges(date, time);
+    if (currentRef.current?.id === id && route.name === 'detail') { changeReel(changes); return { ok: true, message: '' }; }
+    let base = planReels.find((item) => item.id === id) ?? reels.find((item) => item.id === id);
+    if (!base) {
+      try { base = await api.reel(id); } catch (error) { return { ok: false, message: polishError(error) }; }
+    }
+    const result = await patchReelById(id, base.version, changes);
+    return result.ok ? { ok: true, message: '' } : { ok: false, message: result.message };
+  }, [api, changeReel, patchReelById, planReels, reels, route.name]);
 
   /** `Kopiuj link` (LIST-01): a same-origin, session-authenticated deep link to this Reel. */
   const copyReelLink = useCallback(async (id: string) => {
@@ -674,8 +798,10 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const clearAccountView = useCallback(() => {
     window.clearTimeout(saveTimer.current);
     pendingPatch.current = null;
+    flushPending.current = null;
     currentRef.current = null;
     setCurrent(null); setCapture(null); setReels([]); setDeleted([]); setConflict(null);
+    setPlanReels([]); setPlanLoadState('idle');
     hookEditsRef.current = {}; setHookEdits({});
     setSaveState('idle'); setLoadState('idle'); setRoute({ name: 'list' });
   }, []);
@@ -727,5 +853,6 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
     hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
-    patchReelById, removeReelById, copyReelLink, hasUnsavedChanges };
+    patchReelById, removeReelById, copyReelLink, hasUnsavedChanges,
+    layout, setLayout, planReels, planLoadState, loadPlanner, scheduleReel };
 }

@@ -1,6 +1,8 @@
 /** T00 wire contracts. Frozen written specs govern UI; final editorial prompts remain pending. */
 export type Id = string;
 export type IsoDateTime = string;
+/** Calendar date without time zone, `YYYY-MM-DD`. */
+export type IsoDate = string;
 export type ReelStatus = 'idea' | 'to_record' | 'editing' | 'ready' | 'published';
 export type Priority = 'urgent' | 'normal' | 'evergreen';
 export interface MutationContext { operationId: Id; expectedVersion: number }
@@ -149,6 +151,13 @@ export interface Reel {
   publicationHashtags: string;
   /** Required production deliverable; SQL feed_cover_done NOT NULL DEFAULT false. */
   feedCoverDone: boolean;
+  /**
+   * CONTENT-PLANNER-01: the one current publication plan, local calendar date `YYYY-MM-DD`,
+   * or null when unplanned. Planning never changes `status`.
+   */
+  plannedPublicationDate: IsoDate | null;
+  /** Optional local time `HH:MM`; only ever set together with a date. */
+  plannedPublicationTime: string | null;
   createdBy: Id;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -191,7 +200,7 @@ export interface ReelPatchRequest extends MutationContext {
   changes: Partial<Pick<Reel,
     'title' | 'status' | 'priority' | 'inputNote' | 'script' | 'editingNotes' |
     'editorId' | 'publishedAt' | 'publicationUrls' | 'publicationDescription' |
-    'publicationHashtags' | 'feedCoverDone'>>;
+    'publicationHashtags' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationTime'>>;
 }
 export interface AddHookRequest extends MutationContext { text: string; position?: number }
 export interface EditHookRequest extends MutationContext { text: string }

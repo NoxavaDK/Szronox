@@ -336,3 +336,33 @@
 .saveState[data-tone='conflict'] {
   color: var(--sz-color-urgent);
 }
+
+/* CONTENT-PLANNER-01 `Zaplanuj publikację`: one quiet metadata-sized row under the selectors. */
+.planRow {
+  appearance: none;
+  border: 0;
+  background: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sz-space-2);
+  min-height: 36px;
+  margin-top: calc(var(--sz-space-3) * -1);
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--sz-color-cobalt);
+  cursor: pointer;
+}
+
+.planRow[data-planned='true'] {
+  color: var(--sz-color-text-primary);
+}
+
+.planRow[data-planned='true'] svg {
+  color: var(--sz-color-cobalt);
+}
+
+.planRow strong {
+  font-weight: 650;
+}

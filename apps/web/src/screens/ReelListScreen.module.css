@@ -186,3 +186,31 @@
 .emptyOrLoading {
   padding: var(--sz-space-6) 0;
 }
+
+/* CONTENT-PLANNER-01 */
+.planLink {
+  appearance: none;
+  border: 0;
+  background: none;
+  margin-left: auto;
+  min-height: var(--sz-touch-target);
+  padding: 0 var(--sz-space-2);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sz-color-cobalt);
+  cursor: pointer;
+}
+
+/* Beside the title, so the right-hand controls (and the fixed Wyloguj) keep their place. */
+.planLink { margin-left: 0; margin-right: auto; }
+
+.metaPlan {
+  color: var(--sz-color-cobalt);
+}
+
+/* As a side pane the list fills its column; the add button stays inside that column. */
+.screen[data-embedded='true'] {
+  max-width: none;
+  margin: 0;
+}

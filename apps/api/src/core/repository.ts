@@ -63,14 +63,16 @@ const REEL_COLUMNS = `
   script_revision, editor_id, selected_hook_id, current_export, verification, programme_state, programme_attachment,
   programme_input_hash, programme_document_version_id, kdrive_folder, editing_started_at,
   published_at, publication_urls, publication_description, publication_hashtags,
-  feed_cover_done, created_by, created_at, updated_at, deleted_at
+  feed_cover_done, created_by, created_at, updated_at, deleted_at,
+  to_char(planned_publication_date, 'YYYY-MM-DD') as planned_publication_date,
+  to_char(planned_publication_time, 'HH24:MI') as planned_publication_time
 `;
 
 /** Scalar fields PATCH may touch. Anything else is refused, not ignored. */
 export const PATCHABLE_FIELDS = [
   'title', 'status', 'priority', 'inputNote', 'script', 'editingNotes',
   'editorId', 'publishedAt', 'publicationUrls', 'publicationDescription',
-  'publicationHashtags', 'feedCoverDone',
+  'publicationHashtags', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationTime',
 ] as const;
 
 const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
@@ -86,7 +88,22 @@ const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
   publicationDescription: 'publication_description',
   publicationHashtags: 'publication_hashtags',
   feedCoverDone: 'feed_cover_done',
+  plannedPublicationDate: 'planned_publication_date',
+  plannedPublicationTime: 'planned_publication_time',
 };
+
+const PLANNED_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const PLANNED_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** A real calendar date in `YYYY-MM-DD`; `2026-02-30` is refused rather than rolled over. */
+function isCalendarDate(value: string): boolean {
+  const match = PLANNED_DATE.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return year >= 2000 && year <= 2100 && date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
 
 /**
  * Canonical payload hash for the idempotency ledger. Key order is normalised so
@@ -436,9 +453,24 @@ export class CoreRepository {
         throw feedCoverRequired();
       }
 
+      // CONTENT-PLANNER-01: a time is detail of a date. Clearing the date alone clears the
+      // time with it (unscheduling is one action); a time without any date is refused.
+      // Status is deliberately untouched by any plan change.
+      const planEntries: Array<[string, unknown]> = [...entries];
+      const clearsDateOnly = Object.hasOwn(changes, 'plannedPublicationDate')
+        && changes.plannedPublicationDate === null && !Object.hasOwn(changes, 'plannedPublicationTime');
+      if (clearsDateOnly && before.plannedPublicationTime !== null) planEntries.push(['plannedPublicationTime', null]);
+      const nextDate = Object.hasOwn(changes, 'plannedPublicationDate') ? changes.plannedPublicationDate : before.plannedPublicationDate;
+      const nextTime = Object.hasOwn(changes, 'plannedPublicationTime')
+        ? changes.plannedPublicationTime
+        : clearsDateOnly ? null : before.plannedPublicationTime;
+      if (nextTime !== null && nextTime !== undefined && (nextDate === null || nextDate === undefined)) {
+        throw validationError('plannedPublicationTime requires plannedPublicationDate', { field: 'plannedPublicationTime' });
+      }
+
       const assignments: string[] = [];
       const params: unknown[] = [];
-      for (const [field, value] of entries) {
+      for (const [field, value] of planEntries) {
         params.push(this.patchValue(field as (typeof PATCHABLE_FIELDS)[number], value));
         assignments.push(`${PATCH_COLUMNS[field as (typeof PATCHABLE_FIELDS)[number]]} = $${params.length}`);
       }
@@ -483,6 +515,16 @@ export class CoreRepository {
         return value;
       case 'feedCoverDone':
         if (typeof value !== 'boolean') throw validationError('feedCoverDone must be a boolean');
+        return value;
+      case 'plannedPublicationDate':
+        if (value !== null && (typeof value !== 'string' || !isCalendarDate(value))) {
+          throw validationError('plannedPublicationDate must be a YYYY-MM-DD date or null', { field });
+        }
+        return value;
+      case 'plannedPublicationTime':
+        if (value !== null && (typeof value !== 'string' || !PLANNED_TIME.test(value))) {
+          throw validationError('plannedPublicationTime must be HH:MM or null', { field });
+        }
         return value;
       case 'publicationUrls':
         if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
