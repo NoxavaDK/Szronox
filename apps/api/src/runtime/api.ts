@@ -127,6 +127,7 @@ export async function composeApiRuntime(env: ApiRuntimeEnv): Promise<ApiRuntime>
         databaseRole: privileges.facts.role,
         privilegeEnforcement: privileges.enforced ? 'enforced' : 'reported_only',
         privilegeViolations: privileges.violations,
+        kdrive: core.kdrive ? { driveId: core.kdrive.driveId, rootFolderId: core.kdrive.rootFolderId } : 'unconfigured',
       }),
       async close() {
         if (closed) return;

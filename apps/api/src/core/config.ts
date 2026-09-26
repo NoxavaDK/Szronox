@@ -29,6 +29,7 @@ import {
   type StorageAdapter,
 } from './storage.js';
 import { filesystemStorageAdapter } from '../storage/filesystem.js';
+import { type KdriveEnv, parseKdriveConfig } from '../kdrive/config.js';
 
 /** The two provisioned users, as configured. Ids are supplied, never generated. */
 export interface AllowlistEntry {
@@ -43,7 +44,7 @@ export class ConfigError extends Error {
   }
 }
 
-export interface CoreEnv extends AuthEnv {
+export interface CoreEnv extends AuthEnv, KdriveEnv {
   AI_ENABLED?: string;
   /** Absolute private filesystem root. */
   APP_STORAGE_ROOT?: string;
@@ -145,6 +146,8 @@ export function buildCoreDependencies(
     allowlist: allowlist.map((entry) => ({ ...entry, avatarUrl: null })),
     aiEnabled: env.AI_ENABLED === 'true',
     programmeArchiveRoot: programmeArchiveRoot(env),
+    // All-or-nothing; a partial or unreadable configuration fails startup (KDRIVE-01).
+    kdrive: parseKdriveConfig(env),
     auth,
   };
 }
@@ -157,5 +160,7 @@ export function describeConfig(env: CoreEnv = process.env as CoreEnv) {
     storageRootConfigured: present(env.APP_STORAGE_ROOT),
     programmeArchiveConfigured: programmeArchiveRoot(env) !== undefined,
     allowlistConfigured: present(env.APP_ALLOWLIST),
+    // Identifiers only; the token file's content is never described.
+    kdrive: present(env.KDRIVE_DRIVE_ID) ? { driveId: env.KDRIVE_DRIVE_ID, rootFolderId: env.KDRIVE_ROOT_FOLDER_ID ?? null } : 'unconfigured',
   };
 }

@@ -746,6 +746,44 @@ export class CoreRepository {
   }
 
   /**
+   * KDRIVE-01: the recorded result of an already-applied operation, or null when it has not
+   * been seen. Read-only; a reused id with a different payload is IDEMPOTENCY_CONFLICT. Lets
+   * the kDrive command answer a retry from the ledger before touching the provider again.
+   */
+  async recordedOperation<T>(operationId: string, route: string, payload: unknown): Promise<T | null> {
+    return this.replay<T>(this.db, operationId, route, payloadHash(payload));
+  }
+
+  /**
+   * KDRIVE-01: store a Reel's kDrive folder reference `{ driveId, folderId }` (never a path),
+   * version-checked and idempotent like every other Reel mutation. `result` builds the value
+   * recorded in the ledger from the updated Reel, so a replay returns exactly what the first
+   * call returned.
+   */
+  async setKdriveFolder<T>(
+    actor: Actor, reelId: string,
+    request: { operationId: string; expectedVersion: number },
+    payload: unknown,
+    folder: { driveId: string; folderId: string },
+    result: (reel: Reel) => T,
+  ): Promise<T> {
+    const route = `POST /reels/${reelId}/kdrive-folder`;
+    return this.idempotent(actor, request.operationId, route, payload, async (tx) => {
+      const before = await this.loadReel(tx, reelId);
+      if (before.version !== request.expectedVersion) throw editConflict(before.version);
+      const updated = await tx.query<ReelRow>(
+        `update app.reels set kdrive_folder = $1, version = version + 1, updated_at = now()
+         where id = $2 and version = $3 and deleted_at is null
+         returning ${REEL_COLUMNS}`,
+        [JSON.stringify(folder), reelId, request.expectedVersion],
+      );
+      const row = updated.rows[0];
+      if (!row) throw editConflict(before.version);
+      return result(await this.assemble(tx, row));
+    });
+  }
+
+  /**
    * Verify the current export.
    *
    * All three facts are checked against the same version-checked state: a valid

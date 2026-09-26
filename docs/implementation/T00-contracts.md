@@ -332,3 +332,18 @@ The operator authorized one bounded Luna implementation of the [UX-PUBLICATION-0
 ## UX-ASTRA-03 — approved usability continuation (2026-09-26)
 
 The operator explicitly authorized Luna to implement the actionable latest Astra usability notes. [UX-ASTRA-03-dispatch.md](UX-ASTRA-03-dispatch.md) pins the bounded visual corrections, duplicate-Detail investigation and related confirmed Opus navigation/draft/accessibility repairs. It supersedes only the named selection, identity, width, action, summary, color/contrast and supporting-control treatments. Preserve the two-pane default already approved in UX-PUBLICATION-02, slot planner, exact original inputs, explicit hook/AI selection/application and all server invariants. No title fetching, new statuses, migrations, dependency changes, merge or deployment is authorized.
+
+## KDRIVE-01a — kDrive folder API (operator-authorized 2026-09-26)
+
+The operator authorized KDRIVE-01a (API, configuration, tests and DEV deployment). The web wiring (KDRIVE-01b) follows after UX-ASTRA-03 is integrated. The T00 routes are now implemented:
+
+- **`POST /api/v1/reels/:id/kdrive-folder`** takes `{ operationId, expectedVersion, mode: 'create' }` or `{ …, mode: 'link', folderId }`. It is session- and CSRF-protected, version-checked and idempotent, and returns `{ reel, folder }`. `create` refuses a Reel that already has a folder (`already_linked`); `link` is also the explicit relink.
+- **`GET /api/v1/reels/:id/kdrive-folder`** returns `KdriveFolderState`: `none` (with `configured`), `available` (with `name` and `webUrl`), or `missing` / `access_denied` / `unavailable`. A read never clears the stored reference.
+- **Storage:** the Reel stores `{ driveId, folderId }` only (the existing `kdrive_folder` column; no migration).
+- **Folder creation:**
+  - Folders are named `<title or first capture line> [<first 8 hex of Reel id>]`, created under the configured base folder, and found again by that tag. An ambiguous or duplicate create is reconciled by lookup, never duplicated.
+  - Nothing existing in kDrive is deleted, renamed, moved or written.
+  - Capture and status changes never create a folder.
+- **Configuration:** `KDRIVE_DRIVE_ID`, `KDRIVE_ROOT_FOLDER_ID` and `KDRIVE_TOKEN_FILE`, all or none (a partial set fails startup). None means `PROVIDER_UNAVAILABLE` with `reason: kdrive_not_configured`. The token is an API-only secret file and is never logged or described.
+- **Errors:** provider failures use the existing `PROVIDER_RESOURCE_MISSING` / `PROVIDER_ACCESS_DENIED` / `PROVIDER_UNAVAILABLE` codes.
+- **Web link:** `https://ksuite.infomaniak.com/kdrive/app/drive/{driveId}/files/{folderId}`. Opening it requires the viewer's own kDrive access, which the operator confirmed for NOXAVA and SZRON on base folder `1349`.
