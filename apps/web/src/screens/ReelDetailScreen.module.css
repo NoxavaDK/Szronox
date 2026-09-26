@@ -55,12 +55,17 @@
   min-width: 0;
   border: none;
   background: none;
+  resize: none;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   font-family: var(--sz-font-family);
   font-size: var(--sz-text-reel-title-size);
   line-height: var(--sz-text-reel-title-line);
   font-weight: var(--sz-text-reel-title-weight);
   color: var(--sz-color-text-primary);
-  padding: var(--sz-space-1) 0;
+  padding: 0;
+  min-height: calc(var(--sz-text-reel-title-line) + var(--sz-text-reel-title-line));
+  max-height: calc(var(--sz-text-reel-title-line) + var(--sz-text-reel-title-line));
 }
 
 .sourceDomain {
@@ -69,6 +74,8 @@
   line-height: 16px;
   overflow-wrap: anywhere;
 }
+
+.publicationWarning { color: var(--sz-color-warning); font-weight: 600; }
 
 /*
  * The derived label, when there is no authored title. Set explicitly rather than left to the
@@ -100,7 +107,7 @@
 }
 
 .contextAction {
-  align-self: flex-start; min-height: 38px; padding: 0 14px; border: 0; border-radius: 5px;
+  align-self: flex-start; min-height: var(--sz-touch-target); padding: 0 14px; border: 0; border-radius: 5px;
   background: var(--sz-color-cobalt); color: white; font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer;
 }
 .contextAction:hover { filter: brightness(.94); }
@@ -136,7 +143,7 @@
   margin: 0;
 }
 .hookHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.hookChooseAction, .metadataInlineAction { border: 0; background: transparent; color: var(--sz-color-cobalt); font: inherit; font-size: 12.5px; font-weight: 600; min-height: 36px; padding: 0 8px; cursor: pointer; }
+.hookChooseAction, .metadataInlineAction { border: 0; background: transparent; color: var(--sz-color-cobalt); font: inherit; font-size: 12.5px; font-weight: 600; min-height: var(--sz-touch-target); padding: 0 8px; cursor: pointer; }
 
 .hookList {
   display: flex;
@@ -238,7 +245,7 @@
   color: var(--sz-color-text-secondary);
   cursor: pointer;
 }
-.hookEditControl { width: auto; height: auto; min-height: 36px; padding: 0 8px; font-size: 12px; }
+.hookEditControl { width: auto; height: var(--sz-touch-target); min-height: var(--sz-touch-target); padding: 0 8px; font-size: 12px; }
 
 .hookEditor {
   flex: 1;

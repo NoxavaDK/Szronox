@@ -23,7 +23,7 @@
   margin: 0;
   flex: 0 1 auto;
 }
-.signOutButton { min-height: 36px; border: 0; padding: 0 2px; background: transparent; color: var(--sz-color-text-secondary); font-size: 12px; white-space: nowrap; }
+.signOutButton { min-height: var(--sz-touch-target); border: 0; padding: 0 2px; background: transparent; color: var(--sz-color-text-secondary); font-size: 12px; white-space: nowrap; }
 
 .list {
   display: flex;
@@ -91,7 +91,7 @@
 }
 
 .rowSelected {
-  background: var(--sz-color-surface);
+  background: color-mix(in srgb, var(--sz-color-cobalt) 8%, var(--sz-color-background));
   box-shadow: inset 3px 0 0 var(--sz-color-cobalt);
 }
 
@@ -167,6 +167,8 @@
   color: var(--sz-color-urgent);
   font-weight: 650;
 }
+
+.metaReady { color: var(--sz-color-success); font-weight: 650; }
 
 .metaVerified {
   color: var(--sz-color-success);

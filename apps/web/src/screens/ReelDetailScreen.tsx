@@ -74,10 +74,11 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           <BackArrowIcon />
         </button>
         <div className={styles.titleIdentity}>
-          <input
+          <textarea
             className={styles.titleField}
             aria-label="Tytuł"
             value={title}
+            rows={2}
             // The derived label, when there is no title. A placeholder keeps the field empty,
             // so nothing here can be saved as a title the user did not write.
             placeholder={titlePlaceholder}
@@ -153,9 +154,11 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
         <EditingNotesSection {...editingNotes} />
         <SectionRow label="PUBLIKACJA" expanded={publicationExpanded} summary={publicationExpanded ? undefined : metadata.status === 'published'
           ? `Opublikowano${publication.publishedAt ? ` · ${publication.publishedAt}` : ''} · Okładka ${publication.feedCoverDone ? 'gotowa' : 'niegotowa'}`
-          : `${publication.description.trim() ? 'Opis gotowy' : 'Brak opisu'} · Okładka ${publication.feedCoverDone ? 'gotowa' : 'niegotowa'}`}
+          : metadata.status === 'ready' && !publication.feedCoverDone
+            ? <>{publication.description.trim() ? 'Opis gotowy' : 'Brak opisu'} · <span className={styles.publicationWarning}>Okładka niegotowa</span></>
+            : `${publication.description.trim() ? 'Opis gotowy' : 'Brak opisu'} · Okładka ${publication.feedCoverDone ? 'gotowa' : 'niegotowa'}`}
           onClick={onTogglePublication} />
-        {publicationExpanded ? <div ref={publicationRef}><PublicationSection {...publication} plan={plan} /></div> : null}
+        {publicationExpanded ? <div ref={publicationRef}><PublicationSection {...publication} isReady={metadata.status === 'ready'} plan={plan} /></div> : null}
       </div>
 
       {conflict ? <ConflictNotice conflict={conflict} /> : null}

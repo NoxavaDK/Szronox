@@ -214,7 +214,7 @@ function ReelRow({
           </div>
           <div className={styles.metaLine}>
             {item.sourceDomain ? <span className={styles.metaItem}>{item.sourceDomain}</span> : null}
-            {showStatus ? <span className={styles.metaItem}>{STATUS_LABELS[item.status]}</span> : null}
+            {showStatus ? <span className={item.status === 'ready' ? `${styles.metaItem} ${styles.metaReady}` : styles.metaItem}>{item.status === 'ready' ? '✓ Gotowe' : STATUS_LABELS[item.status]}</span> : null}
             {isUrgent ? (
               <span className={`${styles.metaItem} ${styles.metaUrgent}`}>Pilne</span>
             ) : item.elapsedLabel ? (

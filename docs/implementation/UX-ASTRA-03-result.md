@@ -42,3 +42,27 @@ Representative screenshots from that browser pass:
 - `docs/implementation/UX-ASTRA-03-result.md`
 
 Implementation commit: `8105b21` (`Implement Astra usability corrections`). This result-file update is a separate documentation-only follow-up.
+
+## Bounded presentation correction after lead review
+
+Lead review identified multiline title, 44px hit targets, selected-row tint and ready/missing-cover semantic color as concrete remaining presentation gaps. They were corrected in a separate follow-up commit:
+
+- Detail title is a bounded two-line textarea. The authored value stays exact, the derived title remains only a placeholder, and the source domain remains below it. It has no guessed-title persistence.
+- Contextual primary, hook edit/choose, list logout and drawer logout hit areas use the existing 44px touch target. Their visible labels remain compact and logout remains quiet.
+- The selected Reel row uses a pale cobalt tint plus its cobalt rail. Urgency retains its separate red rail.
+- `Gotowe` is rendered with a check and the existing success color in Detail, list and Plan. A ready Reel with a missing feed cover displays explicit amber `Okładka niegotowa` and the existing prerequisite copy in the collapsed summary and expanded Publication section. Early statuses and other optional missing content remain neutral.
+
+Verification after this correction:
+
+- `npm run typecheck --workspace @szronox/web` — PASS.
+- `npm run build --workspace @szronox/web` — PASS (rebuilt the bundle served by the synthetic browser harness).
+- `node /private/tmp/luna-uxastra03/ux-astra03-correction.mjs` — PASS, 9/9. Measured the selected-row cobalt tint/marker; ready status success color/check; amber missing-cover explanation; 44px contextual, hook-edit, hook-choose and ReelListScreen logout targets; long authored title geometry at 360px and 320px with no horizontal overflow. The title value was set directly in the DOM without input/change events, so this was a geometry check and did not persist a draft. The logout check measured the actual CSS-module selector on a temporary DOM button because this branch's drawer surface uses its own logout control.
+
+Updated representative screenshots:
+
+- Desktop ready state with selection tint and warning summary: `/private/tmp/luna-uxastra03/astra-1440.png`
+- 360px long-title view: `/private/tmp/luna-uxastra03/astra-360-long-title.png`
+
+No queue/controller or broad test suites were rerun, per the bounded follow-up request.
+
+Follow-up implementation commit: pending.

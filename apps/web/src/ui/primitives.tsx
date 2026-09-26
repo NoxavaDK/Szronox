@@ -131,7 +131,7 @@ export function SectionRow({
   onClick,
 }: {
   label: string;
-  summary?: string;
+  summary?: ReactNode;
   expanded?: boolean;
   onClick: () => void;
 }) {

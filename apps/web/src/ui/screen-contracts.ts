@@ -720,6 +720,7 @@ export interface PublicationSectionProps {
   onCopyDescription: () => void;
   plan?: { label: string | null; onOpen: () => void };
   isPublished?: boolean;
+  isReady?: boolean;
 
   /**
    * `Wygeneruj opis` (PUBLICATION-01): opens the publication proposal view generated from the

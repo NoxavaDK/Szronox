@@ -41,5 +41,5 @@ button, input, textarea { font: inherit; }
 .side-drawer-backdrop[hidden] { display: none; }
 .side-drawer { width: min(420px, 88vw); height: 100%; overflow-y: auto; background: var(--sz-color-background, #f7f7f5); box-shadow: 3px 0 18px rgb(0 0 0 / 12%); }
 .side-drawer-close { display: block; margin-left: auto; }
-.drawer-signout { margin-left: auto; color: var(--sz-color-text-secondary, #636360) !important; font-size: 12px; }
+.drawer-signout { min-height: var(--sz-touch-target); margin-left: auto; color: var(--sz-color-text-secondary, #636360) !important; font-size: 12px; }
 .workspace-toolbar .workspace-signout { margin-left: 12px; padding-left: 14px; border-left: 1px solid var(--sz-color-divider, #e4e4e1); border-radius: 0; font-size: 12px; }

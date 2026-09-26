@@ -124,7 +124,9 @@ export function MetadataSelectors(props: MetadataSelectorsProps) {
       <div className={styles.metadataRow}>
         <button type="button" className={styles.metadataValue} onClick={() => onOpen('status')}>
           <span className={styles.metadataLabel}>{COPY.statusHeading}</span>
-          <span>{STATUS_LABELS[status]}</span>
+          <span className={status === 'ready' ? styles.readyStatus : undefined}>
+            {status === 'ready' ? <><CheckIcon aria-hidden="true" /> Gotowe</> : STATUS_LABELS[status]}
+          </span>
         </button>
         <button type="button" className={styles.metadataValue} onClick={() => onOpen('priority')}>
           <span className={styles.metadataLabel}>{COPY.priorityHeading}</span>

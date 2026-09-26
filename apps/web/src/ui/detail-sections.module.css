@@ -28,6 +28,7 @@
   font: inherit; color: inherit; cursor: pointer; text-align: left;
 }
 .metadataLabel { font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; opacity: .55; }
+.readyStatus { display: inline-flex; align-items: center; gap: 4px; color: var(--sz-color-success); font-weight: 650; }
 .editorValue { display: inline-flex; align-items: center; gap: .35rem; }
 .selectionError { margin: 0; font-size: .8rem; color: var(--danger, #8a2b16); }
 .saveHint { margin: 0; font-size: .75rem; opacity: .65; }

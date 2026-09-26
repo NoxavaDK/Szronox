@@ -1,5 +1,5 @@
 import '../ui/tokens.css';
-import type { PublicationSectionProps } from '../ui/screen-contracts.js';
+import { COPY, type PublicationSectionProps } from '../ui/screen-contracts.js';
 import { CoverIndicator, TextAction } from '../ui/primitives.js';
 import { CalendarIcon, ExternalLinkIcon } from '../ui/icons.js';
 import styles from './PublicationSection.module.css';
@@ -14,7 +14,7 @@ export function PublicationSection(props: PublicationSectionProps) {
     feedCoverDone, hasFeedCoverAsset, onToggleFeedCoverDone, onAddOrChangeFeedCoverAsset, onOpenFeedCoverAsset,
     description, onChangeDescription,
     hashtags, onChangeHashtags,
-    onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished,
+    onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished, isReady,
     publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
   } = props;
 
@@ -27,6 +27,7 @@ export function PublicationSection(props: PublicationSectionProps) {
       </p> : null}
       <div className={styles.block}>
         <span className={styles.label}>Okładka do feedu</span>
+        {isReady && !feedCoverDone ? <p className={styles.coverWarning}>Okładka niegotowa. {COPY.feedCoverRequired}</p> : null}
         <div className={styles.coverRow}>
           <button type="button" className={styles.coverToggle} data-feed-cover-toggle onClick={onToggleFeedCoverDone}>
             <CoverIndicator done={feedCoverDone} size={22} />
