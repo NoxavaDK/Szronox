@@ -24,7 +24,7 @@ import styles from './ReelDetailScreen.module.css';
  */
 export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
-    onBack, title, onChangeTitle, titlePlaceholder,
+    onBack, title, onChangeTitle, titlePlaceholder, sourceDomain,
     metadata, plan, contextAction, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook, selectedHookId, onSelectHook, hookSelectionPending,
     hookEdits, onStartHookEdit, onChangeHookEdit, onSaveHookEdit, onCancelHookEdit,
@@ -51,14 +51,14 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
         {edit ? (
           <HookEditor edit={edit} onChange={(text) => onChangeHookEdit(hook.id, text)} onSave={() => onSaveHookEdit(hook.id)} onCancel={() => onCancelHookEdit(hook.id)} />
         ) : <>
-          <button type="button" className={styles.hookSelect} aria-pressed={selected} disabled={hookSelectionPending} onClick={() => onSelectHook(hook.id)}>
+          <button type="button" className={styles.hookSelect} data-hook-option aria-pressed={selected} disabled={hookSelectionPending} onClick={() => onSelectHook(hook.id)}>
             <span className={styles.hookText}>{hook.text}</span>
             {selected || hook.source === 'user' ? <span className={styles.hookTags}>
               {selected ? <span className={styles.hookSelectedTag}>✓ WYBRANY</span> : null}
               {hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}
             </span> : null}
           </button>
-          <button type="button" className={styles.hookControl} onClick={() => onStartHookEdit(hook.id)} aria-label="Edytuj hook"><span aria-hidden="true">✎</span></button>
+          <button type="button" className={`${styles.hookControl} ${styles.hookEditControl}`} onClick={() => onStartHookEdit(hook.id)} aria-label="Edytuj hook">Edytuj</button>
           <button type="button" className={styles.hookControl} onClick={() => onRemoveHook(hook.id)} aria-label="Usuń hook"><CloseIcon /></button>
         </>}
       </li>
@@ -73,15 +73,18 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
         <button type="button" className={styles.iconButton} onClick={onBack} aria-label="Wstecz">
           <BackArrowIcon />
         </button>
-        <input
-          className={styles.titleField}
-          aria-label="Tytuł"
-          value={title}
-          // The derived label, when there is no title. A placeholder keeps the field empty,
-          // so nothing here can be saved as a title the user did not write.
-          placeholder={titlePlaceholder}
-          onChange={(event) => onChangeTitle(event.target.value)}
-        />
+        <div className={styles.titleIdentity}>
+          <input
+            className={styles.titleField}
+            aria-label="Tytuł"
+            value={title}
+            // The derived label, when there is no title. A placeholder keeps the field empty,
+            // so nothing here can be saved as a title the user did not write.
+            placeholder={titlePlaceholder}
+            onChange={(event) => onChangeTitle(event.target.value)}
+          />
+          {sourceDomain ? <span className={styles.sourceDomain}>{sourceDomain}</span> : null}
+        </div>
         <CoverIndicator done={metadata.feedCoverDone} onClick={openFeedCover} />
         <ReelOverflow {...overflow} />
       </header>
@@ -99,14 +102,17 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       ) : null}
       <div className={styles.metadataItem}>
         {attachedMemes?.map((meme) => <span key={meme.id}>Mem: {meme.name} <button type="button" onClick={() => onDetachMeme?.(meme.id)} aria-label={`Odłącz mem ${meme.name}`}>×</button> </span>)}
-        <button type="button" onClick={onOpenMeme}>{attachedMemes?.length ? '+ kolejny' : '+ Mem'}</button>
+        <button type="button" className={styles.metadataInlineAction} onClick={onOpenMeme}>{attachedMemes?.length ? '+ kolejny' : '+ Mem'}</button>
       </div>
 
       {contextAction ? <button type="button" className={styles.contextAction} onClick={contextAction.onClick}>{contextAction.label}</button> : null}
       <SourcesSection {...sources} />
 
       <section className={styles.contentBlock} data-hooks-section>
-        <h2 className={styles.sectionLabel}>Hooki</h2>
+        <div className={styles.hookHeading}>
+          <h2 className={styles.sectionLabel}>Hooki</h2>
+          {!selectedHook && hooks.length > 0 ? <button type="button" className={styles.hookChooseAction} onClick={() => document.querySelector<HTMLElement>('[data-hook-option]')?.focus()}>Wybierz hook</button> : null}
+        </div>
         <ul className={styles.hookList}>
           {selectedHook ? renderHook(selectedHook) : null}
           {otherHooks.length > 0 ? selectedHook ? <li className={styles.otherHooks}><details>
@@ -145,10 +151,9 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       <div className={styles.secondarySections}>
         <MaterialsSection {...materials} />
         <EditingNotesSection {...editingNotes} />
-        <SectionRow label="PUBLIKACJA" summary={publicationExpanded ? undefined : metadata.status === 'published'
-          ? `Opublikowano · Okładka ${publication.feedCoverDone ? 'gotowa' : 'do zrobienia'}`
-          : publication.description.trim() ? 'Opis gotowy · Otwórz publikację'
-            : metadata.status === 'ready' ? 'Wygeneruj opis' : `Okładka ${publication.feedCoverDone ? 'gotowa' : 'do zrobienia'}`}
+        <SectionRow label="PUBLIKACJA" expanded={publicationExpanded} summary={publicationExpanded ? undefined : metadata.status === 'published'
+          ? `Opublikowano${publication.publishedAt ? ` · ${publication.publishedAt}` : ''} · Okładka ${publication.feedCoverDone ? 'gotowa' : 'niegotowa'}`
+          : `${publication.description.trim() ? 'Opis gotowy' : 'Brak opisu'} · Okładka ${publication.feedCoverDone ? 'gotowa' : 'niegotowa'}`}
           onClick={onTogglePublication} />
         {publicationExpanded ? <div ref={publicationRef}><PublicationSection {...publication} plan={plan} /></div> : null}
       </div>

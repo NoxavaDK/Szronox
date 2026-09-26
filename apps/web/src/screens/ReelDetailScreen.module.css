@@ -4,7 +4,8 @@
   font-family: var(--sz-font-family);
   color: var(--sz-color-text-primary);
   padding: var(--sz-space-4) var(--sz-space-4) var(--sz-space-6);
-  max-width: var(--sz-content-max-width);
+  width: 100%;
+  max-width: 760px;
   margin: 0 auto;
   box-sizing: border-box;
   display: flex;
@@ -41,8 +42,16 @@
   outline-offset: 2px;
 }
 
-.titleField {
+.titleIdentity {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.titleField {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   border: none;
   background: none;
@@ -52,6 +61,13 @@
   font-weight: var(--sz-text-reel-title-weight);
   color: var(--sz-color-text-primary);
   padding: var(--sz-space-1) 0;
+}
+
+.sourceDomain {
+  color: var(--sz-color-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -84,9 +100,10 @@
 }
 
 .contextAction {
-  align-self: flex-start; min-height: 40px; padding: 0 2px; border: 0; background: none;
-  color: var(--sz-color-cobalt); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer;
+  align-self: flex-start; min-height: 38px; padding: 0 14px; border: 0; border-radius: 5px;
+  background: var(--sz-color-cobalt); color: white; font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer;
 }
+.contextAction:hover { filter: brightness(.94); }
 .contextAction:focus-visible { outline: 2px solid var(--sz-color-cobalt); outline-offset: 2px; }
 .otherHooks { border-top: 1px solid var(--sz-color-divider); }
 .otherHooks summary { display: flex; align-items: center; min-height: 44px; color: var(--sz-color-text-secondary); font-size: 13px; cursor: pointer; }
@@ -116,7 +133,10 @@
   letter-spacing: var(--sz-text-section-label-tracking);
   text-transform: uppercase;
   color: var(--sz-color-text-secondary);
+  margin: 0;
 }
+.hookHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hookChooseAction, .metadataInlineAction { border: 0; background: transparent; color: var(--sz-color-cobalt); font: inherit; font-size: 12.5px; font-weight: 600; min-height: 36px; padding: 0 8px; cursor: pointer; }
 
 .hookList {
   display: flex;
@@ -218,6 +238,7 @@
   color: var(--sz-color-text-secondary);
   cursor: pointer;
 }
+.hookEditControl { width: auto; height: auto; min-height: 36px; padding: 0 8px; font-size: 12px; }
 
 .hookEditor {
   flex: 1;
@@ -287,13 +308,14 @@
 }
 
 .scriptField {
-  border: none;
-  background: none;
+  border: 1px solid var(--sz-color-divider);
+  border-radius: 4px;
+  background: var(--sz-color-surface);
   font-family: var(--sz-font-family);
   font-size: var(--sz-text-body-size);
   line-height: var(--sz-text-body-line);
   color: var(--sz-color-text-primary);
-  padding: 0;
+  padding: var(--sz-space-2);
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
@@ -302,7 +324,8 @@
 }
 
 .scriptField:focus {
-  outline: none;
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 1px;
 }
 
 .aiRow {
@@ -328,6 +351,7 @@
   cursor: not-allowed;
   opacity: 0.55;
 }
+.aiButton:last-child:not(:disabled) { color: var(--sz-color-cobalt); border-color: color-mix(in srgb, var(--sz-color-cobalt) 38%, var(--sz-color-divider)); }
 
 .secondarySections {
   display: flex;

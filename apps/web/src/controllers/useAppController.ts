@@ -10,7 +10,7 @@ import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import { createRequestFromDraft } from '../drafts/create-request.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import { claimIncomingShare, clearIncomingSignal, readIncomingSignal, shareFailureMessage } from '../share/pending.js';
-import { canMarkSavedAfterSend, changesForConflictResolution, deleteDraftIfNoNewerWrite, hasUnfinishedHookEditForReel, retainPendingDraftBeforeSwitch, withConflictSnapshot, type DraftWriteRecord, type DraftWriteResult } from './draft-switch.js';
+import { canMarkSavedAfterSend, changesForConflictResolution, deleteDraftIfNoNewerWrite, enqueueDraftStoreOperation, hasUnfinishedHookEditForReel, retainPendingDraftBeforeSwitch, withConflictSnapshot, type DraftWriteRecord, type DraftWriteResult } from './draft-switch.js';
 
 export type Route =
   | { name: 'list' }
@@ -105,15 +105,21 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const primaryRoute = (): Route => (lastPrimary.current === 'plan' ? { name: 'plan' } : { name: 'list' });
   useEffect(() => { if (route.name === 'list' || route.name === 'plan') lastPrimary.current = route.name; }, [route]);
   const hookEditsRef = useRef<Record<string, HookEdit>>({});
-  const saveTimer = useRef<number>();
-  const saveTimerReelId = useRef<string | null>(null);
+  const saveTimers = useRef(new Map<string, number>());
   const conflictsRef = useRef<Record<string, ConflictState>>({});
   const blockedConflictReels = useRef(new Set<string>());
   const currentRef = useRef<Reel | null>(null);
-  const pendingPatch = useRef<{ reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | null>(null);
-  /** Sends a debounced edit now; set while one is waiting for its timer. */
-  const flushPending = useRef<(() => Promise<void>) | null>(null);
+  const pendingPatches = useRef(new Map<string, { reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] }>());
+  /** Per-Reel flush callback while a debounced edit is waiting for its timer. */
+  const flushPending = useRef(new Map<string, () => Promise<void>>());
   const draftWrites = useRef(new Map<string, DraftWriteRecord>());
+  const draftStoreQueues = useRef(new Map<string, Promise<void>>());
+  /**
+   * The scalar save currently on the network, per Reel. The next save of the same Reel waits
+   * for it and is then rebased onto the version it returned; sending both on the same
+   * `expectedVersion` made the second one conflict with the author's own first save.
+   */
+  const inFlightSaves = useRef(new Map<string, Promise<void>>());
   const draftWriteRevision = useRef(0);
   const setConflictForReel = useCallback((reelId: string, value: ConflictState | null) => {
     const next = { ...conflictsRef.current };
@@ -361,18 +367,20 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     // debounced edit now rather than letting the next Reel's edit replace it unsent.
     const retainCurrentDraft = async () => {
       const oldReelId = currentRef.current?.id;
-      if (!oldReelId || oldReelId === reelId || pendingPatch.current?.reelId !== oldReelId) return true;
+      if (!oldReelId || oldReelId === reelId || !pendingPatches.current.has(oldReelId)) return true;
       const retained = await retainPendingDraftBeforeSwitch(
         oldReelId,
-        () => pendingPatch.current?.reelId ?? null,
+        () => pendingPatches.current.has(oldReelId) ? oldReelId : null,
         () => draftWrites.current.get(oldReelId),
         () => {
-          if (saveTimerReelId.current === oldReelId) {
-            window.clearTimeout(saveTimer.current);
-            saveTimerReelId.current = null;
-          }
-          return flushPending.current?.() ?? null;
+          const timer = saveTimers.current.get(oldReelId);
+          if (timer !== undefined) { window.clearTimeout(timer); saveTimers.current.delete(oldReelId); }
+          const flush = flushPending.current.get(oldReelId);
+          return flush ? flush().catch((error) => {
+            if (currentRef.current?.id === oldReelId) { setSaveState('error'); setMessage(polishError(error)); }
+          }) : null;
         },
+        () => blockedConflictReels.current.has(oldReelId),
       );
       if (!retained.ok) {
         if (currentRef.current?.id === oldReelId) {
@@ -495,14 +503,12 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const changeReel = useCallback((changes: ReelPatchRequest['changes']) => {
     const reel = currentRef.current;
     if (!reel || !user) return;
-    const pending = pendingPatch.current?.reelId === reel.id ? pendingPatch.current : { reelId: reel.id, expectedVersion: reel.version, changes: {} };
-    pending.changes = { ...pending.changes, ...changes }; pendingPatch.current = pending;
+    const pending = pendingPatches.current.get(reel.id) ?? { reelId: reel.id, expectedVersion: reel.version, changes: {} };
+    pending.changes = { ...pending.changes, ...changes }; pendingPatches.current.set(reel.id, pending);
     const next = { ...reel, ...changes }; currentRef.current = next; setCurrent(next); setSaveState('saving');
     const draft: ReelDraft = { id: `${user.id}:${reel.id}`, accountId: user.id, reelId: reel.id, expectedVersion: pending.expectedVersion, changes: pending.changes, updatedAt: Date.now() };
     const revision = ++draftWriteRevision.current;
-    const precedingWrite = draftWrites.current.get(reel.id)?.promise ?? Promise.resolve({ ok: true });
-    const promise: Promise<DraftWriteResult> = precedingWrite
-      .then(() => store.saveReel(draft))
+    const promise: Promise<DraftWriteResult> = enqueueDraftStoreOperation(draftStoreQueues.current, reel.id, () => store.saveReel(draft))
       .then(() => ({ ok: true }), (error: unknown) => ({ ok: false, error }));
     const record: DraftWriteRecord = { revision, promise };
     draftWrites.current.set(reel.id, record);
@@ -522,34 +528,64 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
         }
         return;
       }
-      window.clearTimeout(saveTimer.current);
+      const previousTimer = saveTimers.current.get(reel.id);
+      if (previousTimer !== undefined) window.clearTimeout(previousTimer);
       const send = async () => {
-        if (saveTimerReelId.current === reel.id) saveTimerReelId.current = null;
-        flushPending.current = null;
-        const sending = pendingPatch.current;
-        if (!sending) return;
-        pendingPatch.current = null;
+        saveTimers.current.delete(reel.id);
+        if (flushPending.current.get(reel.id) === send) flushPending.current.delete(reel.id);
+        // One save per Reel on the network at a time. Re-checked in a loop because another
+        // waiting send may have started (and registered itself) first.
+        let sending: { reelId: string; expectedVersion: number; changes: ReelPatchRequest['changes'] } | undefined;
+        let consumedWrite: DraftWriteRecord | undefined;
+        while (true) {
+          const prior = inFlightSaves.current.get(reel.id);
+          if (prior) { await prior; continue; }
+          if (blockedConflictReels.current.has(reel.id)) return;
+          sending = pendingPatches.current.get(reel.id);
+          consumedWrite = draftWrites.current.get(reel.id);
+          if (!sending || !consumedWrite) return;
+          const retained = await consumedWrite.promise;
+          // Typing may have produced a newer local write while this callback waited in the
+          // network queue. Only send the exact pending revision that is durably retained.
+          if (draftWrites.current.get(reel.id) !== consumedWrite || pendingPatches.current.get(reel.id) !== sending) continue;
+          if (!retained.ok) {
+            if (currentRef.current?.id === reel.id) { setSaveState('error'); setMessage(polishError(retained.error)); }
+            return;
+          }
+          // A second callback may have won the send slot while this one awaited IndexedDB.
+          // Re-enter the loop so the version returned by that request is available first.
+          if (inFlightSaves.current.has(reel.id)) continue;
+          if (blockedConflictReels.current.has(reel.id)) return;
+          break;
+        }
+        pendingPatches.current.delete(reel.id);
+        let release!: () => void;
+        const mine = new Promise<void>((resolve) => { release = resolve; });
+        inFlightSaves.current.set(sending.reelId, mine);
+        const sendingDraft: ReelDraft = {
+          id: `${user.id}:${sending.reelId}`, accountId: user.id, reelId: sending.reelId,
+          expectedVersion: sending.expectedVersion, changes: sending.changes, updatedAt: Date.now(),
+        };
         const request = { operationId: crypto.randomUUID(), expectedVersion: sending.expectedVersion, changes: sending.changes };
         try {
           const saved = await api.patch(sending.reelId, request);
+          // Edits typed while this save was in flight were based on the same version; our own
+          // save is the only change in between, so they are rebased — whether or not this Reel
+          // is still the one on screen (a switch flushes them right behind this save).
+          const typed = pendingPatches.current.get(saved.id) ?? null;
+          if (typed && typed.expectedVersion === sending.expectedVersion) typed.expectedVersion = saved.version;
           // The user may have switched to another Reel while this save was debounced or in
           // flight (one click away in the planner/list panes): it must not replace that one.
           if (currentRef.current?.id === saved.id) {
-            // Edits typed while this save was in flight were based on the same version; our
-            // own save is the only change in between, so they are rebased and kept visible.
-            const latest = pendingPatch.current as typeof sending | null;
-            const typed = latest?.reelId === saved.id ? latest : null;
-            if (typed && typed.expectedVersion === sending.expectedVersion) typed.expectedVersion = saved.version;
             const next = typed ? { ...saved, ...typed.changes } : saved;
             currentRef.current = next; setCurrent(next);
           } else {
             const upsert = (list: Reel[]) => list.map((item) => (item.id === saved.id ? saved : item));
             setPlanReels(upsert); setReels(upsert);
           }
-          const deletedDraft = await deleteDraftIfNoNewerWrite(revision, () => draftWrites.current.get(sending.reelId),
-            () => store.deleteReel(user.id, sending.reelId));
-          const pendingReelId = (pendingPatch.current as { reelId: string } | null)?.reelId ?? null;
-          if (canMarkSavedAfterSend(sending.reelId, currentRef.current?.id ?? null, pendingReelId, deletedDraft)) setSaveState('saved');
+          const deletedDraft = await deleteDraftIfNoNewerWrite(consumedWrite.revision, () => draftWrites.current.get(sending.reelId),
+            () => enqueueDraftStoreOperation(draftStoreQueues.current, sending.reelId, () => store.deleteReel(user.id, sending.reelId)));
+          if (canMarkSavedAfterSend(sending.reelId, currentRef.current?.id ?? null, typed?.reelId ?? null, deletedDraft)) setSaveState('saved');
         }
         catch (error) {
           // Abandoned after an account switch: the draft stays in this account's
@@ -560,32 +596,28 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
             blockedConflictReels.current.add(sending.reelId);
             // Stop a newer same-Reel debounce before awaiting storage; otherwise its timer
             // could issue another patch before the conflict decision is available.
-            if (saveTimerReelId.current === sending.reelId) {
-              window.clearTimeout(saveTimer.current);
-              saveTimerReelId.current = null;
-              flushPending.current = null;
-            }
+            const conflictTimer = saveTimers.current.get(sending.reelId);
+            if (conflictTimer !== undefined) { window.clearTimeout(conflictTimer); saveTimers.current.delete(sending.reelId); }
+            flushPending.current.delete(sending.reelId);
             // Keep the draft, then read the authoritative value so the user is shown
             // a real comparison rather than "something changed".
             // The request may have been in flight while the author typed a newer draft.
             // Wait for that local write and attach the conflict snapshot to its contents.
             let latestWrite = draftWrites.current.get(sending.reelId);
             let latestWriteResult: DraftWriteResult = { ok: true };
-            while (latestWrite && latestWrite.revision > revision) {
+            while (latestWrite && latestWrite.revision > consumedWrite.revision) {
               latestWriteResult = await latestWrite.promise;
               if (draftWrites.current.get(sending.reelId) === latestWrite) break;
               latestWrite = draftWrites.current.get(sending.reelId);
             }
             localDraftFailure = !latestWriteResult.ok;
             const latestDraft = await store.reel(user.id, sending.reelId);
-            const pendingAtConflict = pendingPatch.current as unknown as typeof sending | null;
-            const newerPending = pendingAtConflict?.reelId === sending.reelId ? pendingAtConflict : null;
+            const newerPending = pendingPatches.current.get(sending.reelId) ?? null;
             const conflictChanges = changesForConflictResolution(latestDraft?.changes, newerPending?.changes, sending.changes);
-            const conflictBase = { ...(latestDraft ?? draft), changes: conflictChanges };
+            const conflictBase = { ...(latestDraft ?? sendingDraft), changes: conflictChanges };
             if (latestWriteResult.ok) {
-              const prior = draftWrites.current.get(sending.reelId)?.promise ?? Promise.resolve({ ok: true });
-              const conflictPromise: Promise<DraftWriteResult> = prior
-                .then(() => store.saveReel(withConflictSnapshot(conflictBase, draft, error.api.details)))
+              const conflictPromise: Promise<DraftWriteResult> = enqueueDraftStoreOperation(draftStoreQueues.current, sending.reelId,
+                () => store.saveReel(withConflictSnapshot(conflictBase, sendingDraft, error.api.details)))
                 .then(() => ({ ok: true }), (writeError: unknown) => ({ ok: false, error: writeError }));
               const conflictRecord: DraftWriteRecord = { revision: ++draftWriteRevision.current, promise: conflictPromise };
               draftWrites.current.set(sending.reelId, conflictRecord);
@@ -593,8 +625,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
               if (!conflictWriteResult.ok) {
                 localDraftFailure = true;
                 if (currentRef.current?.id === sending.reelId) setMessage(polishError(conflictWriteResult.error));
-              } else if ((pendingPatch.current as typeof sending | null)?.reelId === sending.reelId && draftWrites.current.get(sending.reelId) === conflictRecord) {
-                pendingPatch.current = null;
+              } else if (pendingPatches.current.has(sending.reelId) && draftWrites.current.get(sending.reelId) === conflictRecord) {
+                pendingPatches.current.delete(sending.reelId);
               }
             }
             // A pending debounce must not send while the user is deciding how to resolve
@@ -605,7 +637,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
             }
             try {
               const serverReel = await api.reel(sending.reelId);
-              const pendingAfterRead = pendingPatch.current as unknown as typeof sending | null;
+              const pendingAfterRead = pendingPatches.current.get(sending.reelId) ?? null;
               const finalChanges = changesForConflictResolution(undefined,
                 pendingAfterRead?.reelId === sending.reelId ? pendingAfterRead.changes : undefined,
                 conflictChanges);
@@ -629,10 +661,13 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
           }
           if (!localDraftFailure && currentRef.current?.id === sending.reelId) setMessage(polishError(error));
         }
+        finally {
+          release();
+          if (inFlightSaves.current.get(sending.reelId) === mine) inFlightSaves.current.delete(sending.reelId);
+        }
       };
-      flushPending.current = send;
-      saveTimerReelId.current = reel.id;
-      saveTimer.current = window.setTimeout(() => { void send(); }, 600);
+      flushPending.current.set(reel.id, send);
+      saveTimers.current.set(reel.id, window.setTimeout(() => { void send(); }, 600));
     });
   }, [api, setConflictForReel, store, user]);
 
@@ -650,7 +685,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * rebased: a genuine concurrent change still surfaces as the ordinary conflict.
    */
   const acceptServerReel = useCallback((before: Reel, server: Reel, own: boolean) => {
-    const pending = pendingPatch.current?.reelId === server.id ? pendingPatch.current : null;
+    const pending = pendingPatches.current.get(server.id) ?? null;
     if (pending && own && pending.expectedVersion === before.version && server.version === before.version + 1) {
       pending.expectedVersion = server.version;
     }
@@ -889,15 +924,13 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     const pending = conflict;
     if (!pending || !user || currentRef.current?.id !== pending.serverReel.id) return;
     const reelId = pending.serverReel.id;
-    if (saveTimerReelId.current === reelId) {
-      window.clearTimeout(saveTimer.current);
-      saveTimerReelId.current = null;
-      flushPending.current = null;
-    }
-    if (pendingPatch.current?.reelId === reelId) pendingPatch.current = null;
+    const timer = saveTimers.current.get(reelId);
+    if (timer !== undefined) { window.clearTimeout(timer); saveTimers.current.delete(reelId); }
+    flushPending.current.delete(reelId);
+    pendingPatches.current.delete(reelId);
     if (choice === 'server') {
       currentRef.current = pending.serverReel; setCurrent(pending.serverReel);
-      await store.deleteReel(user.id, reelId);
+      await enqueueDraftStoreOperation(draftStoreQueues.current, reelId, () => store.deleteReel(user.id, reelId));
       setConflictForReel(reelId, null);
       if (currentRef.current?.id === reelId) setSaveState('idle');
       return;
@@ -910,7 +943,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
         changes: pending.changes,
       });
       if (currentRef.current?.id === saved.id) { currentRef.current = saved; setCurrent(saved); }
-      await store.deleteReel(user.id, saved.id);
+      await enqueueDraftStoreOperation(draftStoreQueues.current, saved.id, () => store.deleteReel(user.id, saved.id));
       setConflictForReel(reelId, null);
       if (currentRef.current?.id === saved.id) setSaveState('saved');
     } catch (error) { if (isAbandonedRequest(error)) return; if (currentRef.current?.id === pending.serverReel.id) { setSaveState('error'); setMessage(polishError(error)); } }
@@ -957,11 +990,13 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * key is the account id.
    */
   const clearAccountView = useCallback(() => {
-    window.clearTimeout(saveTimer.current);
-    pendingPatch.current = null;
-    flushPending.current = null;
-    saveTimerReelId.current = null;
+    for (const timer of saveTimers.current.values()) window.clearTimeout(timer);
+    saveTimers.current.clear();
+    pendingPatches.current.clear();
+    flushPending.current.clear();
     draftWrites.current.clear(); draftWriteRevision.current++;
+    draftStoreQueues.current.clear();
+    inFlightSaves.current.clear();
     currentRef.current = null;
     conflictsRef.current = {}; blockedConflictReels.current.clear();
     setCurrent(null); setCapture(null); setReels([]); setDeleted([]); setConflictsByReel({});
@@ -1012,7 +1047,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    */
   const hasUnsavedChanges = useCallback(() => {
     const activeReelId = currentRef.current?.id;
-    const hasScalarDraft = activeReelId !== undefined && pendingPatch.current?.reelId === activeReelId;
+    const hasScalarDraft = activeReelId !== undefined && (pendingPatches.current.has(activeReelId) || inFlightSaves.current.has(activeReelId));
     return hasScalarDraft || hasUnfinishedHookEditForReel(hookEdits, activeReelId) ||
       ['saving', 'conflict', 'offline', 'error'].includes(saveState) || conflict !== null;
   }, [conflict, hookEdits, saveState]);

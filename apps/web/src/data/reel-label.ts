@@ -38,6 +38,8 @@ export const UNTITLED_LABEL = 'Bez tytułu';
 
 export interface ReelLabel {
   text: string;
+  /** Host of an original link, shown as separate secondary source metadata. */
+  sourceDomain?: string;
   /**
    * True when `text` was derived from the capture rather than typed by a person.
    *
@@ -64,6 +66,44 @@ function tidy(value: string): string {
  * discards nothing: `originalInput.url` keeps the exact URL, and the detail screen and
  * `originalShare` still hold it in full.
  */
+export function sourceDomain(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.hostname.replace(/^www\./i, '');
+  } catch { return undefined; }
+}
+
+function captureUrl(input: CaptureInput): string | undefined {
+  if (input.url?.trim()) return input.url;
+  for (const raw of [input.text, input.additionalText, ...(input.originalShare?.fields ?? []).map((field) => field.value)]) {
+    if (raw?.trim() && isBareUrl(raw.trim())) return raw;
+  }
+  return undefined;
+}
+
+const ROUTE_ONLY_SEGMENTS = new Set(['reel', 'reels', 'p', 'watch', 'video', 'videos', 'photo', 'photos', 'status', 'story', 'stories', 's', 'path', 'page']);
+
+function readablePath(raw: string): string | undefined {
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    const segments = parsed.pathname.split('/').filter(Boolean).map((part) => {
+      try { return decodeURIComponent(part); } catch { return part; }
+    });
+    const candidate = segments.reverse().find((part) => {
+      const lower = part.toLocaleLowerCase('pl-PL');
+      if (part.length < 4 || ROUTE_ONLY_SEGMENTS.has(lower) || /^\d+$/.test(part)) return false;
+      if (/^[A-Z0-9_-]{4,}$/.test(part)) return false;
+      if (/^[a-f0-9]{16,}$/i.test(part) || /^[A-Za-z0-9_-]{20,}$/.test(part)) return false;
+      return /[\p{L}]/u.test(part);
+    });
+    if (!candidate) return undefined;
+    return candidate.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  } catch { return undefined; }
+}
+
 export function urlLabel(raw: string): string {
   let parsed: URL;
   try {
@@ -72,9 +112,8 @@ export function urlLabel(raw: string): string {
     return tidy(raw);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return tidy(raw);
-  const host = parsed.host.replace(/^www\./i, '');
-  const path = parsed.pathname.replace(/\/+$/, '');
-  return tidy(host + path);
+  const host = parsed.hostname.replace(/^www\./i, '');
+  return tidy(readablePath(raw) ?? `Materiał z ${host}`);
 }
 
 /** True when the whole string is one absolute http(s) URL and nothing else. */
@@ -107,9 +146,21 @@ export function imageCountLabel(count: number): string {
 
 /** Derive a label from a capture alone. Exported for the capture-time preview and the tests. */
 export function captureLabel(input: CaptureInput): string {
-  const words = firstLine(input.text ?? '') ?? firstLine(input.additionalText ?? '');
-  if (words !== undefined) return isBareUrl(words) ? urlLabel(words) : tidy(words);
+  const title = input.originalShare?.fields.find((field) => field.name.toLocaleLowerCase('pl-PL') === 'title' && field.value.trim() !== '')?.value;
+  const candidates = [
+    title,
+    input.text,
+    input.additionalText,
+    ...(input.originalShare?.fields ?? []).filter((field) => field.name.toLocaleLowerCase('pl-PL') !== 'url').map((field) => field.value),
+  ];
+  for (const candidate of candidates) {
+    const line = candidate === undefined ? undefined : candidate.split(/\r?\n/).map((part) => part.trim()).find((part) => part !== '' && !isBareUrl(part));
+    if (line !== undefined) return tidy(line);
+  }
 
+  for (const raw of [input.url, input.text, input.additionalText, ...(input.originalShare?.fields ?? []).map((field) => field.value)]) {
+    if (raw?.trim() && isBareUrl(raw.trim())) return urlLabel(raw);
+  }
   if (input.url !== undefined && input.url.trim() !== '') return urlLabel(input.url);
 
   const named = input.images.find((image) => image.fileName.trim() !== '');
@@ -135,6 +186,8 @@ export function captureLabel(input: CaptureInput): string {
  * is immutable, which makes the label stable for the life of the Reel.
  */
 export function reelLabel(reel: Pick<Reel, 'title' | 'originalInput'>): ReelLabel {
-  if (reel.title.trim() !== '') return { text: reel.title, derived: false };
-  return { text: captureLabel(reel.originalInput), derived: true };
+  const domain = sourceDomain(captureUrl(reel.originalInput));
+  if (reel.title.trim() !== '') return { text: reel.title, derived: false, ...(domain ? { sourceDomain: domain } : {}) };
+  const text = captureLabel(reel.originalInput);
+  return { text, derived: true, ...(domain ? { sourceDomain: domain } : {}) };
 }

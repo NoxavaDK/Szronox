@@ -294,6 +294,7 @@ export interface SourcesSectionProps {
 export interface EditingNotesSectionProps {
   expanded: boolean;
   onToggle: () => void;
+  summary?: string;
   value: string;
   onChange: (value: string) => void;
   saveState: SaveState;
@@ -339,6 +340,7 @@ export type VerificationViewState =
 export interface MaterialsSectionProps {
   expanded: boolean;
   onToggle: () => void;
+  summary?: string;
 
   kdriveFolder: KdriveFolderView;
   onCreateKdriveFolder: () => void;
@@ -386,6 +388,8 @@ export interface ReelListItemView {
    * label does not read as a title someone wrote. Optional: absent means authored.
    */
   titleIsDerived?: boolean;
+  /** Link host shown as secondary information when this capture included a URL. */
+  sourceDomain?: string;
   priority: Priority;
   editor: EditorView | null;
   /** True when the item has crossed its priority's attention threshold (T08-computed). */
@@ -469,6 +473,8 @@ export interface ReelListScreenProps {
   onOpenAttention?: () => void;
   loadState: LoadState;
   items: ReelListItemView[];
+  /** Currently open Reel, highlighted even if a changed filter no longer includes its status. */
+  selectedReelId?: Id | null;
   onOpenReel: (id: Id) => void;
   onAddNew: () => void;
   onRetry?: () => void;
@@ -479,6 +485,8 @@ export interface ReelListScreenProps {
   onOpenDeleted: () => void;
   /** CONTENT-PLANNER-01: the mobile entry to the PLAN view. Absent when PLAN is already on screen. */
   onOpenPlan?: () => void;
+  /** Quiet account action; shown only when the list occupies the full screen. */
+  onSignOut?: () => void;
   /** Rendered as a side pane: the fixed Nowy pomysł button stays within the pane's own column. */
   embedded?: boolean;
 
@@ -618,6 +626,7 @@ export interface ReelDetailScreenProps {
    * and a derived label can never be saved as a title by accident. Absent when one exists.
    */
   titlePlaceholder?: string;
+  sourceDomain?: string;
 
   metadata: ReelDetailMetadataView;
   /** One phase-relevant shortcut to existing work; never changes status by itself. */

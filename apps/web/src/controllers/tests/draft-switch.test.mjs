@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canMarkSavedAfterSend, changesForConflictResolution, deleteDraftIfNoNewerWrite, hasUnfinishedHookEditForReel, retainPendingDraftBeforeSwitch, withConflictSnapshot } from '../draft-switch.ts';
+import { canMarkSavedAfterSend, changesForConflictResolution, deleteDraftIfNoNewerWrite, enqueueDraftStoreOperation, hasUnfinishedHookEditForReel, retainPendingDraftBeforeSwitch, withConflictSnapshot } from '../draft-switch.ts';
 
 function deferred() {
   let resolve;
@@ -24,6 +24,20 @@ test('an immediate Reel switch waits for local draft retention before sending', 
   write.resolve({ ok: true });
   assert.deepEqual(await switching, { ok: true });
   assert.equal(sent, true);
+});
+
+test('a slow server request does not delay switching after the newest draft is durable', async () => {
+  const network = deferred();
+  let sent = false;
+  const record = { revision: 1, promise: Promise.resolve({ ok: true }) };
+  const result = await retainPendingDraftBeforeSwitch('reel-a', () => 'reel-a', () => record, () => {
+    sent = true;
+    return network.promise;
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(sent, true);
+  // Intentionally unresolved here: the local-retention gate has already released navigation.
+  network.resolve();
 });
 
 test('a failed local draft write prevents the Reel switch and does not send', async () => {
@@ -64,6 +78,19 @@ test('an older in-flight save cannot delete a newer draft for the same Reel', as
   assert.equal(deleted, true);
 });
 
+test('local Reel draft saves remain ordered after a queued deletion', async () => {
+  const queue = new Map();
+  const deleteGate = deferred();
+  const order = [];
+  const deletion = enqueueDraftStoreOperation(queue, 'reel-a', async () => { order.push('delete-start'); await deleteGate.promise; order.push('delete-end'); });
+  const newerSave = enqueueDraftStoreOperation(queue, 'reel-a', async () => { order.push('save-newer'); });
+  await Promise.resolve();
+  assert.deepEqual(order, ['delete-start']);
+  deleteGate.resolve();
+  await Promise.all([deletion, newerSave]);
+  assert.deepEqual(order, ['delete-start', 'delete-end', 'save-newer']);
+});
+
 test('local conflict resolution uses newer typing and survives a failed latest draft write', () => {
   const oldDraft = { reelId: 'reel-a', expectedVersion: 4, changes: { title: 'pierwsza wartość' } };
   const newDraft = { reelId: 'reel-a', expectedVersion: 4, changes: { title: 'nowsza wartość' } };
@@ -81,4 +108,20 @@ test('local conflict resolution uses newer typing and survives a failed latest d
   assert.equal(canMarkSavedAfterSend('reel-a', 'reel-a', 'reel-a', false), false);
   assert.equal(canMarkSavedAfterSend('reel-a', 'reel-b', null, true), false);
   assert.equal(canMarkSavedAfterSend('reel-a', 'reel-a', null, true), true);
+});
+
+test('a conflicted Reel with a stored draft can be left without sending', async () => {
+  let flushed = false;
+  const record = { revision: 3, promise: Promise.resolve({ ok: true }) };
+  // Its edits wait for the explicit conflict choice, so nothing is scheduled to send.
+  const result = await retainPendingDraftBeforeSwitch('reel-a', () => 'reel-a', () => record, () => { flushed = true; return null; }, () => true);
+  assert.deepEqual(result, { ok: true });
+  assert.equal(flushed, false);
+});
+
+test('a conflicted Reel whose local draft write failed still cannot be left', async () => {
+  const failure = new Error('quota');
+  const record = { revision: 4, promise: Promise.resolve({ ok: false, error: failure }) };
+  const result = await retainPendingDraftBeforeSwitch('reel-a', () => 'reel-a', () => record, () => null, () => true);
+  assert.deepEqual(result, { ok: false, error: failure });
 });

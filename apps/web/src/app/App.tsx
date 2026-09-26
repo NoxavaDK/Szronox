@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import './App.css';
 import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { Login } from '../auth/Login.js';
@@ -53,6 +54,47 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const layout = workspaceLayout.layout;
   const [leftView, setLeftView] = useState<'list' | 'plan'>('list');
   const [drawerView, setDrawerView] = useState<'list' | 'plan' | null>(null);
+  /**
+   * The side drawer is modal while open: focus moves into it, Tab stays inside, Escape closes
+   * it and focus returns to what opened it — the same contract as the list quick-actions sheet.
+   */
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerShellRef = useRef<HTMLDivElement>(null);
+  const drawerReturnFocus = useRef<HTMLElement | null>(null);
+  const drawerFocusable = () => Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  ) ?? []).filter((element) => element.offsetParent !== null);
+  useEffect(() => {
+    if (!drawerView) return;
+    if (!drawerRef.current?.contains(document.activeElement)) {
+      drawerReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    drawerFocusable()[0]?.focus();
+  }, [drawerView]);
+  useEffect(() => {
+    const shell = drawerShellRef.current;
+    if (!shell) return;
+    if (drawerView) shell.setAttribute('inert', '');
+    else shell.removeAttribute('inert');
+  }, [drawerView]);
+  const closeDrawer = () => {
+    setDrawerView(null);
+    const target = drawerReturnFocus.current;
+    drawerReturnFocus.current = null;
+    // A selection may have removed the opener; focus then stays wherever the page puts it.
+    if (target?.isConnected) window.requestAnimationFrame(() => target.focus());
+  };
+  const onDrawerKeyDown = (event: ReactKeyboardEvent) => {
+    // A sheet opened from inside the drawer handles its own Escape first.
+    if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); closeDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = drawerFocusable();
+    if (focusable.length === 0) { event.preventDefault(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
   const [listQuery, setListQuery] = useState('');
   const setLayout = (next: 'two' | 'three' | 'focus') => {
     workspaceLayout.setLayout(next);
@@ -228,6 +270,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       hasKdriveFolder: reel.kdriveFolder !== null,
       title: label.text,
       titleIsDerived: label.derived,
+      sourceDomain: label.sourceDomain,
       priority: reel.priority,
       editor: editorOf(reel.editorId),
       isOverdue: false,
@@ -313,7 +356,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     if (!(c.route.name === 'detail' && c.current)) return null;
     const reel = c.current;
     const defaults = sectionDefaults.current[reel.id] ?? (sectionDefaults.current[reel.id] = {
-      sources: reel.script.trim() === '',
+      sources: false,
       materials: reel.status === 'editing',
       notes: reel.status === 'editing' && reel.editingNotes.trim() !== '',
       publication: reel.status === 'ready',
@@ -340,6 +383,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     */
     const label = reelLabel(reel);
     const hasPublicationText = Boolean(reel.publicationDescription.trim() || reel.publicationHashtags.trim());
+    const contextualAiEnabled = aiCapability.enabled && !c.hasUnsavedChanges();
     const scheduleFromDetail = () => {
       setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], publication: true } }));
       openSchedule(reel.id);
@@ -357,12 +401,14 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       void c.replaceExport({ url, label: exportLabel });
     };
     let contextAction: { label: string; onClick: () => void } | undefined;
-    if (!reel.script.trim()) contextAction = { label: 'Opracuj', onClick: () => setAiView({ reelId: reel.id, view: 'develop', autoStart: false }) };
+    // AI shortcuts are offered only when AI is available, exactly like the AI row and the
+    // PUBLIKACJA button; otherwise the next relevant shortcut applies.
+    if (!reel.script.trim() && contextualAiEnabled) contextAction = { label: 'Opracuj', onClick: () => setAiView({ reelId: reel.id, view: 'develop', autoStart: false }) };
     else if (reel.status === 'editing' && !reel.currentExport) contextAction = { label: 'Dodaj eksport', onClick: () => {
       setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], materials: true } }));
       replaceExport();
     } };
-    else if (reel.status === 'ready' && !reel.publicationDescription.trim()) contextAction = { label: 'Wygeneruj opis', onClick: generatePublication };
+    else if (reel.status === 'ready' && !reel.publicationDescription.trim() && contextualAiEnabled) contextAction = { label: 'Wygeneruj opis', onClick: generatePublication };
     else if (hasPublicationText && !planOf(reel).date) contextAction = { label: 'Zaplanuj', onClick: scheduleFromDetail };
     else if (planOf(reel).date) contextAction = { label: `Termin: ${planLabel(planOf(reel), today)} · Zmień termin`, onClick: scheduleFromDetail };
     else if (reel.hooks.length > 0 && !reel.selectedHookId) contextAction = { label: 'Wybierz hook', onClick: () => document.querySelector('[data-hooks-section]')?.scrollIntoView({ block: 'center' }) };
@@ -394,6 +440,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       title={reel.title}
       onChangeTitle={(title) => c.changeReel({ title })}
       titlePlaceholder={label.derived ? label.text : undefined}
+      sourceDomain={label.sourceDomain}
       plan={reel.deletedAt ? undefined : { label: planLabel(planOf(reel), today), onOpen: () => openSchedule(reel.id) }}
       metadata={{
         status: reel.status,
@@ -451,7 +498,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       script={reel.script}
       onChangeScript={(script) => c.changeReel({ script })}
       scriptConflict={c.conflict?.field === 'script' ? conflictView() : undefined}
-      aiRowEnabled={aiCapability.enabled && !['saving', 'conflict', 'offline'].includes(c.saveState)}
+      aiRowEnabled={contextualAiEnabled}
       onAiAction={(action) => setAiView({ reelId: reel.id, view: action, autoStart: false })}
       onOpenMeme={() => setMemeReelId(reel.id)}
       attachedMemes={memeNames}
@@ -461,7 +508,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       sources={{
         expanded: expanded('sources'),
         onToggle: () => toggleSection('sources'),
-        summary: reel.originalInput.url ?? reel.originalInput.text?.slice(0, 90) ?? (reel.originalInput.images.length ? `${reel.originalInput.images.length} załączniki` : 'Brak zapisanego wejścia'),
+        summary: [
+          label.text,
+          reel.originalInput.images.length ? `${reel.originalInput.images.length} załączniki` : '',
+          reel.inputNote.trim() ? `Notatka: ${reel.inputNote.trim().replace(/\s+/g, ' ').slice(0, 48)}` : '',
+        ].filter(Boolean).join(' · '),
         // The immutable original capture, shown as itself rather than summarised.
         originalUrl: reel.originalInput.url ?? null,
         onOpenSource: () => { if (reel.originalInput.url) window.open(reel.originalInput.url, '_blank', 'noopener,noreferrer'); },
@@ -488,6 +539,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       editingNotes={{
         expanded: expanded('notes'),
         onToggle: () => toggleSection('notes'),
+        summary: reel.editingNotes.trim() ? reel.editingNotes.trim().replace(/\s+/g, ' ').slice(0, 72) : 'Brak uwag',
         value: reel.editingNotes,
         onChange: (editingNotes) => c.changeReel({ editingNotes }),
         saveState: c.saveState,
@@ -496,6 +548,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       materials={{
         expanded: expanded('materials'),
         onToggle: () => toggleSection('materials'),
+        summary: reel.currentExport
+          ? `Eksport: ${reel.currentExport.label}${verification.kind === 'verified' ? ' · Zweryfikowano' : verification.kind === 'outdated' ? ' · Nieaktualna weryfikacja' : ' · Do weryfikacji'}`
+          : 'Brak eksportu',
         kdriveFolder: { name: reel.kdriveFolder ? reel.kdriveFolder.folderId : null, unavailable: false },
         onCreateKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
         onOpenKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
@@ -540,9 +595,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     />;
   };
 
-  const renderList = (embedded: boolean) => <ReelListScreen
+  const renderList = (embedded: boolean, showSignOut = false) => <ReelListScreen
     embedded={embedded}
     onOpenPlan={c.layout === 'single' ? () => c.setRoute({ name: 'plan' }) : undefined}
+    onSignOut={showSignOut ? () => void c.signOut() : undefined}
     currentUser={c.user!}
     statusTabs={[{ status: 'all', label: 'Wszystkie' }, ...(Object.keys(STATUS_TAB_LABELS) as ReelStatus[]).map((value) => ({
       status: value, label: STATUS_TAB_LABELS[value],
@@ -554,6 +610,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     loadState={c.loadState}
     // The open Reel is synced into the list; one whose status just changed leaves this tab.
     items={c.reels.filter((reel) => c.status === 'all' || reel.status === c.status).map(toListItem)}
+    selectedReelId={c.route.name === 'detail' ? c.current?.id ?? null : null}
     onOpenReel={(id) => { if (c.layout === 'drawer') setDrawerView(null); void c.openDetail(id); }}
     onAddNew={() => { setDrawerView(null); c.startCapture(); }}
     onRetry={() => void c.loadList()}
@@ -582,8 +639,6 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       undo: undo ? { message: undo.message, onUndo: () => void onUndoStatus(), saveState: undoSaveState } : null,
     }}
   />;
-
-  const signOut = <button className="sign-out" onClick={() => void c.signOut()}>Wyloguj</button>;
 
   const renderPlanner = (variant: 'pane' | 'screen') => <PlannerPane
     variant={variant}
@@ -620,7 +675,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   if (c.layout === 'single') {
     if (c.route.name === 'detail' && c.current) return <>{notice}{renderDetail()}{scheduleSheet}</>;
     if (c.route.name === 'plan') return <>{notice}{renderPlanner('screen')}{scheduleSheet}</>;
-    return <>{notice}{renderList(false)}{signOut}{scheduleSheet}</>;
+    return <>{notice}{renderList(false, true)}{scheduleSheet}</>;
   }
 
   if (c.layout === 'drawer') {
@@ -628,21 +683,22 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       : c.route.name === 'plan' ? renderPlanner('screen') : renderList(false);
     return <>
       {notice}
-      <div className="drawer-shell">
+      <div ref={drawerShellRef} className="drawer-shell" aria-hidden={Boolean(drawerView)}>
         <nav className="drawer-toolbar" aria-label="Nawigacja">
           <button type="button" onClick={() => setDrawerView('list')}>Rolki</button>
           <button type="button" onClick={() => setDrawerView('plan')}>Plan</button>
+          <button type="button" className="drawer-signout" onClick={() => void c.signOut()}>Wyloguj</button>
         </nav>
         <main className="drawer-centre">{centre}</main>
       </div>
-      <div className="side-drawer-backdrop" hidden={!drawerView} role="presentation" onClick={() => setDrawerView(null)}>
-        <aside className="side-drawer" role="dialog" aria-label={drawerView === 'list' ? 'Rolki' : 'Plan'} onClick={(event) => event.stopPropagation()}>
-          <button type="button" className="side-drawer-close" onClick={() => setDrawerView(null)}>Zamknij</button>
+      <div className="side-drawer-backdrop" hidden={!drawerView} role="presentation" onClick={closeDrawer}>
+        <aside ref={drawerRef} className="side-drawer" role="dialog" aria-modal="true" aria-label={drawerView === 'list' ? 'Rolki' : 'Plan'}
+          onClick={(event) => event.stopPropagation()} onKeyDown={onDrawerKeyDown}>
+          <button type="button" className="side-drawer-close" onClick={closeDrawer}>Zamknij</button>
           <div hidden={drawerView !== 'list'}>{renderList(false)}</div>
           <div hidden={drawerView !== 'plan'}>{renderPlanner('screen')}</div>
         </aside>
       </div>
-      {signOut}
       {scheduleSheet}
     </>;
   }
@@ -663,6 +719,8 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
           <button type="button" aria-pressed={c.layout === 'two'} onClick={() => setLayout('two')}>Dwa panele</button>
           <button type="button" className="workspace-three-option" aria-pressed={c.layout === 'three'} onClick={() => setLayout('three')}>Trzy panele</button>
           <button type="button" aria-pressed={c.layout === 'focus'} onClick={() => setLayout('focus')}>Skupienie</button>
+          {/* In the toolbar rather than fixed over it, so it never covers the layout controls. */}
+          <button type="button" className="workspace-signout" onClick={() => void c.signOut()}>Wyloguj</button>
         </div>
       </div>
       {c.layout === 'three' ? <aside className="workspace-pane workspace-plan">{renderPlanner('pane')}</aside> : null}
@@ -673,7 +731,6 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       <main className="workspace-pane workspace-centre">{centre}</main>
       {c.layout === 'three' ? <aside className="workspace-pane workspace-reels">{renderList(true)}</aside> : null}
     </div>
-    {signOut}
     {scheduleSheet}
   </>;
 }

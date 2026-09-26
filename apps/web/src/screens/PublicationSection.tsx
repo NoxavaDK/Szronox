@@ -71,7 +71,7 @@ export function PublicationSection(props: PublicationSectionProps) {
         />
       </div>
 
-      <TextAction onClick={onCopyDescription}>Kopiuj opis</TextAction>
+      <TextAction className={styles.copyAction} onClick={onCopyDescription}>Kopiuj opis</TextAction>
       {isPublished || publishedAt || publicationLinks.length ? <div className={styles.block}>
         <span className={styles.label}>Po publikacji</span>
         <div className={styles.postPublication}>

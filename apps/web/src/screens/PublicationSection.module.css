@@ -57,16 +57,18 @@
 .planRow strong { font-weight: 600; }
 .generateRow { display: grid; gap: 2px; justify-items: start; }
 .prerequisite { margin: 0; color: var(--sz-color-text-secondary); font-size: 12px; line-height: 17px; }
+.copyAction { align-self: flex-start; min-height: 40px; padding: 0 12px; border: 1px solid var(--sz-color-cobalt); border-radius: 4px; background: color-mix(in srgb, var(--sz-color-cobalt) 8%, var(--sz-color-background)); font-weight: 650; }
 
 .textField {
-  border: none;
-  border-bottom: 1px solid var(--sz-color-divider);
-  background: none;
+  border: 1px solid var(--sz-color-divider);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--sz-color-surface) 65%, transparent);
   font-family: var(--sz-font-family);
   font-size: var(--sz-text-body-size);
   line-height: var(--sz-text-body-line);
   color: var(--sz-color-text-primary);
-  padding: var(--sz-space-2) 0;
+  padding: var(--sz-space-2);
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
@@ -75,8 +77,8 @@
 }
 
 .textField:focus {
-  outline: none;
-  border-bottom-color: var(--sz-color-cobalt);
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 1px;
 }
 
 .postPublication {

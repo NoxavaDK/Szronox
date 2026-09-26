@@ -36,7 +36,7 @@ const PRIORITY_ORDER: Priority[] = ['urgent', 'normal', 'evergreen'];
 
 /** A collapsible inline section header with the frozen chevron affordance. */
 function SectionHeader(
-  { heading, expanded, onToggle }: { heading: string; expanded: boolean; onToggle: () => void },
+  { heading, summary, expanded, onToggle }: { heading: string; summary?: string; expanded: boolean; onToggle: () => void },
 ) {
   return (
     <button
@@ -46,6 +46,7 @@ function SectionHeader(
       aria-expanded={expanded}
     >
       <span className={styles.sectionHeading}>{heading}</span>
+      {!expanded && summary ? <span className={styles.sectionHeaderSummary}>{summary}</span> : null}
       <span className={expanded ? styles.chevronOpen : styles.chevron} aria-hidden="true">
         <ChevronRightIcon />
       </span>
@@ -226,8 +227,7 @@ export function SourcesSection(props: SourcesSectionProps) {
 
   return (
     <section className={styles.section}>
-      <SectionHeader heading={COPY.sourcesHeading} expanded={expanded} onToggle={onToggle} />
-      {!expanded && summary ? <p className={styles.sourceSummary}>{summary}</p> : null}
+      <SectionHeader heading={COPY.sourcesHeading} summary={summary ?? undefined} expanded={expanded} onToggle={onToggle} />
       {expanded ? (
         <div className={styles.sectionBody}>
           {originalUrl || originalText ? (
@@ -300,10 +300,10 @@ export function SourcesSection(props: SourcesSectionProps) {
 
 /** One shared plain-text production note. No threads, no per-user notes. */
 export function EditingNotesSection(props: EditingNotesSectionProps) {
-  const { expanded, onToggle, value, onChange, saveState, conflict } = props;
+  const { expanded, onToggle, summary, value, onChange, saveState, conflict } = props;
   return (
     <section className={styles.section}>
-      <SectionHeader heading={COPY.editingNotesHeading} expanded={expanded} onToggle={onToggle} />
+      <SectionHeader heading={COPY.editingNotesHeading} summary={summary} expanded={expanded} onToggle={onToggle} />
       {expanded ? (
         <div className={styles.sectionBody}>
           <textarea
@@ -362,14 +362,14 @@ function VerificationRow(
 /** FOLDER kDrive → AKTUALNY EKSPORT → WERYFIKACJA, in exactly that order. */
 export function MaterialsSection(props: MaterialsSectionProps) {
   const {
-    expanded, onToggle, kdriveFolder, kdriveEnabled, currentExport,
+    expanded, onToggle, summary, kdriveFolder, kdriveEnabled, currentExport,
     onCreateKdriveFolder, onOpenKdriveFolder, onRelinkKdriveFolder,
     onOpenExport, onReplaceExport, verification, onMarkVerified, saveState,
   } = props;
 
   return (
     <section className={styles.section}>
-      <SectionHeader heading={COPY.materialsHeading} expanded={expanded} onToggle={onToggle} />
+      <SectionHeader heading={COPY.materialsHeading} summary={summary} expanded={expanded} onToggle={onToggle} />
       {expanded ? (
         <div className={styles.sectionBody}>
           <div className={styles.subsection}>

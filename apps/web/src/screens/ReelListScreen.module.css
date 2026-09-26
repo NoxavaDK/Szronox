@@ -21,7 +21,9 @@
   line-height: var(--sz-text-screen-title-line);
   font-weight: var(--sz-text-screen-title-weight);
   margin: 0;
+  flex: 0 1 auto;
 }
+.signOutButton { min-height: 36px; border: 0; padding: 0 2px; background: transparent; color: var(--sz-color-text-secondary); font-size: 12px; white-space: nowrap; }
 
 .list {
   display: flex;
@@ -88,6 +90,11 @@
   outline-offset: -2px;
 }
 
+.rowSelected {
+  background: var(--sz-color-surface);
+  box-shadow: inset 3px 0 0 var(--sz-color-cobalt);
+}
+
 .urgentRail {
   position: absolute;
   left: 0;
@@ -108,7 +115,7 @@
 
 .titleLine {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
 }
@@ -117,9 +124,12 @@
   font-size: var(--sz-text-reel-title-size);
   line-height: var(--sz-text-reel-title-line);
   font-weight: var(--sz-text-reel-title-weight);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
   min-width: 0;
 }
 

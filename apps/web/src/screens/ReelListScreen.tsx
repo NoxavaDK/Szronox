@@ -13,7 +13,7 @@ import quickStyles from './ReelQuickActions.module.css';
 
 /** "Rolki" — frozen-visual-spec.md sec. 2. Controlled: all state and intents come from props. */
 export function ReelListScreen(props: ReelListScreenProps) {
-  const { currentUser, statusTabs, selectedStatus, onSelectStatus, searchQuery, onChangeSearchQuery, attentionCount, onOpenAttention, loadState, items, onOpenReel, onAddNew, onRetry, quickActions } = props;
+  const { currentUser, statusTabs, selectedStatus, onSelectStatus, searchQuery, onChangeSearchQuery, attentionCount, onOpenAttention, loadState, items, selectedReelId, onOpenReel, onAddNew, onRetry, quickActions } = props;
   const [localQuery, setLocalQuery] = useState('');
   const query = searchQuery ?? localQuery;
   const updateQuery = onChangeSearchQuery ?? setLocalQuery;
@@ -41,6 +41,7 @@ export function ReelListScreen(props: ReelListScreenProps) {
         {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}
         <button type="button" onClick={props.onOpenDeleted} aria-label="Usunięte">⋮</button>
         <Avatar user={currentUser} size={32} />
+        {props.onSignOut ? <button type="button" className={styles.signOutButton} onClick={props.onSignOut}>Wyloguj</button> : null}
       </header>
 
       <StatusSelector tabs={statusTabs} selected={selectedStatus} onSelect={onSelectStatus} />
@@ -72,6 +73,7 @@ export function ReelListScreen(props: ReelListScreenProps) {
             <ReelRow
               key={item.id}
               item={item}
+              selected={item.id === selectedReelId}
               showFeedCover={showFeedCover}
               showStatus={selectedStatus === 'all'}
               onOpen={() => onOpenReel(item.id)}
@@ -92,9 +94,10 @@ export function ReelListScreen(props: ReelListScreenProps) {
 }
 
 function ReelRow({
-  item, showFeedCover, showStatus, onOpen, quickActions, revealed, onRevealChange,
+  item, selected, showFeedCover, showStatus, onOpen, quickActions, revealed, onRevealChange,
 }: {
   item: ReelListItemView;
+  selected: boolean;
   showFeedCover: boolean;
   showStatus: boolean;
   onOpen: () => void;
@@ -187,7 +190,9 @@ function ReelRow({
 
       <button
         type="button"
-        className={styles.row}
+        className={selected ? `${styles.row} ${styles.rowSelected}` : styles.row}
+        aria-current={selected ? 'true' : undefined}
+        data-selected={selected ? 'true' : undefined}
         style={{
           transform: offset !== 0 ? `translateX(${offset}px)` : undefined,
           transition: dragging || reduceMotion ? 'none' : 'transform 160ms ease',
@@ -208,6 +213,7 @@ function ReelRow({
             {item.priority !== 'normal' ? <PriorityGlyph priority={item.priority} /> : null}
           </div>
           <div className={styles.metaLine}>
+            {item.sourceDomain ? <span className={styles.metaItem}>{item.sourceDomain}</span> : null}
             {showStatus ? <span className={styles.metaItem}>{STATUS_LABELS[item.status]}</span> : null}
             {isUrgent ? (
               <span className={`${styles.metaItem} ${styles.metaUrgent}`}>Pilne</span>
