@@ -387,6 +387,7 @@ export function MaterialsSection(props: MaterialsSectionProps) {
             ) : (
               <div className={styles.sourceRow}>
                 <span className={styles.sourceValue}>{kdriveFolder.name}</span>
+                {kdriveFolder.note ? <span className={styles.quiet}>{kdriveFolder.note}</span> : null}
                 {kdriveFolder.unavailable ? (
                   <>
                     <span className={styles.unsupported}>Folder niedostępny</span>
@@ -400,7 +401,7 @@ export function MaterialsSection(props: MaterialsSectionProps) {
                 )}
               </div>
             )}
-            {!kdriveEnabled ? <p className={styles.quiet}>Integracja kDrive nie jest jeszcze dostępna.</p> : null}
+            {!kdriveEnabled ? <p className={styles.quiet}>Integracja kDrive nie jest skonfigurowana na tym serwerze.</p> : null}
           </div>
 
           <div className={styles.subsection}>

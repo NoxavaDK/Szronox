@@ -109,3 +109,34 @@ Merge `8f5e48c` (implementation `97ff69d`) runs as image `szronox-dev:8f5e48c`, 
 **Rollback (code only):** restore `app.pre-8f5e48c` as `app` and `backups/pre-8f5e48c/runtime.env` (release `650c581`, no KDRIVE_* keys), optionally restore `backups/pre-8f5e48c/dc-gemini.sh`, then run `config/dc-gemini.sh up -d --no-deps api worker`. No migration is involved. Stored folder references stay in `kdrive_folder` and are ignored by `650c581`.
 
 **Open operator gate:** open a folder link in a signed-in browser as NOXAVA and as SZRON. That becomes clickable in the app with KDRIVE-01b; until then, test link: `https://ksuite.infomaniak.com/kdrive/app/drive/1990403/files/1381`.
+
+## KDRIVE-01b — web wiring (2026-09-26)
+
+Built on master after UX-PUBLICATION-02/UX-ASTRA-03 integration (`86d9b8e`).
+
+- **`apps/web/src/data/kdrive.ts`:**
+  - web-link builder;
+  - relink input parser (numeric id, or a kDrive folder link on an `infomaniak.com` host);
+  - the Materials view per resolved state;
+  - Polish command messages.
+- **`apps/web/src/data/api.ts`:** `kdriveFolder` and `commandKdriveFolder`.
+- **`apps/web/src/app/App.tsx`:**
+  - The hard-coded `KDRIVE_ENABLED = false` is removed.
+  - Opening a Reel resolves its folder (keyed per Reel; re-resolved only when the stored reference changes).
+  - MATERIAŁY: `+ Utwórz folder kDrive` (create), `Otwórz kDrive` (opens `webUrl`), and `Połącz ponownie` (prompt for a pasted kDrive link or number, then link).
+  - The list sheet's `Otwórz kDrive` opens the stored reference directly.
+  - A command is refused with an explanation while an edit of the Reel is still saving, so it never conflicts with the author's own edit.
+  - "Not configured" is taken only from an unambiguous `none` answer; a temporary outage never disables the actions.
+  - The collapsed Materials summary mentions a linked folder.
+- **`apps/web/src/ui/{detail-sections.tsx,screen-contracts.ts}`:** optional one-line `note` (checking / deleted / no access / temporarily unavailable), and truthful "nie jest skonfigurowana" wording.
+- **Duplicate-Detail fix (root correction from the UX-ASTRA-03 Opus review):** the Zaplanuj sheet key is now `schedule:<reelId>`, no longer equal to the Detail's `reelId` key. That shared key left a stale Detail behind on mobile after cancelling the sheet. It had been present since CONTENT-PLANNER-01 and is live on DEV until this deploys.
+
+**Verification:**
+- `npm run build`, `npm run typecheck`: PASS.
+- New `data/tests/kdrive.test.mjs`: 5/5, including source guards for the removed switch-off and the namespaced sheet key.
+- Existing web suites plus controller tests: all pass. Browser auth and attachment transport: 24/24.
+- Local real-Chrome run against this build (kDrive faked in-process, no real calls): 17/17.
+  - Mobile: create, name with tag, open link, list open.
+  - A folder deleted at kDrive shows as unavailable with the reference kept, and relink by pasted link works.
+  - Desktop: create is refused while an edit is saving, then works with the edit kept.
+  - Three rounds of Zaplanuj → Anuluj → Wstecz leave no duplicate or stale Detail.

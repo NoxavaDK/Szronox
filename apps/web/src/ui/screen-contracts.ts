@@ -314,6 +314,8 @@ export interface KdriveFolderView {
    * replacement is never created silently.
    */
   unavailable: boolean;
+  /** KDRIVE-01b: one short Polish line about the resolved state (checking, deleted, no access…). */
+  note?: string | null;
 }
 
 export interface CurrentExportView {
