@@ -1,6 +1,6 @@
 # UX-ASTRA-03 — Luna implementation result
 
-Status: bounded implementation complete; awaiting root review and the agreed Opus/Astra verification. No merge or deployment.
+Status: bounded implementation complete; root review accepted; agreed Opus/Astra verification pending. No merge or deployment.
 
 ## Baseline and scope
 
@@ -30,14 +30,14 @@ Representative screenshots from that browser pass:
 - **BLOCKER:** none known.
 - **CORRECTION NEEDED:** none known from this bounded pass.
 - **ACCEPTED / NO FURTHER TESTING NOW:** the reported duplicate Detail was not reproduced on the candidate after schedule cancel, Back/list readiness, and Reel switch; the sequence and visible counts are recorded above. No speculative navigation rewrite was made.
-- **OPEN REAL-WORLD GATE:** no enlarged-text/actual browser zoom pass was available in the harness; widths were measured in CSS pixels. Live provider output quality remains unverified. Root's requested Opus/Astra review remains pending.
+- **OPEN REAL-WORLD GATE:** no enlarged-text/actual browser zoom pass was available in the harness; widths were measured in CSS pixels. Live provider output quality remains unverified. The agreed Opus/Astra verification remains pending.
 
 ## Changed files
 
 - `apps/web/src/app/App.css`, `apps/web/src/app/App.tsx`
 - `apps/web/src/controllers/draft-switch.ts`, `apps/web/src/controllers/tests/draft-switch.test.mjs`, `apps/web/src/controllers/useAppController.ts`
 - `apps/web/src/data/reel-label.ts`, `apps/web/src/data/tests/reel-label.test.mjs`
-- `apps/web/src/screens/PublicationSection.module.css`, `apps/web/src/screens/PublicationSection.tsx`, `apps/web/src/screens/ReelDetailScreen.module.css`, `apps/web/src/screens/ReelDetailScreen.tsx`, `apps/web/src/screens/ReelListScreen.module.css`, `apps/web/src/screens/ReelListScreen.tsx`
+- `apps/web/src/screens/PlannerPane.tsx`, `apps/web/src/screens/PublicationSection.module.css`, `apps/web/src/screens/PublicationSection.tsx`, `apps/web/src/screens/ReelDetailScreen.module.css`, `apps/web/src/screens/ReelDetailScreen.tsx`, `apps/web/src/screens/ReelListScreen.module.css`, `apps/web/src/screens/ReelListScreen.tsx`
 - `apps/web/src/ui/detail-sections.module.css`, `apps/web/src/ui/detail-sections.tsx`, `apps/web/src/ui/primitives.module.css`, `apps/web/src/ui/primitives.tsx`, `apps/web/src/ui/screen-contracts.ts`, `apps/web/src/ui/tokens.ts`
 - `docs/implementation/UX-ASTRA-03-result.md`
 
@@ -50,7 +50,7 @@ Lead review identified multiline title, 44px hit targets, selected-row tint and 
 - Detail title is a bounded two-line textarea. The authored value stays exact, the derived title remains only a placeholder, and the source domain remains below it. It has no guessed-title persistence.
 - Contextual primary, hook edit/choose, list logout and drawer logout hit areas use the existing 44px touch target. Their visible labels remain compact and logout remains quiet.
 - The selected Reel row uses a pale cobalt tint plus its cobalt rail. Urgency retains its separate red rail.
-- `Gotowe` is rendered with a check and the existing success color in Detail, list and Plan. A ready Reel with a missing feed cover displays explicit amber `Okładka niegotowa` and the existing prerequisite copy in the collapsed summary and expanded Publication section. Early statuses and other optional missing content remain neutral.
+- `Gotowe` is rendered with a check and the existing success color in Detail, list and Plan. A ready Reel with a missing feed cover shows the amber `Okładka niegotowa` label in collapsed Publication; the expanded Publication section adds the full existing prerequisite explanation. Early statuses and other optional missing content remain neutral.
 
 Verification after this correction:
 
