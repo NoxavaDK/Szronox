@@ -67,7 +67,7 @@ Apply Opus's confirmed corrections from `UX-PUBLICATION-02-opus-review.md`:
 ### A6 — informative supporting sections
 
 - Closed Materials communicates `Brak eksportu` or current export/verification state; publication communicates relevant `Brak opisu`, `Okładka niegotowa`, existing copy or published summary. Nonempty editing notes and captured sources have concise truthful summaries.
-- Keep empty-script input visible as approved; after a saved script exists, sources start collapsed. Materials and Publication open according to existing stage/explicit-entry defaults, with manual overrides per Reel.
+- Apply Astra's latest source default: after capture, Sources starts collapsed with a compact content summary, including when the script is empty. The source text remains available on explicit expansion; this supersedes UX-PUBLICATION-02's empty-script open default only. Materials and Publication open according to existing stage/explicit-entry defaults, with manual overrides per Reel.
 - All expansion indicators and `aria-expanded` agree with the visible content, including Sources and Publication. Closed sections must not all look like identical unexplained links.
 
 ### A7 — restrained semantic color, contrast and consistency
