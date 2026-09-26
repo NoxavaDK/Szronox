@@ -77,26 +77,46 @@
   color: var(--sz-color-text-secondary);
 }
 
-.timeRow {
+.slotField {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--sz-space-2);
+}
+
+.slotLabel {
+  font-size: var(--sz-text-metadata-size);
+  color: var(--sz-color-text-secondary);
+}
+
+.slots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--sz-space-1);
 }
 
-.timeRow input {
-  flex: 1;
-  min-width: 0;
+.slot {
+  appearance: none;
+  border: 1px solid var(--sz-color-divider);
+  background: var(--sz-color-background);
+  border-radius: var(--sz-radius-sm);
+  min-height: var(--sz-touch-target);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sz-color-text-primary);
+  cursor: pointer;
 }
 
-.clearTime {
-  appearance: none;
-  border: 0;
-  background: none;
-  width: 36px;
-  height: 36px;
-  font-size: 20px;
+.slot[aria-pressed='true'] {
+  border-color: var(--sz-color-cobalt);
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+}
+
+.slot:disabled {
   color: var(--sz-color-text-secondary);
-  cursor: pointer;
+  cursor: default;
 }
 
 .actions {

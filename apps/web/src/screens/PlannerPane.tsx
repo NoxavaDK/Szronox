@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
 import '../ui/tokens.css';
 import type { Reel } from '../../../../packages/contracts/src/index.js';
-import { groupPlanner, planOf, weekRangeLabel } from '../data/planner.js';
+import { SLOT_LABELS, groupPlanner, planOf, weekRangeLabel } from '../data/planner.js';
 import { reelLabel } from '../data/reel-label.js';
 import { STATUS_LABELS } from '../ui/screen-contracts.js';
 import { CoverIndicator, StatusBanner } from '../ui/primitives.js';
@@ -165,7 +165,7 @@ function PlannerCard({ reel, selected, draggable, onOpen, onSchedule }: {
   onSchedule: () => void;
 }) {
   const label = reelLabel(reel);
-  const { time } = planOf(reel);
+  const { slot } = planOf(reel);
   // Preparation readiness uses only state that already exists reliably: the workflow status
   // and the required feed cover. Nothing is inferred beyond that.
   const showCover = reel.status === 'editing' || reel.status === 'ready' || reel.status === 'published';
@@ -183,7 +183,7 @@ function PlannerCard({ reel, selected, draggable, onOpen, onSchedule }: {
       <button type="button" className={styles.cardMain} onClick={onOpen} aria-current={selected ? 'true' : undefined}>
         <span className={label.derived ? `${styles.cardTitle} ${styles.cardTitleDerived}` : styles.cardTitle}>{label.text}</span>
         <span className={styles.cardMeta}>
-          {time ? <span className={styles.cardTime}>{time}</span> : null}
+          {slot ? <span className={styles.cardTime}>{SLOT_LABELS[slot]}</span> : null}
           <span data-status={reel.status}>{STATUS_LABELS[reel.status]}</span>
           {showCover ? <CoverIndicator done={reel.feedCoverDone} size={14} /> : null}
         </span>

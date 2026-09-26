@@ -18,7 +18,7 @@ import { AiWorkspace } from '../screens/AiWorkspace.js';
 import { MemePicker } from '../screens/MemePicker.js';
 import { PlannerPane } from '../screens/PlannerPane.js';
 import { ScheduleSheet } from '../screens/ScheduleSheet.js';
-import { localIsoDate, planLabel, planOf } from '../data/planner.js';
+import { localIsoDate, planLabel, planOf, type PublicationSlot } from '../data/planner.js';
 import { useWorkspaceLayout } from '../ui/workspace-layout.js';
 import {
   COPY,
@@ -62,17 +62,17 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const openSchedule = (id: string) => { setScheduleError(null); setScheduleSaving(false); setScheduleFor(id); };
   const closeSchedule = () => { setScheduleFor(null); setScheduleError(null); setScheduleSaving(false); };
-  const applySchedule = async (id: string, date: string | null, time: string | null) => {
+  const applySchedule = async (id: string, date: string | null, slot: PublicationSlot | null) => {
     setScheduleSaving(true); setScheduleError(null);
-    const result = await c.scheduleReel(id, date, time);
+    const result = await c.scheduleReel(id, date, slot);
     setScheduleSaving(false);
     if (result.ok) closeSchedule();
     else if (result.message) setScheduleError(result.message);
   };
-  /** Desktop drag and drop: a new day keeps the Reel's explicit time; NIEZAPLANOWANE clears both. */
+  /** Desktop drag and drop: a new day keeps the Reel's explicit slot; NIEZAPLANOWANE clears both. */
   const moveReel = async (id: string, date: string | null) => {
     const reel = c.planReels.find((item) => item.id === id);
-    const result = await c.scheduleReel(id, date, date === null ? null : reel ? planOf(reel).time : null);
+    const result = await c.scheduleReel(id, date, date === null ? null : reel ? planOf(reel).slot : null);
     if (!result.ok && result.message) c.setMessage(result.message);
   };
 
@@ -575,7 +575,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     saving={scheduleSaving}
     error={scheduleError}
     onDismiss={closeSchedule}
-    onConfirm={(date, time) => void applySchedule(scheduleReel.id, date, time)}
+    onConfirm={(date, slot) => void applySchedule(scheduleReel.id, date, slot)}
     onClear={() => void applySchedule(scheduleReel.id, null, null)}
   /> : null;
 

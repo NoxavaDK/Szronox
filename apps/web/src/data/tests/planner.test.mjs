@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addDays, groupPlanner, isOverdue, isUnscheduledCandidate, planChanges, planLabel, planOf,
-  plannerWeek, quickDays, weekRangeLabel, weekStartOf,
+  plannerWeek, quickDays, weekRangeLabel, weekStartOf, PUBLICATION_SLOTS, SLOT_LABELS,
 } from '../planner.ts';
 
 // Thursday 2026-09-24; its week is Monday 21.09 – Sunday 27.09.
@@ -13,7 +13,7 @@ const reel = (over = {}) => ({
   status: 'editing',
   deletedAt: null,
   plannedPublicationDate: null,
-  plannedPublicationTime: null,
+  plannedPublicationSlot: null,
   ...over,
 });
 
@@ -47,15 +47,16 @@ test('other weeks show Monday to Sunday and a range label', () => {
   assert.equal(previous.every((day) => day.isPast), true);
 });
 
-test('a scheduled Reel appears on exactly its day, timed first in time order', () => {
+test('a scheduled Reel appears on exactly its day: rano, popołudnie, wieczór, then no slot', () => {
   const a = reel({ id: 'a', plannedPublicationDate: '2026-09-25' });
-  const b = reel({ id: 'b', plannedPublicationDate: '2026-09-25', plannedPublicationTime: '18:00' });
-  const c = reel({ id: 'c', plannedPublicationDate: '2026-09-25', plannedPublicationTime: '08:30' });
+  const b = reel({ id: 'b', plannedPublicationDate: '2026-09-25', plannedPublicationSlot: 'evening' });
+  const c = reel({ id: 'c', plannedPublicationDate: '2026-09-25', plannedPublicationSlot: 'morning' });
+  const e = reel({ id: 'e', plannedPublicationDate: '2026-09-25', plannedPublicationSlot: 'afternoon' });
   const d = reel({ id: 'd', plannedPublicationDate: '2026-09-28' });
-  const groups = groupPlanner([a, b, c, d], TODAY, 0);
-  assert.deepEqual(groups.days.find((day) => day.label === 'JUTRO').items.map((item) => item.id), ['c', 'b', 'a']);
-  assert.equal(groups.days.flatMap((day) => day.items).length, 3, 'next week is not in this week');
-  assert.deepEqual(groupPlanner([a, b, c, d], TODAY, 1).days[0].items.map((item) => item.id), ['d']);
+  const groups = groupPlanner([a, b, c, d, e], TODAY, 0);
+  assert.deepEqual(groups.days.find((day) => day.label === 'JUTRO').items.map((item) => item.id), ['c', 'e', 'b', 'a']);
+  assert.equal(groups.days.flatMap((day) => day.items).length, 4, 'next week is not in this week');
+  assert.deepEqual(groupPlanner([a, b, c, d, e], TODAY, 1).days[0].items.map((item) => item.id), ['d']);
 });
 
 test('moving a Reel moves it between days; clearing it returns it to NIEZAPLANOWANE', () => {
@@ -63,8 +64,8 @@ test('moving a Reel moves it between days; clearing it returns it to NIEZAPLANOW
   const moved = { ...planned, ...planChanges('2026-09-26', null) };
   const groups = groupPlanner([moved], TODAY, 0);
   assert.deepEqual(groups.days.map((day) => day.items.length), [0, 0, 1, 0]);
-  const cleared = { ...moved, ...planChanges(null, '10:00') };
-  assert.deepEqual(planOf(cleared), { date: null, time: null }, 'unscheduling clears the time');
+  const cleared = { ...moved, ...planChanges(null, 'morning') };
+  assert.deepEqual(planOf(cleared), { date: null, slot: null }, 'unscheduling clears the slot');
   assert.deepEqual(groupPlanner([cleared], TODAY, 0).unscheduled.map((item) => item.id), ['x']);
 });
 
@@ -85,7 +86,10 @@ test('NIEZAPLANOWANE holds only active, in-production Reels without a plan', () 
 
 test('a Reel cached before the planner existed is valid and unplanned', () => {
   const legacy = { id: 'old', status: 'ready', deletedAt: null };
-  assert.deepEqual(planOf(legacy), { date: null, time: null });
+  assert.deepEqual(planOf(legacy), { date: null, slot: null });
+  // A cached Reel from the short free-time period: its date stands, the stray time is ignored.
+  assert.deepEqual(planOf({ plannedPublicationDate: '2026-09-25', plannedPublicationTime: '18:00' }), { date: '2026-09-25', slot: null });
+  assert.deepEqual(planOf({ plannedPublicationDate: '2026-09-25', plannedPublicationSlot: '18:00' }), { date: '2026-09-25', slot: null });
   assert.deepEqual(groupPlanner([legacy], TODAY, 0).unscheduled.map((item) => item.id), ['old']);
 });
 
@@ -102,11 +106,12 @@ test('past unpublished plans surface as overdue in the current week only; publis
 });
 
 test('plan labels are short and Polish', () => {
-  assert.equal(planLabel({ date: null, time: null }, TODAY), null);
-  assert.equal(planLabel({ date: TODAY, time: '18:00' }, TODAY), 'Dziś, 18:00');
-  assert.equal(planLabel({ date: '2026-09-25', time: null }, TODAY), 'Jutro');
-  assert.equal(planLabel({ date: '2026-10-01', time: null }, TODAY), 'czw 01.10');
-  assert.equal(planLabel({ date: '2027-01-04', time: '07:00' }, TODAY), 'pn 04.01.2027, 07:00');
+  assert.equal(planLabel({ date: null, slot: null }, TODAY), null);
+  assert.equal(planLabel({ date: TODAY, slot: 'evening' }, TODAY), 'Dziś, wieczór');
+  assert.equal(planLabel({ date: '2026-09-25', slot: null }, TODAY), 'Jutro');
+  assert.equal(planLabel({ date: '2026-09-25', slot: 'afternoon' }, TODAY), 'Jutro, popołudnie');
+  assert.equal(planLabel({ date: '2026-10-01', slot: null }, TODAY), 'czw 01.10');
+  assert.equal(planLabel({ date: '2027-01-04', slot: 'morning' }, TODAY), 'pn 04.01.2027, rano');
 });
 
 test('quick days start today and cover a week', () => {
@@ -116,8 +121,11 @@ test('quick days start today and cover a week', () => {
   assert.equal(days[6].date, '2026-09-30');
 });
 
-test('plan changes never send a time without a date and treat empty time as none', () => {
-  assert.deepEqual(planChanges('2026-09-25', ''), { plannedPublicationDate: '2026-09-25', plannedPublicationTime: null });
-  assert.deepEqual(planChanges('2026-09-25', '09:15'), { plannedPublicationDate: '2026-09-25', plannedPublicationTime: '09:15' });
-  assert.deepEqual(planChanges(null, '09:15'), { plannedPublicationDate: null, plannedPublicationTime: null });
+test('plan changes never send a slot without a date, and never a free time', () => {
+  assert.deepEqual(planChanges('2026-09-25', null), { plannedPublicationDate: '2026-09-25', plannedPublicationSlot: null });
+  assert.deepEqual(planChanges('2026-09-25', 'evening'), { plannedPublicationDate: '2026-09-25', plannedPublicationSlot: 'evening' });
+  assert.deepEqual(planChanges(null, 'evening'), { plannedPublicationDate: null, plannedPublicationSlot: null });
+  assert.equal('plannedPublicationTime' in planChanges('2026-09-25', 'morning'), false);
+  assert.deepEqual([...PUBLICATION_SLOTS], ['morning', 'afternoon', 'evening']);
+  assert.deepEqual(Object.values(SLOT_LABELS), ['Rano', 'Popołudnie', 'Wieczór']);
 });

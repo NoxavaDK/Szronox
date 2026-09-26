@@ -65,14 +65,14 @@ const REEL_COLUMNS = `
   published_at, publication_urls, publication_description, publication_hashtags,
   feed_cover_done, created_by, created_at, updated_at, deleted_at,
   to_char(planned_publication_date, 'YYYY-MM-DD') as planned_publication_date,
-  to_char(planned_publication_time, 'HH24:MI') as planned_publication_time
+  planned_publication_slot
 `;
 
 /** Scalar fields PATCH may touch. Anything else is refused, not ignored. */
 export const PATCHABLE_FIELDS = [
   'title', 'status', 'priority', 'inputNote', 'script', 'editingNotes',
   'editorId', 'publishedAt', 'publicationUrls', 'publicationDescription',
-  'publicationHashtags', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationTime',
+  'publicationHashtags', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationSlot',
 ] as const;
 
 const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
@@ -89,11 +89,11 @@ const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
   publicationHashtags: 'publication_hashtags',
   feedCoverDone: 'feed_cover_done',
   plannedPublicationDate: 'planned_publication_date',
-  plannedPublicationTime: 'planned_publication_time',
+  plannedPublicationSlot: 'planned_publication_slot',
 };
 
 const PLANNED_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const PLANNED_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const PUBLICATION_SLOTS = ['morning', 'afternoon', 'evening'];
 
 /** A real calendar date in `YYYY-MM-DD`; `2026-02-30` is refused rather than rolled over. */
 function isCalendarDate(value: string): boolean {
@@ -453,19 +453,20 @@ export class CoreRepository {
         throw feedCoverRequired();
       }
 
-      // CONTENT-PLANNER-01: a time is detail of a date. Clearing the date alone clears the
-      // time with it (unscheduling is one action); a time without any date is refused.
+      // CONTENT-PLANNER-01: the slot (Rano/Popołudnie/Wieczór) is detail of a date. Clearing
+      // the date alone clears the slot with it (unscheduling is one action); a slot without
+      // any date is refused.
       // Status is deliberately untouched by any plan change.
       const planEntries: Array<[string, unknown]> = [...entries];
       const clearsDateOnly = Object.hasOwn(changes, 'plannedPublicationDate')
-        && changes.plannedPublicationDate === null && !Object.hasOwn(changes, 'plannedPublicationTime');
-      if (clearsDateOnly && before.plannedPublicationTime !== null) planEntries.push(['plannedPublicationTime', null]);
+        && changes.plannedPublicationDate === null && !Object.hasOwn(changes, 'plannedPublicationSlot');
+      if (clearsDateOnly && before.plannedPublicationSlot !== null) planEntries.push(['plannedPublicationSlot', null]);
       const nextDate = Object.hasOwn(changes, 'plannedPublicationDate') ? changes.plannedPublicationDate : before.plannedPublicationDate;
-      const nextTime = Object.hasOwn(changes, 'plannedPublicationTime')
-        ? changes.plannedPublicationTime
-        : clearsDateOnly ? null : before.plannedPublicationTime;
-      if (nextTime !== null && nextTime !== undefined && (nextDate === null || nextDate === undefined)) {
-        throw validationError('plannedPublicationTime requires plannedPublicationDate', { field: 'plannedPublicationTime' });
+      const nextSlot = Object.hasOwn(changes, 'plannedPublicationSlot')
+        ? changes.plannedPublicationSlot
+        : clearsDateOnly ? null : before.plannedPublicationSlot;
+      if (nextSlot !== null && nextSlot !== undefined && (nextDate === null || nextDate === undefined)) {
+        throw validationError('plannedPublicationSlot requires plannedPublicationDate', { field: 'plannedPublicationSlot' });
       }
 
       const assignments: string[] = [];
@@ -521,10 +522,8 @@ export class CoreRepository {
           throw validationError('plannedPublicationDate must be a YYYY-MM-DD date or null', { field });
         }
         return value;
-      case 'plannedPublicationTime':
-        if (value !== null && (typeof value !== 'string' || !PLANNED_TIME.test(value))) {
-          throw validationError('plannedPublicationTime must be HH:MM or null', { field });
-        }
+      case 'plannedPublicationSlot':
+        if (value !== null) this.assertOneOf(value, PUBLICATION_SLOTS, field);
         return value;
       case 'publicationUrls':
         if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {

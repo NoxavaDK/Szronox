@@ -5,7 +5,7 @@ import type { CoreApiClient } from '../data/api.js';
 import type { AttachmentRecovery, AttachmentProgress } from '../data/attachment-recovery.js';
 import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { composePublicationText } from '../data/publication.js';
-import { planChanges } from '../data/planner.js';
+import { planChanges, type PublicationSlot } from '../data/planner.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import { createRequestFromDraft } from '../drafts/create-request.js';
 import type { SyncQueue } from '../drafts/queue.js';
@@ -708,8 +708,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * other Detail edit, so a plan change cannot race an unsent script edit into a conflict.
    * Any other Reel uses the list's version-checked `patchReelById`.
    */
-  const scheduleReel = useCallback(async (id: string, date: string | null, time: string | null): Promise<{ ok: boolean; message: string }> => {
-    const changes = planChanges(date, time);
+  const scheduleReel = useCallback(async (id: string, date: string | null, slot: PublicationSlot | null): Promise<{ ok: boolean; message: string }> => {
+    const changes = planChanges(date, slot);
     if (currentRef.current?.id === id && route.name === 'detail') { changeReel(changes); return { ok: true, message: '' }; }
     let base = planReels.find((item) => item.id === id) ?? reels.find((item) => item.id === id);
     if (!base) {
