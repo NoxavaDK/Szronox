@@ -65,4 +65,4 @@ Updated representative screenshots:
 
 No queue/controller or broad test suites were rerun, per the bounded follow-up request.
 
-Follow-up implementation commit: pending.
+Follow-up implementation commit: `6e4a8dc` (`Correct Astra title and touch affordances`).
