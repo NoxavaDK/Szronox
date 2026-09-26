@@ -16,7 +16,8 @@ const read = (relative) => readFileSync(path.join(here, relative), 'utf8');
 
 test('publication refusals map to truthful Polish copy', () => {
   const error = (code, details) => new ClientApiError(409, { code, message: code, retryable: false, details });
-  assert.equal(polishError(error('STALE_PUBLICATION_RESULT')), 'Skrypt zmienił się od wygenerowania opisu. Wygeneruj opis ponownie.');
+  // PUBLICATION-02: a proposal is stale when the script, the selected hook or a saved source changed.
+  assert.equal(polishError(error('STALE_PUBLICATION_RESULT')), 'Skrypt, wybrany hook lub źródła zmieniły się od wygenerowania opisu. Wygeneruj opis ponownie.');
   assert.equal(polishError(error('VALIDATION_ERROR', { reason: 'script_required' })), SCRIPT_REQUIRED);
   assert.match(polishError(error('VALIDATION_ERROR', { reason: 'wrong_action' })), /Wygeneruj opis/);
   assert.match(UNSAVED_BEFORE_PUBLICATION, /zachowane/);

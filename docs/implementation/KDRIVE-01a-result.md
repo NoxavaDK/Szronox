@@ -134,7 +134,8 @@ Built on master after UX-PUBLICATION-02/UX-ASTRA-03 integration (`86d9b8e`).
 **Verification:**
 - `npm run build`, `npm run typecheck`: PASS.
 - New `data/tests/kdrive.test.mjs`: 5/5, including source guards for the removed switch-off and the namespaced sheet key.
-- Existing web suites plus controller tests: all pass. Browser auth and attachment transport: 24/24.
+- Existing web suites plus controller tests: 92/92, after correcting one stale test expectation. `publication-generation.test.mjs` still expected the pre-PUBLICATION-02 STALE_PUBLICATION_RESULT copy. UX-PUBLICATION-02 had deliberately changed that copy to cover script, hook and source changes, but not the test; this failure came in with the Luna merge (`86d9b8e`). I first merged `7a68ef0` before reading that result; the expectation is corrected in the follow-up commit.
+- Browser auth and attachment transport: 24/24.
 - Local real-Chrome run against this build (kDrive faked in-process, no real calls): 17/17.
   - Mobile: create, name with tag, open link, list open.
   - A folder deleted at kDrive shows as unavailable with the reference kept, and relink by pasted link works.
