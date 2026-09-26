@@ -10,6 +10,13 @@
 
 This candidate continues the pending UX-PUBLICATION-02 implementation, including its publication grounding and explicit apply safeguards. Astra's live DEV notes described an earlier deployed UI; use the candidate for this review. Root contracts, migrations, API/worker code, dependencies and lockfiles are outside UX-ASTRA-03's implementation scope. The candidate has not been merged or deployed.
 
+## Root review result
+
+- **ACCEPTED / NO FURTHER TESTING NOW:** primary correction commit `8105b21` and bounded presentation follow-up `6e4a8dc`. Root inspected the changed boundaries and refreshed desktop/360px screenshots, and accepted Luna's recorded task evidence without rerunning broad suites.
+- Task evidence: controller tests 9/9, label tests 17/17, browser draft checks 17/17, browser layout/accessibility checks 15/15, final presentation geometry checks 9/9; web typecheck/build and diff check passed. Exact commands and measurement limitations are in the candidate result.
+- **BLOCKER / CORRECTION NEEDED:** none known after the bounded lead corrections. Opus and Astra review remain pending.
+- **OPEN REAL-WORLD GATE:** actual browser zoom/enlarged text, real devices and provider semantic quality remain unverified.
+
 ## Opus — bounded verification first
 
 Read the result and inspect the correction diff. Accept the recorded task evidence unless there is a concrete defect hypothesis; do not rerun the full suites for independent confirmation.
