@@ -3,7 +3,7 @@ import type {
   AiAction, AiRun, ApplyAiRequest, AttachMemeRequest, CreateMemeRequest, Meme, StartAiRunRequest,
   ErrorResponse, InitiateAttachmentRequest, InitiateAttachmentResponse, Reel, ReelListQuery,
   ReelPatchRequest, RemoveHookRequest, RenewAttachmentUploadResponse, ReplaceExportRequest,
-  SelectHookRequest, SelectHookResponse,
+  SelectHookRequest, SelectHookResponse, KdriveFolderRequest, KdriveFolderResponse, KdriveFolderState,
   UploadTransport, User, VerifyExportRequest,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
@@ -129,6 +129,9 @@ export class CoreApiClient {
   restore = (id: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/restore`, { method: 'POST', body: JSON.stringify(body) });
   replaceExport = (id: string, body: ReplaceExportRequest) => this.request<Reel>(`/reels/${id}/current-export`, { method: 'POST', body: JSON.stringify(body) });
   verifyExport = (id: string, body: VerifyExportRequest) => this.request<Reel>(`/reels/${id}/verification`, { method: 'POST', body: JSON.stringify(body) });
+  /** KDRIVE-01: resolve the stored folder, or explicitly create/link one. */
+  kdriveFolder = (id: string) => this.request<KdriveFolderState>(`/reels/${encodeURIComponent(id)}/kdrive-folder`);
+  commandKdriveFolder = (id: string, body: KdriveFolderRequest) => this.request<KdriveFolderResponse>(`/reels/${encodeURIComponent(id)}/kdrive-folder`, { method: 'POST', body: JSON.stringify(body) });
 
   aiCapabilities = () => this.request<{ enabled: boolean; programmeIndexed: boolean }>('/ai/capabilities');
   startAi = (id: string, body: StartAiRunRequest) => this.request<{ id: string; state: 'queued' }>(`/reels/${id}/ai-runs`, { method: 'POST', body: JSON.stringify(body) });

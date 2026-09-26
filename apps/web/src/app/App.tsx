@@ -21,6 +21,7 @@ import { PlannerPane } from '../screens/PlannerPane.js';
 import { ScheduleSheet } from '../screens/ScheduleSheet.js';
 import { localIsoDate, planLabel, planOf, type PublicationSlot } from '../data/planner.js';
 import { useWorkspaceLayout } from '../ui/workspace-layout.js';
+import { kdriveCommandMessage, kdriveFolderView, kdriveWebUrl, parseKdriveFolderInput, type KdriveViewState } from '../data/kdrive.js';
 import {
   COPY,
   STATUS_LABELS,
@@ -35,8 +36,6 @@ import {
   type VerificationViewState,
 } from '../ui/screen-contracts.js';
 
-/** kDrive integration is not enabled anywhere in the product yet (T04 remains unauthorized). */
-const KDRIVE_ENABLED = false;
 
 export function App({ auth, api, store, queue, attachments }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue; attachments: AttachmentRecovery }) {
   const c = useAppController(auth, api, store, queue, attachments);
@@ -218,6 +217,57 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     return () => { live = false; };
   }, [api, c.current?.id, c.current?.memeIds.join(',')]);
 
+  // ── KDRIVE-01b: the open Reel's kDrive folder, resolved by the server ──────
+  // Keyed by Reel so a late answer for one Reel never shows under another.
+  const [kdriveStates, setKdriveStates] = useState<Record<string, KdriveViewState>>({});
+  /** Whether this server has kDrive configured; unknown until a first resolve answers. */
+  const [kdriveConfigured, setKdriveConfigured] = useState<boolean | null>(null);
+  const [kdriveBusy, setKdriveBusy] = useState(false);
+  const kdriveReelId = c.route.name === 'detail' ? c.current?.id ?? null : null;
+  const kdriveFolderKey = c.current?.kdriveFolder ? `${c.current.kdriveFolder.driveId}/${c.current.kdriveFolder.folderId}` : '';
+  const resolveKdrive = (reelId: string) => {
+    setKdriveStates((old) => ({ ...old, [reelId]: { state: 'loading' } }));
+    void api.kdriveFolder(reelId).then((state) => {
+      setKdriveStates((old) => ({ ...old, [reelId]: state }));
+      // Only `none` says unambiguously whether kDrive is configured; `unavailable` may just be
+      // a temporary outage, so it never disables the actions.
+      if (state.state === 'none') setKdriveConfigured(state.configured);
+    }).catch(() => setKdriveStates((old) => ({ ...old, [reelId]: { state: 'error' } })));
+  };
+  useEffect(() => {
+    if (!kdriveReelId || !c.user) return;
+    resolveKdrive(kdriveReelId);
+    // Re-resolve when the stored reference itself changes, not on every scalar edit.
+  }, [api, kdriveReelId, kdriveFolderKey, c.user?.id]);
+
+  /**
+   * Explicit create or relink. Refused while an edit of this Reel is still being saved, because
+   * the command is version-checked against the saved Reel and would otherwise conflict.
+   */
+  const commandKdrive = async (reel: Reel, request: { mode: 'create' } | { mode: 'link'; folderId: string }) => {
+    if (kdriveBusy) return;
+    if (c.hasUnsavedChanges()) { c.setMessage('Poczekaj, aż zmiany w rolce zostaną zapisane, i spróbuj ponownie.'); return; }
+    setKdriveBusy(true);
+    try {
+      const result = await api.commandKdriveFolder(reel.id, { operationId: crypto.randomUUID(), expectedVersion: reel.version, ...request });
+      if (c.current?.id === reel.id) c.acceptReel(result.reel);
+      setKdriveStates((old) => ({ ...old, [reel.id]: result.folder }));
+      setKdriveConfigured(true);
+      c.setMessage(request.mode === 'create' ? 'Utworzono folder kDrive.' : 'Połączono folder kDrive.');
+    } catch (error) {
+      c.setMessage(kdriveCommandMessage(error as never));
+    } finally {
+      setKdriveBusy(false);
+    }
+  };
+  const relinkKdrive = (reel: Reel) => {
+    const raw = window.prompt('Wklej link do folderu w kDrive albo jego numer');
+    if (raw === null) return;
+    const folderId = parseKdriveFolderInput(raw);
+    if (!folderId) { c.setMessage('To nie jest link do folderu kDrive ani jego numer.'); return; }
+    void commandKdrive(reel, { mode: 'link', folderId });
+  };
+
   const previews = useMemo(
     () => c.capture?.draft.input.images.map((image) => ({
       id: image.attachmentId,
@@ -382,6 +432,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
      * instead of an empty box.
     */
     const label = reelLabel(reel);
+    const kdriveView = kdriveFolderView(reel.kdriveFolder, kdriveStates[reel.id]);
     const hasPublicationText = Boolean(reel.publicationDescription.trim() || reel.publicationHashtags.trim());
     const contextualAiEnabled = aiCapability.enabled && !c.hasUnsavedChanges();
     const scheduleFromDetail = () => {
@@ -550,13 +601,15 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         onToggle: () => toggleSection('materials'),
         summary: reel.currentExport
           ? `Eksport: ${reel.currentExport.label}${verification.kind === 'verified' ? ' · Zweryfikowano' : verification.kind === 'outdated' ? ' · Nieaktualna weryfikacja' : ' · Do weryfikacji'}`
-          : 'Brak eksportu',
-        kdriveFolder: { name: reel.kdriveFolder ? reel.kdriveFolder.folderId : null, unavailable: false },
-        onCreateKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
-        onOpenKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
-        onRelinkKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
-        // Honestly unavailable rather than pretending.
-        kdriveEnabled: KDRIVE_ENABLED,
+          : 'Brak eksportu'
+          + (reel.kdriveFolder ? ' · Folder kDrive' : ''),
+        kdriveFolder: { name: kdriveView.name, unavailable: kdriveView.unavailable, note: kdriveView.note },
+        onCreateKdriveFolder: () => void commandKdrive(reel, { mode: 'create' }),
+        onOpenKdriveFolder: () => { if (kdriveView.webUrl) window.open(kdriveView.webUrl, '_blank', 'noopener,noreferrer'); },
+        onRelinkKdriveFolder: () => relinkKdrive(reel),
+        // Creating/relinking needs the server's kDrive configuration; opening a stored link
+        // does not. Unknown (not yet resolved) is treated as available rather than blocking.
+        kdriveEnabled: kdriveConfigured !== false,
         currentExport: { label: reel.currentExport?.label ?? null, revision: reel.currentExport?.revision ?? null },
         onOpenExport: () => { if (reel.currentExport) window.open(reel.currentExport.url, '_blank', 'noopener,noreferrer'); },
         onReplaceExport: replaceExport,
@@ -628,8 +681,12 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onQuickAdvanceStatus: (id, status) => void applyQuickStatus(id, status),
       onCopyLink: (id) => void c.copyReelLink(id),
       onOpenSchedule: (id) => { closeQuickActions(); openSchedule(id); },
-      kdriveEnabled: KDRIVE_ENABLED,
-      onOpenKdrive: () => c.setMessage(COPY.kdriveUnavailable),
+      kdriveEnabled: true,
+      // A stored reference opens directly; the list does not wait for a resolve.
+      onOpenKdrive: (id) => {
+        const reel = c.reels.find((item) => item.id === id) ?? c.planReels.find((item) => item.id === id);
+        if (reel?.kdriveFolder) window.open(kdriveWebUrl(reel.kdriveFolder.driveId, reel.kdriveFolder.folderId), '_blank', 'noopener,noreferrer');
+      },
       onRequestDelete: (id) => setQuickConfirmDeleteId(id),
       confirmingDeleteId: quickConfirmDeleteId,
       onCancelDelete: () => setQuickConfirmDeleteId(null),
@@ -661,7 +718,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       ?? c.reels.find((reel) => reel.id === scheduleFor)
       ?? null;
   const scheduleSheet = scheduleReel ? <ScheduleSheet
-    key={scheduleReel.id}
+    // Namespaced: on the single-pane layout the sheet renders beside the Detail screen, which is
+    // keyed by the same Reel id. Equal sibling keys made React leave a stale Detail behind.
+    key={`schedule:${scheduleReel.id}`}
     reelTitle={reelLabel(scheduleReel).text}
     plan={planOf(scheduleReel)}
     today={today}
