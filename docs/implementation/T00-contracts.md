@@ -328,3 +328,7 @@ The PLAN view, the list `Zaplanuj` quick action and Reel Detail `Zaplanuj publik
 ## UX-PUBLICATION-02 — operator-approved correction (2026-09-26)
 
 The operator authorized one bounded Luna implementation of the [UX-PUBLICATION-02 dispatch](UX-PUBLICATION-02-dispatch.md), followed by manual Opus verification and a final Astra UI check. That dispatch supersedes only the prior CONTENT-PLANNER-01 wide-layout default, the named Reel Detail hierarchy/defaults in the written visual specifications, and PUBLICATION-01's script-only generation input. Preserve the frozen compact editorial visual language, five Reel statuses, existing planner fields and publication application safeguards. No merge or deployment is authorized by this amendment.
+
+## UX-ASTRA-03 — approved usability continuation (2026-09-26)
+
+The operator explicitly authorized Luna to implement the actionable latest Astra usability notes. [UX-ASTRA-03-dispatch.md](UX-ASTRA-03-dispatch.md) pins the bounded visual corrections, duplicate-Detail investigation and related confirmed Opus navigation/draft/accessibility repairs. It supersedes only the named selection, identity, width, action, summary, color/contrast and supporting-control treatments. Preserve the two-pane default already approved in UX-PUBLICATION-02, slot planner, exact original inputs, explicit hook/AI selection/application and all server invariants. No title fetching, new statuses, migrations, dependency changes, merge or deployment is authorized.

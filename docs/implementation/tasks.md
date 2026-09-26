@@ -78,3 +78,7 @@ User requested direct entry of a ready script in Quick Add on 2026-09-24 and exp
 ## UX-PUBLICATION-02 — approved for Luna implementation
 
 On 2026-09-26 the user authorized one Luna implementation of the Astra-reviewed mobile/desktop hierarchy corrections and bounded PUBLICATION-02 generation correction, followed by manual Opus verification and Astra's final UI check. Root pins shared contracts and integration; Luna works only in a separate assigned worktree and file allowlist. Exact scope and acceptance: [UX-PUBLICATION-02-dispatch.md](UX-PUBLICATION-02-dispatch.md). CONTENT-PLANNER-01 is already integrated and deployed to DEV; this task revises its interface rather than adding another planner model. No merge or deployment is authorized by this dispatch.
+
+## UX-ASTRA-03 — explicitly approved Luna continuation
+
+The user provided Astra's live DEV usability notes and explicitly approved preparing concrete action points and launching Luna to implement them. Continue the pending UX branch with remaining visual corrections, evidence-led duplicate-Detail investigation and the related confirmed Opus switching/save/accessibility defects. Exact model, file ownership, baseline and acceptance: [UX-ASTRA-03-dispatch.md](UX-ASTRA-03-dispatch.md). Preserve implemented UX-PUBLICATION-02 behavior and accepted API/worker evidence. No merge or deployment.
