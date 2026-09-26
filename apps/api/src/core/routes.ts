@@ -27,6 +27,7 @@ import {
 import type { StorageAdapter } from './storage.js';
 import type { Database } from '../db/client.js';
 import { registerAttachmentRoutes } from '../storage/routes.js';
+import type { KdriveConfig } from '../kdrive/config.js';
 
 export interface CoreDependencies {
   db: Database;
@@ -42,6 +43,8 @@ export interface CoreDependencies {
    * and the source route says so explicitly rather than serving an unverified file.
    */
   programmeArchiveRoot?: string;
+  /** KDRIVE-01: parsed kDrive configuration, or null/absent when kDrive is not configured. */
+  kdrive?: KdriveConfig | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

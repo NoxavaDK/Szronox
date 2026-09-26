@@ -8,6 +8,7 @@ import { registerAuthRoutes, type AuthRouteDependencies } from './auth/routes.js
 import { registerAiRoutes } from './ai/routes.js';
 import { registerLibraryRoutes } from './ai/library.js';
 import { type CoreDependencies, registerCoreRoutes } from './core/routes.js';
+import { registerKdriveRoutes } from './kdrive/routes.js';
 import { type ReadinessTracker, unconfiguredReadiness } from './runtime/readiness.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -110,7 +111,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   // Registered BEFORE the static plugins and the not-found handler, so a core route
   // is matched by its own handler rather than falling through to the SPA fallback.
   if (options.auth) registerAuthRoutes(app, options.auth);
-  if (options.core) { registerCoreRoutes(app, options.core); registerAiRoutes(app, options.core); registerLibraryRoutes(app, options.core); }
+  if (options.core) { registerCoreRoutes(app, options.core); registerAiRoutes(app, options.core); registerLibraryRoutes(app, options.core); registerKdriveRoutes(app, options.core); }
 
   const webRoot = path.resolve(here, '../../web/dist');
   // Root registration only supplies the reply.sendFile decorator used for the SPA fallback below.

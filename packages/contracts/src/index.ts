@@ -220,6 +220,22 @@ export interface CreateMemeRequest {
   imageAssetId: Id;
   attachToReel?: { reelId: Id; expectedVersion: number };
 }
+/**
+ * KDRIVE-01: explicit kDrive folder command (T00 `POST /reels/:id/kdrive-folder`).
+ * `create` makes (or, after an ambiguous earlier attempt, finds) this Reel's folder under the
+ * configured base folder; `link` stores an existing folder id, also used to relink. Never
+ * issued implicitly by capture or a status change.
+ */
+export type KdriveFolderRequest = MutationContext & ({ mode: 'create' } | { mode: 'link'; folderId: string });
+/**
+ * Resolved state of a Reel's stored folder reference (`GET /reels/:id/kdrive-folder`). A
+ * missing/denied/unavailable reference is retained on the Reel, never cleared by a read.
+ */
+export type KdriveFolderState =
+  | { state: 'none'; configured: boolean }
+  | { state: 'available'; driveId: string; folderId: string; name: string; webUrl: string }
+  | { state: 'missing' | 'access_denied' | 'unavailable'; driveId: string; folderId: string; webUrl: string; retryable: boolean };
+export interface KdriveFolderResponse { reel: Reel; folder: KdriveFolderState }
 export interface ReelListQuery {
   /** Defaults to active. Deleted is a secondary view, never a ReelStatus. */
   visibility?: 'active' | 'deleted';
