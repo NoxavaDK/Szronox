@@ -9,7 +9,7 @@ Reviewer: Opus 5.5, manual, as directed by the operator. Target: `codex/ux-publi
 - **Browser composition:** headless Chrome 154 driven over CDP against Luna's built API and web on a local PGlite database with synthetic seeded Reels and a harness-issued session (the `sessionHarness` path the test suites use). No production or DEV records. Scripts are kept in the reviewer scratchpad.
 - **Not repeated:** Luna's recorded unit suites.
 
-## Results: 56 of 62 browser checks pass
+## Results: 52 of 58 browser checks pass (6 failures, all classified below)
 
 - **Layout:**
   - 390px single view, 800px drawer, 1200px two panes, 1600px two panes by default with an explicit `Trzy panele`.
