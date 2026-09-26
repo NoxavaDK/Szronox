@@ -21,12 +21,30 @@
   line-height: var(--sz-text-screen-title-line);
   font-weight: var(--sz-text-screen-title-weight);
   margin: 0;
+  flex: 0 1 auto;
 }
+.signOutButton { min-height: var(--sz-touch-target); border: 0; padding: 0 2px; background: transparent; color: var(--sz-color-text-secondary); font-size: 12px; white-space: nowrap; }
 
 .list {
   display: flex;
   flex-direction: column;
 }
+
+.search {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  margin: 4px 0 0;
+  border: 0;
+  border-bottom: 1px solid var(--sz-color-divider);
+  border-radius: 0;
+  background: transparent;
+  color: var(--sz-color-text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.search:focus { outline: none; border-bottom-color: var(--sz-color-cobalt); }
 
 /*
  * Swipe-reveal wrapper (LIST-01). `.row` translates on top of `.revealTrack`; giving `.row`
@@ -72,6 +90,11 @@
   outline-offset: -2px;
 }
 
+.rowSelected {
+  background: color-mix(in srgb, var(--sz-color-cobalt) 8%, var(--sz-color-background));
+  box-shadow: inset 3px 0 0 var(--sz-color-cobalt);
+}
+
 .urgentRail {
   position: absolute;
   left: 0;
@@ -92,7 +115,7 @@
 
 .titleLine {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
 }
@@ -101,9 +124,12 @@
   font-size: var(--sz-text-reel-title-size);
   line-height: var(--sz-text-reel-title-line);
   font-weight: var(--sz-text-reel-title-weight);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
   min-width: 0;
 }
 
@@ -141,6 +167,8 @@
   color: var(--sz-color-urgent);
   font-weight: 650;
 }
+
+.metaReady { color: var(--sz-color-success); font-weight: 650; }
 
 .metaVerified {
   color: var(--sz-color-success);

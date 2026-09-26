@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import './App.css';
 import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { Login } from '../auth/Login.js';
@@ -39,20 +40,67 @@ const KDRIVE_ENABLED = false;
 
 export function App({ auth, api, store, queue, attachments }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue; attachments: AttachmentRecovery }) {
   const c = useAppController(auth, api, store, queue, attachments);
-  const [publicationExpanded, setPublicationExpanded] = useState(false);
+  type DetailSection = 'sources' | 'materials' | 'notes' | 'publication';
+  const [sectionOverrides, setSectionOverrides] = useState<Record<string, Partial<Record<DetailSection, boolean>>>>({});
+  const sectionDefaults = useRef<Record<string, Record<DetailSection, boolean>>>({});
   const [openSelector, setOpenSelector] = useState<MetadataSelector | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
-  const [notesExpanded, setNotesExpanded] = useState(false);
-  const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [aiCapability, setAiCapability] = useState({ enabled: false, programmeIndexed: false });
 
   // ── CONTENT-PLANNER-01 ────────────────────────────────────────────────────
-  const layout = useWorkspaceLayout();
-  const { setLayout } = c;
-  useEffect(() => { setLayout(layout); }, [layout, setLayout]);
+  const workspaceLayout = useWorkspaceLayout(c.user?.id);
+  const layout = workspaceLayout.layout;
+  const [leftView, setLeftView] = useState<'list' | 'plan'>('list');
+  const [drawerView, setDrawerView] = useState<'list' | 'plan' | null>(null);
+  /**
+   * The side drawer is modal while open: focus moves into it, Tab stays inside, Escape closes
+   * it and focus returns to what opened it — the same contract as the list quick-actions sheet.
+   */
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerShellRef = useRef<HTMLDivElement>(null);
+  const drawerReturnFocus = useRef<HTMLElement | null>(null);
+  const drawerFocusable = () => Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  ) ?? []).filter((element) => element.offsetParent !== null);
+  useEffect(() => {
+    if (!drawerView) return;
+    if (!drawerRef.current?.contains(document.activeElement)) {
+      drawerReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    drawerFocusable()[0]?.focus();
+  }, [drawerView]);
+  useEffect(() => {
+    const shell = drawerShellRef.current;
+    if (!shell) return;
+    if (drawerView) shell.setAttribute('inert', '');
+    else shell.removeAttribute('inert');
+  }, [drawerView]);
+  const closeDrawer = () => {
+    setDrawerView(null);
+    const target = drawerReturnFocus.current;
+    drawerReturnFocus.current = null;
+    // A selection may have removed the opener; focus then stays wherever the page puts it.
+    if (target?.isConnected) window.requestAnimationFrame(() => target.focus());
+  };
+  const onDrawerKeyDown = (event: ReactKeyboardEvent) => {
+    // A sheet opened from inside the drawer handles its own Escape first.
+    if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); closeDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = drawerFocusable();
+    if (focusable.length === 0) { event.preventDefault(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+  const [listQuery, setListQuery] = useState('');
+  const setLayout = (next: 'two' | 'three' | 'focus') => {
+    workspaceLayout.setLayout(next);
+    c.setLayout(next);
+  };
+  useEffect(() => { c.setLayout(layout); }, [layout, c.setLayout]);
   const [today, setToday] = useState(() => localIsoDate(new Date()));
   // Keeps DZIŚ honest across midnight in a tab left open.
   useEffect(() => { const timer = window.setInterval(() => setToday(localIsoDate(new Date())), 60_000); return () => window.clearInterval(timer); }, []);
@@ -222,6 +270,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       hasKdriveFolder: reel.kdriveFolder !== null,
       title: label.text,
       titleIsDerived: label.derived,
+      sourceDomain: label.sourceDomain,
       priority: reel.priority,
       editor: editorOf(reel.editorId),
       isOverdue: false,
@@ -306,6 +355,16 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const renderDetail = (): JSX.Element | null => {
     if (!(c.route.name === 'detail' && c.current)) return null;
     const reel = c.current;
+    const defaults = sectionDefaults.current[reel.id] ?? (sectionDefaults.current[reel.id] = {
+      sources: false,
+      materials: reel.status === 'editing',
+      notes: reel.status === 'editing' && reel.editingNotes.trim() !== '',
+      publication: reel.status === 'ready',
+    });
+    const expanded = (section: DetailSection) => sectionOverrides[reel.id]?.[section] ?? defaults[section];
+    const toggleSection = (section: DetailSection) => setSectionOverrides((old) => ({
+      ...old, [reel.id]: { ...old[reel.id], [section]: !expanded(section) },
+    }));
     // Both overlays are honoured only for the Reel that opened them.
     if (memeReelId === reel.id) return <MemePicker api={api} reel={reel} onClose={() => setMemeReelId(null)} onReel={c.acceptReel} />;
     if (aiView?.reelId === reel.id) return <AiWorkspace key={aiView.view} api={api} reel={reel}
@@ -321,8 +380,38 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
      * The field stays genuinely empty, so opening an untitled Reel and editing something else
      * cannot turn a guess into an authored title — and the user still sees what the Reel is
      * instead of an empty box.
-     */
+    */
     const label = reelLabel(reel);
+    const hasPublicationText = Boolean(reel.publicationDescription.trim() || reel.publicationHashtags.trim());
+    const contextualAiEnabled = aiCapability.enabled && !c.hasUnsavedChanges();
+    const scheduleFromDetail = () => {
+      setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], publication: true } }));
+      openSchedule(reel.id);
+    };
+    const generatePublication = () => {
+      if (c.hasUnsavedChanges()) { c.setMessage(UNSAVED_BEFORE_PUBLICATION); return; }
+      if (!reel.script.trim()) { c.setMessage(SCRIPT_REQUIRED); return; }
+      c.setMessage(null);
+      setAiView({ reelId: reel.id, view: 'generate_publication', autoStart: false });
+    };
+    const replaceExport = () => {
+      const url = window.prompt('Adres eksportu');
+      if (!url) return;
+      const exportLabel = window.prompt('Nazwa eksportu', url.split('/').pop() ?? 'eksport') ?? 'eksport';
+      void c.replaceExport({ url, label: exportLabel });
+    };
+    let contextAction: { label: string; onClick: () => void } | undefined;
+    // AI shortcuts are offered only when AI is available, exactly like the AI row and the
+    // PUBLIKACJA button; otherwise the next relevant shortcut applies.
+    if (!reel.script.trim() && contextualAiEnabled) contextAction = { label: 'Opracuj', onClick: () => setAiView({ reelId: reel.id, view: 'develop', autoStart: false }) };
+    else if (reel.status === 'editing' && !reel.currentExport) contextAction = { label: 'Dodaj eksport', onClick: () => {
+      setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], materials: true } }));
+      replaceExport();
+    } };
+    else if (reel.status === 'ready' && !reel.publicationDescription.trim() && contextualAiEnabled) contextAction = { label: 'Wygeneruj opis', onClick: generatePublication };
+    else if (hasPublicationText && !planOf(reel).date) contextAction = { label: 'Zaplanuj', onClick: scheduleFromDetail };
+    else if (planOf(reel).date) contextAction = { label: `Termin: ${planLabel(planOf(reel), today)} · Zmień termin`, onClick: scheduleFromDetail };
+    else if (reel.hooks.length > 0 && !reel.selectedHookId) contextAction = { label: 'Wybierz hook', onClick: () => document.querySelector('[data-hooks-section]')?.scrollIntoView({ block: 'center' }) };
 
     /**
      * Verification is derived, never chosen: the verifier is the peer of the
@@ -351,6 +440,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       title={reel.title}
       onChangeTitle={(title) => c.changeReel({ title })}
       titlePlaceholder={label.derived ? label.text : undefined}
+      sourceDomain={label.sourceDomain}
       plan={reel.deletedAt ? undefined : { label: planLabel(planOf(reel), today), onOpen: () => openSchedule(reel.id) }}
       metadata={{
         status: reel.status,
@@ -362,6 +452,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         feedCoverDone: reel.feedCoverDone,
         verificationState: reel.verificationState,
       }}
+      contextAction={contextAction}
       selectors={{
         open: openSelector,
         onOpen: (selector) => { setSelectionError(null); setOpenSelector(selector); },
@@ -392,7 +483,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         deleteState: c.saveState,
       }}
       restore={reel.deletedAt ? { onRestore: () => void c.restore(reel), saveState: c.saveState } : undefined}
-      onOpenFeedCover={() => setPublicationExpanded(true)}
+      onOpenFeedCover={() => setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], publication: true } }))}
       hooks={reel.hooks}
       onRemoveHook={(id) => void c.removeHook(id)}
       // `?? null`: a Reel cached before HOOKS-SELECT-EDIT has no such field, meaning no choice.
@@ -407,7 +498,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       script={reel.script}
       onChangeScript={(script) => c.changeReel({ script })}
       scriptConflict={c.conflict?.field === 'script' ? conflictView() : undefined}
-      aiRowEnabled={aiCapability.enabled && !['saving', 'conflict', 'offline'].includes(c.saveState)}
+      aiRowEnabled={contextualAiEnabled}
       onAiAction={(action) => setAiView({ reelId: reel.id, view: action, autoStart: false })}
       onOpenMeme={() => setMemeReelId(reel.id)}
       attachedMemes={memeNames}
@@ -415,8 +506,13 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         .then(c.acceptReel).catch((error) => c.setMessage(String(error))); }}
       onOpenProgramme={() => setAiView({ reelId: reel.id, view: reel.programmeAttachment ? 'attached_programme' : 'find_programme', autoStart: false })}
       sources={{
-        expanded: sourcesExpanded,
-        onToggle: () => setSourcesExpanded((value) => !value),
+        expanded: expanded('sources'),
+        onToggle: () => toggleSection('sources'),
+        summary: [
+          label.text,
+          reel.originalInput.images.length ? `${reel.originalInput.images.length} załączniki` : '',
+          reel.inputNote.trim() ? `Notatka: ${reel.inputNote.trim().replace(/\s+/g, ' ').slice(0, 48)}` : '',
+        ].filter(Boolean).join(' · '),
         // The immutable original capture, shown as itself rather than summarised.
         originalUrl: reel.originalInput.url ?? null,
         onOpenSource: () => { if (reel.originalInput.url) window.open(reel.originalInput.url, '_blank', 'noopener,noreferrer'); },
@@ -441,16 +537,20 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         inputNoteConflict: c.conflict?.field === 'inputNote' ? conflictView() : undefined,
       }}
       editingNotes={{
-        expanded: notesExpanded,
-        onToggle: () => setNotesExpanded((value) => !value),
+        expanded: expanded('notes'),
+        onToggle: () => toggleSection('notes'),
+        summary: reel.editingNotes.trim() ? reel.editingNotes.trim().replace(/\s+/g, ' ').slice(0, 72) : 'Brak uwag',
         value: reel.editingNotes,
         onChange: (editingNotes) => c.changeReel({ editingNotes }),
         saveState: c.saveState,
         conflict: c.conflict?.field === 'editingNotes' ? conflictView() : undefined,
       }}
       materials={{
-        expanded: materialsExpanded,
-        onToggle: () => setMaterialsExpanded((value) => !value),
+        expanded: expanded('materials'),
+        onToggle: () => toggleSection('materials'),
+        summary: reel.currentExport
+          ? `Eksport: ${reel.currentExport.label}${verification.kind === 'verified' ? ' · Zweryfikowano' : verification.kind === 'outdated' ? ' · Nieaktualna weryfikacja' : ' · Do weryfikacji'}`
+          : 'Brak eksportu',
         kdriveFolder: { name: reel.kdriveFolder ? reel.kdriveFolder.folderId : null, unavailable: false },
         onCreateKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
         onOpenKdriveFolder: () => c.setMessage(COPY.kdriveUnavailable),
@@ -459,18 +559,13 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         kdriveEnabled: KDRIVE_ENABLED,
         currentExport: { label: reel.currentExport?.label ?? null, revision: reel.currentExport?.revision ?? null },
         onOpenExport: () => { if (reel.currentExport) window.open(reel.currentExport.url, '_blank', 'noopener,noreferrer'); },
-        onReplaceExport: () => {
-          const url = window.prompt('Adres eksportu');
-          if (!url) return;
-          const label = window.prompt('Nazwa eksportu', url.split('/').pop() ?? 'eksport') ?? 'eksport';
-          void c.replaceExport({ url, label });
-        },
+        onReplaceExport: replaceExport,
         verification,
         onMarkVerified: () => void c.verifyExport(),
         saveState: c.saveState,
       }}
-      publicationExpanded={publicationExpanded}
-      onTogglePublication={() => setPublicationExpanded((value) => !value)}
+      publicationExpanded={expanded('publication')}
+      onTogglePublication={() => toggleSection('publication')}
       publication={{
         feedCoverDone: reel.feedCoverDone,
         hasFeedCoverAsset: false,
@@ -482,15 +577,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         hashtags: reel.publicationHashtags,
         onChangeHashtags: (publicationHashtags) => c.changeReel({ publicationHashtags }),
         onCopyDescription: () => void c.copyPublication(),
-        generatePublicationEnabled: aiCapability.enabled,
-        onGeneratePublication: () => {
-          // Generation reads the saved script only: unsaved edits are neither saved nor
-          // discarded here, and an empty saved script is refused before any request.
-          if (c.hasUnsavedChanges()) { c.setMessage(UNSAVED_BEFORE_PUBLICATION); return; }
-          if (reel.script.trim().length === 0) { c.setMessage(SCRIPT_REQUIRED); return; }
-          c.setMessage(null);
-          setAiView({ reelId: reel.id, view: 'generate_publication', autoStart: false });
-        },
+        generatePublicationEnabled: aiCapability.enabled && reel.script.trim().length > 0 && !c.hasUnsavedChanges(),
+        generatePublicationHint: c.hasUnsavedChanges() ? 'Wymaga zapisania zmian. Wygeneruje z zapisanego skryptu, wybranego hooka i źródeł.' : !reel.script.trim() ? 'Wymaga zapisanego skryptu. Źródła uzupełniają opis, a wybrany hook określa ton.' : 'Użyje zapisanego skryptu, wybranego hooka i tekstowych źródeł.',
+        onGeneratePublication: generatePublication,
+        plan: { label: planLabel(planOf(reel), today), onOpen: scheduleFromDetail },
+        isPublished: reel.status === 'published',
         publishedAt: reel.publishedAt,
         publicationLinks: reel.publicationUrls.map((url, index) => ({ id: `${index}`, url })),
         onAddPublicationLink: () => {
@@ -504,20 +595,24 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     />;
   };
 
-  const renderList = (embedded: boolean) => <ReelListScreen
+  const renderList = (embedded: boolean, showSignOut = false) => <ReelListScreen
     embedded={embedded}
     onOpenPlan={c.layout === 'single' ? () => c.setRoute({ name: 'plan' }) : undefined}
+    onSignOut={showSignOut ? () => void c.signOut() : undefined}
     currentUser={c.user!}
-    statusTabs={(Object.keys(STATUS_TAB_LABELS) as ReelStatus[]).map((value) => ({
-      status: value, label: STATUS_TAB_LABELS[value], count: c.counts[value],
-    }))}
+    statusTabs={[{ status: 'all', label: 'Wszystkie' }, ...(Object.keys(STATUS_TAB_LABELS) as ReelStatus[]).map((value) => ({
+      status: value, label: STATUS_TAB_LABELS[value],
+    }))]}
     selectedStatus={c.status}
     onSelectStatus={c.setStatus}
+    searchQuery={listQuery}
+    onChangeSearchQuery={setListQuery}
     loadState={c.loadState}
     // The open Reel is synced into the list; one whose status just changed leaves this tab.
-    items={c.reels.filter((reel) => reel.status === c.status).map(toListItem)}
-    onOpenReel={(id) => void c.openDetail(id)}
-    onAddNew={c.startCapture}
+    items={c.reels.filter((reel) => c.status === 'all' || reel.status === c.status).map(toListItem)}
+    selectedReelId={c.route.name === 'detail' ? c.current?.id ?? null : null}
+    onOpenReel={(id) => { if (c.layout === 'drawer') setDrawerView(null); void c.openDetail(id); }}
+    onAddNew={() => { setDrawerView(null); c.startCapture(); }}
     onRetry={() => void c.loadList()}
     onOpenDeleted={() => c.setRoute({ name: 'deleted' })}
     quickActions={{
@@ -545,8 +640,6 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     }}
   />;
 
-  const signOut = <button className="sign-out" onClick={() => void c.signOut()}>Wyloguj</button>;
-
   const renderPlanner = (variant: 'pane' | 'screen') => <PlannerPane
     variant={variant}
     reels={c.planReels}
@@ -556,10 +649,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     loadState={c.planLoadState}
     onRetry={() => void c.loadPlanner()}
     selectedReelId={c.route.name === 'detail' ? c.current?.id ?? null : null}
-    onOpenReel={(id) => void c.openDetail(id)}
+    onOpenReel={(id) => { if (c.layout === 'drawer') setDrawerView(null); void c.openDetail(id); }}
     onSchedule={openSchedule}
     onMove={variant === 'pane' ? (id, date) => void moveReel(id, date) : undefined}
-    onOpenReels={variant === 'screen' ? () => c.setRoute({ name: 'list' }) : undefined}
+    onOpenReels={variant === 'screen' ? () => { setDrawerView(null); c.setRoute({ name: 'list' }); } : undefined}
   />;
 
   const scheduleReel = scheduleFor === null ? null
@@ -582,23 +675,62 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   if (c.layout === 'single') {
     if (c.route.name === 'detail' && c.current) return <>{notice}{renderDetail()}{scheduleSheet}</>;
     if (c.route.name === 'plan') return <>{notice}{renderPlanner('screen')}{scheduleSheet}</>;
-    return <>{notice}{renderList(false)}{signOut}{scheduleSheet}</>;
+    return <>{notice}{renderList(false, true)}{scheduleSheet}</>;
   }
 
-  // Wide layouts (CONTENT-PLANNER-01): PLAN | CURRENT REEL | REELS. On `two`, REELS folds into
-  // the centre whenever no Reel is open, so the Reel being worked on always keeps the width.
+  if (c.layout === 'drawer') {
+    const centre = c.route.name === 'detail' && c.current ? renderDetail()
+      : c.route.name === 'plan' ? renderPlanner('screen') : renderList(false);
+    return <>
+      {notice}
+      <div ref={drawerShellRef} className="drawer-shell" aria-hidden={Boolean(drawerView)}>
+        <nav className="drawer-toolbar" aria-label="Nawigacja">
+          <button type="button" onClick={() => setDrawerView('list')}>Rolki</button>
+          <button type="button" onClick={() => setDrawerView('plan')}>Plan</button>
+          <button type="button" className="drawer-signout" onClick={() => void c.signOut()}>Wyloguj</button>
+        </nav>
+        <main className="drawer-centre">{centre}</main>
+      </div>
+      <div className="side-drawer-backdrop" hidden={!drawerView} role="presentation" onClick={closeDrawer}>
+        <aside ref={drawerRef} className="side-drawer" role="dialog" aria-modal="true" aria-label={drawerView === 'list' ? 'Rolki' : 'Plan'}
+          onClick={(event) => event.stopPropagation()} onKeyDown={onDrawerKeyDown}>
+          <button type="button" className="side-drawer-close" onClick={closeDrawer}>Zamknij</button>
+          <div hidden={drawerView !== 'list'}>{renderList(false)}</div>
+          <div hidden={drawerView !== 'plan'}>{renderPlanner('screen')}</div>
+        </aside>
+      </div>
+      {scheduleSheet}
+    </>;
+  }
+
+  // Desktop defaults to ROLKI/PLAN | CURRENT REEL. Spacious displays may add a third pane;
+  // focus mode hides both side panes while preserving the selected Reel.
   const detail = renderDetail();
-  const centre = detail ?? (c.layout === 'two'
-    ? renderList(true)
-    : <div className="workspace-empty"><p>Wybierz rolkę z planu albo z listy.</p></div>);
+  const centre = detail ?? <div className="workspace-empty"><p>Wybierz rolkę z listy albo z planu.</p></div>;
   return <>
     {notice}
     <div className="workspace" data-layout={c.layout}>
-      <aside className="workspace-pane workspace-plan">{renderPlanner('pane')}</aside>
+      <div className="workspace-toolbar">
+        {c.layout === 'two' ? <div className="workspace-side-switch" aria-label="Lewy panel">
+          <button type="button" aria-pressed={leftView === 'list'} onClick={() => setLeftView('list')}>Rolki</button>
+          <button type="button" aria-pressed={leftView === 'plan'} onClick={() => setLeftView('plan')}>Plan</button>
+        </div> : null}
+        <div className="workspace-layout-switch" aria-label="Układ">
+          <button type="button" aria-pressed={c.layout === 'two'} onClick={() => setLayout('two')}>Dwa panele</button>
+          <button type="button" className="workspace-three-option" aria-pressed={c.layout === 'three'} onClick={() => setLayout('three')}>Trzy panele</button>
+          <button type="button" aria-pressed={c.layout === 'focus'} onClick={() => setLayout('focus')}>Skupienie</button>
+          {/* In the toolbar rather than fixed over it, so it never covers the layout controls. */}
+          <button type="button" className="workspace-signout" onClick={() => void c.signOut()}>Wyloguj</button>
+        </div>
+      </div>
+      {c.layout === 'three' ? <aside className="workspace-pane workspace-plan">{renderPlanner('pane')}</aside> : null}
+      {c.layout === 'two' ? <aside className="workspace-pane workspace-side">
+        <div hidden={leftView !== 'list'}>{renderList(true)}</div>
+        <div hidden={leftView !== 'plan'}>{renderPlanner('pane')}</div>
+      </aside> : null}
       <main className="workspace-pane workspace-centre">{centre}</main>
       {c.layout === 'three' ? <aside className="workspace-pane workspace-reels">{renderList(true)}</aside> : null}
     </div>
-    {c.layout === 'three' || detail === null ? signOut : null}
     {scheduleSheet}
   </>;
 }

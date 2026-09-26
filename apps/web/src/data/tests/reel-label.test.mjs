@@ -6,6 +6,7 @@ import {
   captureLabel,
   imageCountLabel,
   reelLabel,
+  sourceDomain,
   urlLabel,
 } from '../reel-label.ts';
 
@@ -46,18 +47,19 @@ test('a whitespace-only title is not a title', () => {
 test('a link-only capture is labelled by its URL, not left blank', () => {
   // The reported case: a shared link stores no text, so title stayed '' and the row was blank.
   const result = reelLabel(reel('', { images: [], url: 'https://www.instagram.com/reel/ABC123/' }));
-  assert.deepEqual(result, { text: 'instagram.com/reel/ABC123', derived: true });
+  assert.deepEqual(result, { text: 'Materiał z instagram.com', derived: true, sourceDomain: 'instagram.com' });
 });
 
-test('a URL is shortened to host and path, and marked as derived', () => {
-  assert.equal(urlLabel('https://www.example.test/a/b/'), 'example.test/a/b');
-  assert.equal(urlLabel('https://example.test'), 'example.test');
-  assert.equal(urlLabel('https://example.test/'), 'example.test');
+test('URL labels use readable path text and keep the domain separate', () => {
+  assert.equal(urlLabel('https://www.example.test/a/b/'), 'Materiał z example.test');
+  assert.equal(urlLabel('https://example.test'), 'Materiał z example.test');
+  assert.equal(urlLabel('https://example.test/'), 'Materiał z example.test');
   // Query and fragment are dropped: usually tracking noise, and they would push the
   // meaningful part of the label past the row's ellipsis.
-  assert.equal(urlLabel('https://example.test/artykul?utm_source=x&utm_campaign=y#top'), 'example.test/artykul');
-  // A port is part of the host and is kept.
-  assert.equal(urlLabel('http://example.test:8080/a'), 'example.test:8080/a');
+  assert.equal(urlLabel('https://example.test/artykul?utm_source=x&utm_campaign=y#top'), 'artykul');
+  assert.equal(sourceDomain('https://www.example.test/artykul?utm_source=x'), 'example.test');
+  // A port is intentionally omitted from the secondary domain label.
+  assert.equal(urlLabel('http://example.test:8080/a'), 'Materiał z example.test');
   // Not a URL, or not an http(s) one: shown as given rather than mangled or dropped.
   assert.equal(urlLabel('nie-jest-adresem'), 'nie-jest-adresem');
   assert.equal(urlLabel('mailto:kto@example.test'), 'mailto:kto@example.test');
@@ -69,13 +71,27 @@ test('shared text wins over the URL, because it is what the person wrote', () =>
     text: 'Zobacz ten materiał o transporcie',
     url: 'https://example.test/x',
   }));
-  assert.deepEqual(result, { text: 'Zobacz ten materiał o transporcie', derived: true });
+  assert.deepEqual(result, { text: 'Zobacz ten materiał o transporcie', derived: true, sourceDomain: 'example.test' });
 });
 
 test('text that is nothing but a bare URL is labelled as a URL', () => {
   // What an Android share of a link usually produces: the link arrives in `text`.
   const result = captureLabel({ images: [], text: 'https://www.example.test/a/long/path' });
-  assert.equal(result, 'example.test/a/long/path');
+  assert.equal(result, 'long');
+});
+
+test('a saved share title and accompanying text beat a bare URL', () => {
+  assert.equal(captureLabel({
+    images: [], text: 'https://example.test/123456', additionalText: 'Komentarz zapisany przy linku',
+    originalShare: { fields: [{ name: 'title', value: 'Nagłówek udostępnienia' }], files: [] },
+  }), 'Nagłówek udostępnienia');
+  assert.equal(captureLabel({ images: [], text: 'https://example.test/123456', additionalText: 'Komentarz do materiału' }), 'Komentarz do materiału');
+});
+
+test('decoded slugs are readable while opaque and numeric identifiers fall back to the domain', () => {
+  assert.equal(urlLabel('https://example.test/wi%C4%99cej-o-rolkach'), 'więcej o rolkach');
+  assert.equal(urlLabel('https://example.test/rolka/123456789'), 'rolka');
+  assert.equal(urlLabel('https://example.test/reel/ABC123'), 'Materiał z example.test');
 });
 
 test('a multi-line share is labelled by its first non-empty line', () => {
@@ -163,7 +179,7 @@ test('deriving a label never alters the capture it reads', () => {
     images: [{ attachmentId: 'a1', fileName: 'p.png', mimeType: 'image/png', byteSize: 10 }],
     text: '  https://www.example.test/a?utm_source=x  ',
     url: 'https://www.example.test/a?utm_source=x',
-    originalShare: { fields: [{ name: 'text', value: '  raw  ' }], files: [] },
+    originalShare: { fields: [{ name: 'text', value: '  https://www.example.test/a?utm_source=x  ' }], files: [] },
   };
   const snapshot = structuredClone(input);
   const label = reelLabel(reel('', input));
@@ -171,6 +187,7 @@ test('deriving a label never alters the capture it reads', () => {
   assert.equal(label.derived, true);
   // The label is shortened; the capture is not. The exact URL, the untrimmed text and the
   // original shared fields all survive for the detail screen and for any later processing.
-  assert.equal(label.text, 'example.test/a');
+  assert.equal(label.text, 'Materiał z example.test');
+  assert.equal(label.sourceDomain, 'example.test');
   assert.deepEqual(input, snapshot);
 });

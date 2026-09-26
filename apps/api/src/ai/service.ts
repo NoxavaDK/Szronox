@@ -99,9 +99,25 @@ function visibleSnapshot(snapshot: InternalSnapshot): AiInputSnapshot {
 
 function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | null }, action: AiAction): unknown {
   const hooks = snapshot.hooks.map(({ id, text, source, position }) => ({ id, text, source, position }));
-  // Publication copy is written from the saved script alone; the target fields are guarded
-  // per application by replaceCurrentValue, so editing them does not stale the proposal.
-  if (action === 'language_check' || action === 'generate_publication') return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
+  // PUBLICATION-01 runs remain script-only. New PUBLICATION-02 runs also depend on the
+  // selected hook and exact eligible saved text. Publication target fields are guarded per
+  // apply by replaceCurrentValue, so editing either target does not stale the proposal.
+  if (action === 'generate_publication') {
+    if (snapshot.publicationContextVersion !== 2) return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
+    const selectedHook = snapshot.hooks.find((hook) => hook.id === snapshot.selectedHookId);
+    return {
+      script: snapshot.script, scriptRevision: snapshot.scriptRevision,
+      selectedHookId: snapshot.selectedHookId ?? null, selectedHookText: selectedHook?.text ?? null,
+      textualInput: {
+        capturedText: snapshot.originalInput.text ?? null,
+        additionalText: snapshot.originalInput.additionalText ?? null,
+        originalShareTextFields: (snapshot.originalInput.originalShare?.fields ?? [])
+          .filter((field) => field.name.toLowerCase() === 'text').map(({ name, value }) => ({ name, value })),
+        inputNote: snapshot.inputNote,
+      },
+    };
+  }
+  if (action === 'language_check') return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
   if (action === 'fact_check') return { script: snapshot.script, hooks };
   if (action === 'find_programme') {
     return {
@@ -124,6 +140,7 @@ function runResponse(row: RunRow, live: Reel): AiRun {
   const current: AiInputSnapshot = {
     ...snapshot, title: live.title, originalInput: live.originalInput, inputNote: live.inputNote,
     script: live.script, scriptRevision: live.scriptRevision, priority: live.priority,
+    selectedHookId: live.selectedHookId,
     publicationDescription: live.publicationDescription, publicationHashtags: live.publicationHashtags,
     attachedMemeIds: live.memeIds,
     hooks: live.hooks.filter((hook) => !row.applied_hook_ids.includes(hook.id))
@@ -233,6 +250,7 @@ export class AiService {
       const snapshot: InternalSnapshot = {
         reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput,
         script: reel.script, scriptRevision: reel.scriptRevision,
+        ...(publication ? { publicationContextVersion: 2 as const } : {}),
         hooks: reel.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
         // Read in this same locked transaction, so it always names one of the hooks above.
         selectedHookId: reel.selectedHookId,
@@ -251,10 +269,11 @@ export class AiService {
         programmeEvidence, imageObjects: publication ? [] : images.rows.map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
       };
       const id = randomUUID();
+      const promptId = publication ? 'gemini-02-publication-provisional-v2' : PROMPT_ID;
       await tx.query(
         `insert into app.ai_runs (id,reel_id,requested_by,action,input_snapshot,input_hash,model,prompt_id,prompt_stage)
          values ($1,$2,$3,$4,$5,$6,$7,$8,'development_provisional')`,
-        [id, reelId, actor.id, body.action, JSON.stringify(snapshot), hash(relevant(snapshot, body.action)), MODEL, PROMPT_ID]);
+        [id, reelId, actor.id, body.action, JSON.stringify(snapshot), hash(relevant(snapshot, body.action)), MODEL, promptId]);
       return { id, state: 'queued' as const };
     });
   }
@@ -282,9 +301,11 @@ export class AiService {
       const runs = await tx.query<RunRow>('select * from app.ai_runs where id=$1 for update', [runId]);
       const run = runs.rows[0];
       if (!run || run.state !== 'succeeded' || !run.result) throw notFound('Completed AI run not found');
-      const rows = await tx.query<{ version: number; script: string; script_revision: number; title: string; priority: string; publication_description: string; publication_hashtags: string }>(
-        `select version,script,script_revision,title,priority,publication_description,publication_hashtags
-           from app.reels where id=$1 and deleted_at is null for update`, [run.reel_id]);
+      const rows = await tx.query<{ version: number; script: string; script_revision: number; title: string; priority: string; publication_description: string; publication_hashtags: string; original_input: Reel['originalInput']; input_note: string; selected_hook_id: string | null; selected_hook_text: string | null }>(
+        `select r.version,r.script,r.script_revision,r.title,r.priority,r.publication_description,r.publication_hashtags,
+                r.original_input,r.input_note,r.selected_hook_id,h.text as selected_hook_text
+           from app.reels r left join app.reel_hooks h on h.id=r.selected_hook_id
+          where r.id=$1 and r.deleted_at is null for update of r`, [run.reel_id]);
       const live = rows.rows[0];
       if (!live) throw notFound('Reel not found');
       if (live.version !== body.expectedVersion) throw editConflict(live.version);
@@ -307,7 +328,15 @@ export class AiService {
         if (run.action !== 'generate_publication') throw validationError('Publication copy is applied only from Wygeneruj opis', { reason: 'wrong_action' });
         if (typeof body.text !== 'string' || body.text.length > 10000) throw validationError('Invalid publication draft');
         // Text and revision: an edit-and-revert of the script also invalidates the proposal.
-        if (live.script !== input.script || live.script_revision !== input.scriptRevision) throw stale('STALE_PUBLICATION_RESULT');
+        const publicationLive: AiInputSnapshot = {
+          ...input, script: live.script, scriptRevision: live.script_revision,
+          originalInput: live.original_input, inputNote: live.input_note, selectedHookId: live.selected_hook_id,
+          hooks: live.selected_hook_id === null ? input.hooks.filter((hook) => hook.id !== input.selectedHookId)
+            : input.hooks.map((hook) => hook.id === live.selected_hook_id ? { ...hook, text: live.selected_hook_text ?? '' } : hook),
+        };
+        const changedContext = live.script !== input.script || live.script_revision !== input.scriptRevision ||
+          (input.publicationContextVersion === 2 && hash(relevant(input, 'generate_publication')) !== hash(relevant(publicationLive, 'generate_publication')));
+        if (changedContext) throw stale('STALE_PUBLICATION_RESULT');
         const description = body.selection === 'publication_description';
         if (body.confirmReplacement !== true || typeof body.replaceCurrentValue !== 'string') {
           throw validationError('Explicit publication replacement confirmation is required');

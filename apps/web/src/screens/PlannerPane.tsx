@@ -184,7 +184,7 @@ function PlannerCard({ reel, selected, draggable, onOpen, onSchedule }: {
         <span className={label.derived ? `${styles.cardTitle} ${styles.cardTitleDerived}` : styles.cardTitle}>{label.text}</span>
         <span className={styles.cardMeta}>
           {slot ? <span className={styles.cardTime}>{SLOT_LABELS[slot]}</span> : null}
-          <span data-status={reel.status}>{STATUS_LABELS[reel.status]}</span>
+          <span data-status={reel.status}>{reel.status === 'ready' ? '✓ Gotowe' : STATUS_LABELS[reel.status]}</span>
           {showCover ? <CoverIndicator done={reel.feedCoverDone} size={14} /> : null}
         </span>
       </button>

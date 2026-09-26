@@ -31,17 +31,19 @@ export function TextAction({
   disabled,
   tone = 'default',
   ariaLabel,
+  className,
 }: {
   children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
   tone?: Tone;
   ariaLabel?: string;
+  className?: string;
 }) {
   return (
     <button
       type="button"
-      className={styles.textAction}
+      className={className ? `${styles.textAction} ${className}` : styles.textAction}
       data-tone={tone === 'default' ? undefined : tone}
       onClick={onClick}
       disabled={disabled}
@@ -125,18 +127,20 @@ export function PrioritySelector({
 export function SectionRow({
   label,
   summary,
+  expanded,
   onClick,
 }: {
   label: string;
-  summary?: string;
+  summary?: ReactNode;
+  expanded?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={styles.sectionRow} onClick={onClick}>
+    <button type="button" className={styles.sectionRow} onClick={onClick} aria-expanded={expanded}>
       <span className={styles.sectionRowLabel}>{label}</span>
       <span className={styles.sectionRowRight}>
         {summary ? <span>{summary}</span> : null}
-        <ChevronGlyph />
+        <span className={expanded ? styles.sectionChevronOpen : styles.sectionChevron}><ChevronGlyph /></span>
       </span>
     </button>
   );

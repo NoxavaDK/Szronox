@@ -163,6 +163,10 @@
   font-size: 13px;
 }
 
+.sectionChevron,
+.sectionChevronOpen { display: inline-flex; transition: transform .15s ease; }
+.sectionChevronOpen { transform: rotate(90deg); }
+
 .sectionRow:focus-visible {
   outline: 2px solid var(--sz-color-cobalt);
   outline-offset: -2px;

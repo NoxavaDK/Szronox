@@ -260,6 +260,7 @@ export interface SourceAttachmentView {
 export interface SourcesSectionProps {
   expanded: boolean;
   onToggle: () => void;
+  summary?: string | null;
 
   /** Original captured URL, if the Reel came from a link. Never rewritten. */
   originalUrl: string | null;
@@ -293,6 +294,7 @@ export interface SourcesSectionProps {
 export interface EditingNotesSectionProps {
   expanded: boolean;
   onToggle: () => void;
+  summary?: string;
   value: string;
   onChange: (value: string) => void;
   saveState: SaveState;
@@ -338,6 +340,7 @@ export type VerificationViewState =
 export interface MaterialsSectionProps {
   expanded: boolean;
   onToggle: () => void;
+  summary?: string;
 
   kdriveFolder: KdriveFolderView;
   onCreateKdriveFolder: () => void;
@@ -362,7 +365,7 @@ export interface MaterialsSectionProps {
 // ---------------------------------------------------------------------------
 
 export interface StatusTabView {
-  status: ReelStatus;
+  status: ReelStatus | 'all';
   label: string;
   /** Omit to render the tab without a count (spec shows Gotowe/Opublikowane bare). */
   count?: number;
@@ -385,6 +388,8 @@ export interface ReelListItemView {
    * label does not read as a title someone wrote. Optional: absent means authored.
    */
   titleIsDerived?: boolean;
+  /** Link host shown as secondary information when this capture included a URL. */
+  sourceDomain?: string;
   priority: Priority;
   editor: EditorView | null;
   /** True when the item has crossed its priority's attention threshold (T08-computed). */
@@ -459,13 +464,17 @@ export interface ReelQuickActionsProps {
 export interface ReelListScreenProps {
   currentUser: EditorView;
   statusTabs: StatusTabView[];
-  selectedStatus: ReelStatus;
-  onSelectStatus: (status: ReelStatus) => void;
+  selectedStatus: ReelStatus | 'all';
+  onSelectStatus: (status: ReelStatus | 'all') => void;
+  searchQuery?: string;
+  onChangeSearchQuery?: (value: string) => void;
   /** Count of items needing attention across all statuses; omit/0 hides the strip. */
   attentionCount?: number;
   onOpenAttention?: () => void;
   loadState: LoadState;
   items: ReelListItemView[];
+  /** Currently open Reel, highlighted even if a changed filter no longer includes its status. */
+  selectedReelId?: Id | null;
   onOpenReel: (id: Id) => void;
   onAddNew: () => void;
   onRetry?: () => void;
@@ -476,6 +485,8 @@ export interface ReelListScreenProps {
   onOpenDeleted: () => void;
   /** CONTENT-PLANNER-01: the mobile entry to the PLAN view. Absent when PLAN is already on screen. */
   onOpenPlan?: () => void;
+  /** Quiet account action; shown only when the list occupies the full screen. */
+  onSignOut?: () => void;
   /** Rendered as a side pane: the fixed Nowy pomysł button stays within the pane's own column. */
   embedded?: boolean;
 
@@ -615,8 +626,11 @@ export interface ReelDetailScreenProps {
    * and a derived label can never be saved as a title by accident. Absent when one exists.
    */
   titlePlaceholder?: string;
+  sourceDomain?: string;
 
   metadata: ReelDetailMetadataView;
+  /** One phase-relevant shortcut to existing work; never changes status by itself. */
+  contextAction?: { label: string; onClick: () => void };
   /**
    * CONTENT-PLANNER-01 `Zaplanuj publikację`: the Reel's one plan, read from the Reel itself.
    * `label` is null when unplanned. Optional so fixtures without planning still render.
@@ -704,6 +718,9 @@ export interface PublicationSectionProps {
    * failure handling are T08's responsibility (T08 sec. 8), not this component's.
    */
   onCopyDescription: () => void;
+  plan?: { label: string | null; onOpen: () => void };
+  isPublished?: boolean;
+  isReady?: boolean;
 
   /**
    * `Wygeneruj opis` (PUBLICATION-01): opens the publication proposal view generated from the
@@ -711,6 +728,7 @@ export interface PublicationSectionProps {
    */
   onGeneratePublication?: () => void;
   generatePublicationEnabled?: boolean;
+  generatePublicationHint?: string;
 
   publishedAt: string | null;
   publicationLinks: PublicationLinkView[];

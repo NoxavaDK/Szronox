@@ -7,12 +7,16 @@ import { StatusSelector } from '../ui/StatusSelector.js';
 import { useRowGesture, prefersReducedMotion } from '../ui/gestures.js';
 import { ReelQuickActionsSheet, UndoSnackbar, quickAdvanceLabel } from './ReelQuickActions.js';
 import { COPY } from '../ui/screen-contracts.js';
+import { STATUS_LABELS } from '../ui/screen-contracts.js';
 import styles from './ReelListScreen.module.css';
 import quickStyles from './ReelQuickActions.module.css';
 
 /** "Rolki" — frozen-visual-spec.md sec. 2. Controlled: all state and intents come from props. */
 export function ReelListScreen(props: ReelListScreenProps) {
-  const { currentUser, statusTabs, selectedStatus, onSelectStatus, attentionCount, onOpenAttention, loadState, items, onOpenReel, onAddNew, onRetry, quickActions } = props;
+  const { currentUser, statusTabs, selectedStatus, onSelectStatus, searchQuery, onChangeSearchQuery, attentionCount, onOpenAttention, loadState, items, selectedReelId, onOpenReel, onAddNew, onRetry, quickActions } = props;
+  const [localQuery, setLocalQuery] = useState('');
+  const query = searchQuery ?? localQuery;
+  const updateQuery = onChangeSearchQuery ?? setLocalQuery;
 
   // "may be surfaced where operationally useful, especially Montaż/Gotowe" (sec. 2) —
   // a presentational choice, not a data decision, so it lives here rather than in props.
@@ -21,6 +25,8 @@ export function ReelListScreen(props: ReelListScreenProps) {
   // Only one row's swipe reveal is open at a time; a new one opening closes the previous —
   // this is what LIST-01 means by closing revealed actions when opening another row.
   const [revealedId, setRevealedId] = useState<string | null>(null);
+  const normalizedQuery = query.trim().toLocaleLowerCase('pl-PL');
+  const visibleItems = items.filter((item) => item.title.toLocaleLowerCase('pl-PL').includes(normalizedQuery));
   const openItem = quickActions && quickActions.openReelId !== null
     ? items.find((item) => item.id === quickActions.openReelId) ?? null
     : null;
@@ -35,9 +41,11 @@ export function ReelListScreen(props: ReelListScreenProps) {
         {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}
         <button type="button" onClick={props.onOpenDeleted} aria-label="Usunięte">⋮</button>
         <Avatar user={currentUser} size={32} />
+        {props.onSignOut ? <button type="button" className={styles.signOutButton} onClick={props.onSignOut}>Wyloguj</button> : null}
       </header>
 
       <StatusSelector tabs={statusTabs} selected={selectedStatus} onSelect={onSelectStatus} />
+      <input className={styles.search} type="search" aria-label="Szukaj rolki" placeholder="Szukaj rolki…" value={query} onChange={(event) => updateQuery(event.target.value)} />
 
       {typeof attentionCount === 'number' && attentionCount > 0 ? (
         <AttentionStrip count={attentionCount} onClick={onOpenAttention ?? (() => {})} />
@@ -55,17 +63,19 @@ export function ReelListScreen(props: ReelListScreenProps) {
         <div className={styles.emptyOrLoading}>
           <StatusBanner tone="error" message="Nie udało się wczytać" actionLabel={onRetry ? 'Spróbuj ponownie' : undefined} onAction={onRetry} />
         </div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className={styles.emptyOrLoading}>
-          <StatusBanner tone="empty" message="Brak rolek w tym widoku" />
+          <StatusBanner tone="empty" message={items.length ? 'Brak wyników wyszukiwania' : 'Brak rolek w tym widoku'} />
         </div>
       ) : (
         <ul className={styles.list} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <ReelRow
               key={item.id}
               item={item}
+              selected={item.id === selectedReelId}
               showFeedCover={showFeedCover}
+              showStatus={selectedStatus === 'all'}
               onOpen={() => onOpenReel(item.id)}
               quickActions={quickActions}
               revealed={revealedId === item.id}
@@ -84,10 +94,12 @@ export function ReelListScreen(props: ReelListScreenProps) {
 }
 
 function ReelRow({
-  item, showFeedCover, onOpen, quickActions, revealed, onRevealChange,
+  item, selected, showFeedCover, showStatus, onOpen, quickActions, revealed, onRevealChange,
 }: {
   item: ReelListItemView;
+  selected: boolean;
   showFeedCover: boolean;
+  showStatus: boolean;
   onOpen: () => void;
   quickActions: ReelQuickActionsProps | undefined;
   revealed: boolean;
@@ -178,7 +190,9 @@ function ReelRow({
 
       <button
         type="button"
-        className={styles.row}
+        className={selected ? `${styles.row} ${styles.rowSelected}` : styles.row}
+        aria-current={selected ? 'true' : undefined}
+        data-selected={selected ? 'true' : undefined}
         style={{
           transform: offset !== 0 ? `translateX(${offset}px)` : undefined,
           transition: dragging || reduceMotion ? 'none' : 'transform 160ms ease',
@@ -199,6 +213,8 @@ function ReelRow({
             {item.priority !== 'normal' ? <PriorityGlyph priority={item.priority} /> : null}
           </div>
           <div className={styles.metaLine}>
+            {item.sourceDomain ? <span className={styles.metaItem}>{item.sourceDomain}</span> : null}
+            {showStatus ? <span className={item.status === 'ready' ? `${styles.metaItem} ${styles.metaReady}` : styles.metaItem}>{item.status === 'ready' ? '✓ Gotowe' : STATUS_LABELS[item.status]}</span> : null}
             {isUrgent ? (
               <span className={`${styles.metaItem} ${styles.metaUrgent}`}>Pilne</span>
             ) : item.elapsedLabel ? (

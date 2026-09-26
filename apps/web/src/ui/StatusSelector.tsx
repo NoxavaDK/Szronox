@@ -2,31 +2,22 @@ import type { StatusTabView } from './screen-contracts.js';
 import type { ReelStatus } from '@szronox/contracts';
 import styles from './StatusSelector.module.css';
 
-/** Horizontal status selector with a cobalt underline; scrolls on narrow screens. */
+/** One compact, explicitly labelled list filter. `Wszystkie` is a view, never a Reel state. */
 export function StatusSelector({
   tabs,
   selected,
   onSelect,
 }: {
   tabs: StatusTabView[];
-  selected: ReelStatus;
-  onSelect: (status: ReelStatus) => void;
+  selected: ReelStatus | 'all';
+  onSelect: (status: ReelStatus | 'all') => void;
 }) {
   return (
-    <div className={styles.selector} role="tablist" aria-label="Filtr statusu">
-      {tabs.map((tab) => (
-        <button
-          key={tab.status}
-          type="button"
-          role="tab"
-          aria-selected={tab.status === selected}
-          className={styles.tab}
-          onClick={() => onSelect(tab.status)}
-        >
-          {tab.label}
-          {typeof tab.count === 'number' ? <span className={styles.count}>{tab.count}</span> : null}
-        </button>
-      ))}
-    </div>
+    <label className={styles.filter}>
+      <span>Status</span>
+      <select aria-label="Filtr statusu" value={selected} onChange={(event) => onSelect(event.target.value as ReelStatus | 'all')}>
+        {tabs.map((tab) => <option key={tab.status} value={tab.status}>{tab.label}{typeof tab.count === 'number' ? ` · ${tab.count}` : ''}</option>)}
+      </select>
+    </label>
   );
 }

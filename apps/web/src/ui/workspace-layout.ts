@@ -1,40 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { WorkspaceLayout } from '../controllers/useAppController.js';
 
-/**
- * CONTENT-PLANNER-01 workspace thresholds, derived from the existing layout tokens rather than
- * from device classes (tokens.css):
- *
- *   - the centre keeps the frozen single-column content width (`--sz-content-max-width`
- *     480px) plus its 16px gutters, and is never squeezed below ~560px;
- *   - PLAN is a 320px pane (the 320px reflow width every surface already supports);
- *   - REELS is a 380px pane (the 360px reference width plus its row padding).
- *
- * 320 + 560 + 380 = 1260, so three panes start at 1280px. Two panes (PLAN | centre) need
- * 320 + 560 = 880 and start at 960px, leaving the centre room to breathe. Below that the app
- * is the unchanged mobile one-view-at-a-time layout.
- */
-export const PLAN_PANE_WIDTH = 320;
-export const REELS_PANE_WIDTH = 380;
-export const TWO_PANE_MIN_WIDTH = 960;
-export const THREE_PANE_MIN_WIDTH = 1280;
+/** Width is based on the usable center column, with the optional planner removed first. */
+export const TWO_PANE_MIN_WIDTH = 1020;
+export const THREE_PANE_MIN_WIDTH = 1500;
+export const DRAWER_MIN_WIDTH = 680;
+type Preference = 'two' | 'three' | 'focus';
+const keyFor = (userId: string | null | undefined) => userId ? `szronox.workspace.${userId}` : null;
+const readPreference = (key: string | null): Preference => {
+  if (!key || typeof localStorage === 'undefined') return 'two';
+  const value = localStorage.getItem(key);
+  return value === 'three' || value === 'focus' ? value : 'two';
+};
+const readWidth = () => typeof window === 'undefined' ? 0 : window.innerWidth;
+const fit = (width: number, preference: Preference): WorkspaceLayout => {
+  if (width < DRAWER_MIN_WIDTH) return 'single';
+  if (width < TWO_PANE_MIN_WIDTH) return 'drawer';
+  if (preference === 'focus') return 'focus';
+  if (preference === 'three' && width >= THREE_PANE_MIN_WIDTH) return 'three';
+  return 'two';
+};
 
-export function layoutForWidth(width: number): WorkspaceLayout {
-  if (width >= THREE_PANE_MIN_WIDTH) return 'three';
-  if (width >= TWO_PANE_MIN_WIDTH) return 'two';
-  return 'single';
-}
-
-export function useWorkspaceLayout(): WorkspaceLayout {
-  const read = () => (typeof window === 'undefined' ? 'single' : layoutForWidth(window.innerWidth));
-  const [layout, setLayout] = useState<WorkspaceLayout>(read);
+/** Two panes are the wide default; three panes and focus mode are per-user device preferences. */
+export function useWorkspaceLayout(userId?: string) {
+  const storageKey = useMemo(() => keyFor(userId), [userId]);
+  const [preference, setPreference] = useState<Preference>(() => readPreference(storageKey));
+  const [width, setWidth] = useState(readWidth);
+  useEffect(() => setPreference(readPreference(storageKey)), [storageKey]);
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-    const queries = [TWO_PANE_MIN_WIDTH, THREE_PANE_MIN_WIDTH].map((width) => window.matchMedia(`(min-width: ${width}px)`));
-    const update = () => setLayout(read());
-    queries.forEach((query) => query.addEventListener('change', update));
-    update();
-    return () => queries.forEach((query) => query.removeEventListener('change', update));
+    if (typeof window === 'undefined') return;
+    const update = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
   }, []);
-  return layout;
+  const setLayout = useCallback((layout: WorkspaceLayout) => {
+    const next: Preference = layout === 'three' || layout === 'focus' ? layout : 'two';
+    setPreference(next);
+    if (storageKey) localStorage.setItem(storageKey, next);
+  }, [storageKey]);
+  return { layout: fit(width, preference), setLayout };
 }

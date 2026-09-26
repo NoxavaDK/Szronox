@@ -4,6 +4,7 @@
   gap: var(--sz-space-5);
   padding-top: var(--sz-space-3);
 }
+.publishedSummary { margin: 0; color: var(--sz-color-text-secondary); font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
 
 .block {
   display: flex;
@@ -26,6 +27,8 @@
   gap: var(--sz-space-3);
 }
 
+.coverWarning { margin: 0; color: var(--sz-color-warning); font-size: 13px; line-height: 18px; }
+
 .coverToggle {
   appearance: none;
   border: none;
@@ -47,15 +50,27 @@
   margin-left: auto;
 }
 
+.planRow {
+  appearance: none; display: flex; align-items: center; gap: var(--sz-space-2);
+  min-height: 44px; width: 100%; padding: 0; border: 0; border-top: 1px solid var(--sz-color-divider);
+  background: transparent; color: var(--sz-color-cobalt); font: inherit; text-align: left; cursor: pointer;
+}
+.planRow[data-planned='true'] { color: var(--sz-color-text-primary); }
+.planRow strong { font-weight: 600; }
+.generateRow { display: grid; gap: 2px; justify-items: start; }
+.prerequisite { margin: 0; color: var(--sz-color-text-secondary); font-size: 12px; line-height: 17px; }
+.copyAction { align-self: flex-start; min-height: 40px; padding: 0 12px; border: 1px solid var(--sz-color-cobalt); border-radius: 4px; background: color-mix(in srgb, var(--sz-color-cobalt) 8%, var(--sz-color-background)); font-weight: 650; }
+
 .textField {
-  border: none;
-  border-bottom: 1px solid var(--sz-color-divider);
-  background: none;
+  border: 1px solid var(--sz-color-divider);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--sz-color-surface) 65%, transparent);
   font-family: var(--sz-font-family);
   font-size: var(--sz-text-body-size);
   line-height: var(--sz-text-body-line);
   color: var(--sz-color-text-primary);
-  padding: var(--sz-space-2) 0;
+  padding: var(--sz-space-2);
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
@@ -64,8 +79,8 @@
 }
 
 .textField:focus {
-  outline: none;
-  border-bottom-color: var(--sz-color-cobalt);
+  outline: 2px solid var(--sz-color-cobalt);
+  outline-offset: 1px;
 }
 
 .postPublication {

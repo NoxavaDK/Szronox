@@ -13,17 +13,33 @@ button, input, textarea { font: inherit; }
 .auth-accounts input { min-height: 0; width: auto; padding: 0; border: 0; }
 .app-notice { position: fixed; z-index: 30; left: 12px; right: 12px; bottom: 76px; max-width: 520px; margin: auto; display: flex; gap: 12px; justify-content: space-between; background: #171717; color: white; padding: 12px 14px; white-space: pre-wrap; font-size: 13px; }
 .app-notice button { border: 0; background: none; color: white; font-size: 20px; }
-.sign-out { position: fixed; top: 18px; right: 56px; border: 0; background: transparent; color: #625f59; font-size: 12px; }
 
-/*
- * CONTENT-PLANNER-01 wide workspace: PLAN | CURRENT REEL | REELS. Only rendered at the
- * thresholds in ui/workspace-layout.ts; each pane scrolls on its own so the plan stays in
- * view while a Reel is being worked on. Pane widths match PLAN_PANE_WIDTH/REELS_PANE_WIDTH.
- */
-.workspace { display: grid; height: 100vh; height: 100dvh; background: var(--sz-color-background, #f7f7f5); }
-.workspace[data-layout='two'] { grid-template-columns: 320px minmax(0, 1fr); }
-.workspace[data-layout='three'] { grid-template-columns: 320px minmax(0, 1fr) 380px; }
-.workspace-pane { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.workspace-plan { border-right: 1px solid var(--sz-color-divider, #e4e4e1); }
+/* Desktop defaults to a list/plan selector beside the dominant selected-Reel surface. */
+.workspace { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; height: 100dvh; background: var(--sz-color-background, #f7f7f5); }
+.workspace[data-layout='two'] { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
+.workspace[data-layout='three'] { grid-template-columns: minmax(250px, 290px) minmax(0, 1fr) minmax(320px, 380px); }
+.workspace[data-layout='focus'] { grid-template-columns: minmax(0, 1fr); }
+.workspace-toolbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--sz-color-divider, #e4e4e1); background: var(--sz-color-background, #f7f7f5); }
+.workspace-side-switch, .workspace-layout-switch { display: flex; align-items: center; gap: 4px; }
+.workspace-toolbar button { min-height: 36px; border: 0; border-bottom: 2px solid transparent; padding: 0 10px; background: transparent; color: var(--sz-color-text-secondary, #636360); font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-toolbar button[aria-pressed='true'] { border-bottom-color: var(--sz-color-cobalt, #315bd8); color: var(--sz-color-text-primary, #171717); }
+.workspace-pane { grid-row: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.workspace-plan, .workspace-side { border-right: 1px solid var(--sz-color-divider, #e4e4e1); }
 .workspace-reels { border-left: 1px solid var(--sz-color-divider, #e4e4e1); }
+.workspace-centre { grid-column: 2; }
+.workspace[data-layout='three'] .workspace-centre { grid-column: 2; }
+.workspace[data-layout='focus'] .workspace-centre { grid-column: 1; }
 .workspace-empty { height: 100%; display: grid; place-items: center; padding: 24px; box-sizing: border-box; color: var(--sz-color-text-secondary, #636360); font-size: 14px; }
+.workspace-three-option { display: none; }
+@media (min-width: 1500px) { .workspace-three-option { display: inline-flex; align-items: center; } }
+@media (max-width: 1019px) { .workspace-toolbar { display: none; } }
+.drawer-shell { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--sz-color-background, #f7f7f5); }
+.drawer-toolbar { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--sz-color-divider, #e4e4e1); }
+.drawer-toolbar button, .side-drawer-close { min-height: 40px; border: 0; background: none; padding: 0 14px; color: var(--sz-color-cobalt, #315bd8); font: inherit; font-weight: 600; cursor: pointer; }
+.drawer-centre { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.side-drawer-backdrop { position: fixed; z-index: 40; inset: 0; display: flex; background: rgb(23 23 23 / 30%); }
+.side-drawer-backdrop[hidden] { display: none; }
+.side-drawer { width: min(420px, 88vw); height: 100%; overflow-y: auto; background: var(--sz-color-background, #f7f7f5); box-shadow: 3px 0 18px rgb(0 0 0 / 12%); }
+.side-drawer-close { display: block; margin-left: auto; }
+.drawer-signout { min-height: var(--sz-touch-target); margin-left: auto; color: var(--sz-color-text-secondary, #636360) !important; font-size: 12px; }
+.workspace-toolbar .workspace-signout { margin-left: 12px; padding-left: 14px; border-left: 1px solid var(--sz-color-divider, #e4e4e1); border-radius: 0; font-size: 12px; }

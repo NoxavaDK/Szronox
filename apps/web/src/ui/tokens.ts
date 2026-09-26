@@ -23,7 +23,7 @@ export const colors = {
 /** Priority row markers: "Normalne may use a small cobalt marker. Pilne red. Evergreen teal." */
 export const priorityColor: Record<Priority, string> = {
   urgent: colors.urgent,
-  normal: colors.cobalt,
+  normal: colors.textSecondary,
   evergreen: colors.evergreen,
 };
 
