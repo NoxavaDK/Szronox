@@ -41,4 +41,4 @@ Representative screenshots from that browser pass:
 - `apps/web/src/ui/detail-sections.module.css`, `apps/web/src/ui/detail-sections.tsx`, `apps/web/src/ui/primitives.module.css`, `apps/web/src/ui/primitives.tsx`, `apps/web/src/ui/screen-contracts.ts`, `apps/web/src/ui/tokens.ts`
 - `docs/implementation/UX-ASTRA-03-result.md`
 
-Commit: `b26118b` (`Implement Astra usability corrections`).
+Implementation commit: `8105b21` (`Implement Astra usability corrections`). This result-file update is a separate documentation-only follow-up.
