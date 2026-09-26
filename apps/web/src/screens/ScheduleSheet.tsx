@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { planLabel, quickDays } from '../data/planner.js';
+import { PUBLICATION_SLOTS, SLOT_LABELS, planLabel, quickDays, type Plan, type PublicationSlot } from '../data/planner.js';
 import { TextAction } from '../ui/primitives.js';
 import sheetStyles from './ReelQuickActions.module.css';
 import styles from './ScheduleSheet.module.css';
@@ -8,9 +8,9 @@ import styles from './ScheduleSheet.module.css';
 export interface ScheduleSheetProps {
   reelTitle: string;
   /** The Reel's current plan; `date: null` means unplanned. */
-  plan: { date: string | null; time: string | null };
+  plan: Plan;
   today: string;
-  onConfirm: (date: string, time: string | null) => void;
+  onConfirm: (date: string, slot: PublicationSlot | null) => void;
   /** Only offered when the Reel is planned: returns it to NIEZAPLANOWANE. */
   onClear: () => void;
   onDismiss: () => void;
@@ -20,12 +20,13 @@ export interface ScheduleSheetProps {
 
 /**
  * `Zaplanuj` (CONTENT-PLANNER-01): one small sheet, the same from the planner, the list's
- * Więcej sheet and Reel Detail. Choose a day → optional time → Gotowe. A date alone is a
- * complete plan; the time is never required. Nothing here touches the Reel's status.
+ * Więcej sheet and Reel Detail. Choose a day → optional Rano/Popołudnie/Wieczór → Gotowe. A
+ * date alone is a complete plan; the slot is never required and tapping the chosen slot again
+ * clears it. Nothing here touches the Reel's status.
  */
 export function ScheduleSheet({ reelTitle, plan, today, onConfirm, onClear, onDismiss, saving, error }: ScheduleSheetProps) {
   const [date, setDate] = useState<string | null>(plan.date);
-  const [time, setTime] = useState<string>(plan.time ?? '');
+  const [slot, setSlot] = useState<PublicationSlot | null>(plan.slot);
   const sheetRef = useRef<HTMLDivElement>(null);
   const days = quickDays(today);
   const otherDay = date !== null && !days.some((day) => day.date === date);
@@ -83,15 +84,24 @@ export function ScheduleSheet({ reelTitle, plan, today, onConfirm, onClear, onDi
             <span>Inny dzień</span>
             <input type="date" value={date ?? ''} onChange={(event) => setDate(event.target.value || null)} />
           </label>
-          <label className={styles.field}>
-            <span>Godzina (opcjonalnie)</span>
-            <span className={styles.timeRow}>
-              <input type="time" value={time} disabled={date === null} onChange={(event) => setTime(event.target.value)} />
-              {time ? (
-                <button type="button" className={styles.clearTime} onClick={() => setTime('')} aria-label="Bez godziny">×</button>
-              ) : null}
-            </span>
-          </label>
+        </div>
+
+        <div className={styles.slotField}>
+          <span className={styles.slotLabel}>Pora dnia (opcjonalnie)</span>
+          <div className={styles.slots} role="group" aria-label="Pora dnia">
+            {PUBLICATION_SLOTS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={styles.slot}
+                aria-pressed={slot === value}
+                disabled={date === null}
+                onClick={() => setSlot(slot === value ? null : value)}
+              >
+                {SLOT_LABELS[value]}
+              </button>
+            ))}
+          </div>
         </div>
 
         {error ? <p className={sheetStyles.error} role="alert">{error}</p> : null}
@@ -106,7 +116,7 @@ export function ScheduleSheet({ reelTitle, plan, today, onConfirm, onClear, onDi
               type="button"
               className={styles.done}
               disabled={date === null || saving}
-              onClick={() => { if (date !== null) onConfirm(date, time || null); }}
+              onClick={() => { if (date !== null) onConfirm(date, slot); }}
             >
               {saving ? 'Zapisywanie…' : 'Gotowe'}
             </button>

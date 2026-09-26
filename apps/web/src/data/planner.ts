@@ -2,14 +2,19 @@
  * CONTENT-PLANNER-01: the planner is a view over existing Reels, never its own data.
  *
  * Everything here is pure and derived from `Reel.plannedPublicationDate` /
- * `plannedPublicationTime`, so the planner, the list quick action and Reel Detail can only
+ * `plannedPublicationSlot`, so the planner, the list quick action and Reel Detail can only
  * ever show one plan per Reel. Dates are local calendar days (`YYYY-MM-DD`) with a Monday
  * week start; no time zone arithmetic is involved because the stored value has no zone.
  */
 
-import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
+import type { PublicationSlot, Reel, ReelStatus } from '../../../../packages/contracts/src/index.js';
 
-export type PlanFields = Pick<Reel, 'plannedPublicationDate' | 'plannedPublicationTime'>;
+export type PlanFields = Pick<Reel, 'plannedPublicationDate' | 'plannedPublicationSlot'>;
+export type { PublicationSlot };
+
+/** The only three publication times, in day order. */
+export const PUBLICATION_SLOTS: readonly PublicationSlot[] = ['morning', 'afternoon', 'evening'];
+export const SLOT_LABELS: Record<PublicationSlot, string> = { morning: 'Rano', afternoon: 'Popołudnie', evening: 'Wieczór' };
 
 /**
  * Which unplanned Reels belong in NIEZAPLANOWANE: work that is actually heading for
@@ -22,10 +27,16 @@ export const UNSCHEDULED_STATUSES: readonly ReelStatus[] = ['to_record', 'editin
 const WEEKDAY_SHORT = ['ND', 'PN', 'WT', 'ŚR', 'CZW', 'PT', 'SOB'];
 const WEEKDAY_LOWER = ['nd', 'pn', 'wt', 'śr', 'czw', 'pt', 'sob'];
 
-/** A Reel cached before CONTENT-PLANNER-01 has no plan fields at all: that means unplanned. */
-export function planOf(reel: Partial<PlanFields>): { date: string | null; time: string | null } {
+export interface Plan { date: string | null; slot: PublicationSlot | null }
+
+/**
+ * A Reel cached before CONTENT-PLANNER-01 has no plan fields at all: that means unplanned. A
+ * cached value that is not one of the three slots (e.g. the retired free time) is ignored.
+ */
+export function planOf(reel: Partial<PlanFields>): Plan {
   const date = reel.plannedPublicationDate ?? null;
-  return { date, time: date === null ? null : reel.plannedPublicationTime ?? null };
+  const slot = reel.plannedPublicationSlot ?? null;
+  return { date, slot: date !== null && slot !== null && PUBLICATION_SLOTS.includes(slot) ? slot : null };
 }
 
 export function localIsoDate(date: Date): string {
@@ -93,15 +104,15 @@ export function weekRangeLabel(today: string, offset: number): string {
   return `${shortDate(monday)} – ${shortDate(addDays(monday, 6))}`;
 }
 
-/** How a plan reads next to a Reel: `Dziś, 18:00`, `Jutro`, `czw 01.10`. */
-export function planLabel(plan: { date: string | null; time: string | null }, today: string): string | null {
+/** How a plan reads next to a Reel: `Dziś, wieczór`, `Jutro`, `czw 01.10, rano`. */
+export function planLabel(plan: Plan, today: string): string | null {
   if (plan.date === null) return null;
   const day = plan.date === today
     ? 'Dziś'
     : plan.date === addDays(today, 1)
       ? 'Jutro'
       : `${WEEKDAY_LOWER[dateOf(plan.date).getDay()]} ${shortDate(plan.date)}${plan.date.slice(0, 4) === today.slice(0, 4) ? '' : `.${plan.date.slice(0, 4)}`}`;
-  return plan.time ? `${day}, ${plan.time}` : day;
+  return plan.slot ? `${day}, ${SLOT_LABELS[plan.slot].toLowerCase()}` : day;
 }
 
 export function isUnscheduledCandidate(reel: Pick<Reel, 'status' | 'deletedAt'> & Partial<PlanFields>): boolean {
@@ -114,18 +125,12 @@ export function isOverdue(reel: Pick<Reel, 'status' | 'deletedAt'> & Partial<Pla
   return reel.deletedAt === null && date !== null && date < today && reel.status !== 'published';
 }
 
-/** Timed Reels in time order, then untimed ones; ties keep the incoming (list) order. */
-function byTime<T extends Partial<PlanFields>>(items: T[]): T[] {
+/** Rano, Popołudnie, Wieczór, then Reels with no slot; ties keep the incoming (list) order. */
+function bySlot<T extends Partial<PlanFields>>(items: T[]): T[] {
+  const rank = (slot: PublicationSlot | null) => (slot === null ? PUBLICATION_SLOTS.length : PUBLICATION_SLOTS.indexOf(slot));
   return items
-    .map((item, index) => ({ item, index, time: planOf(item).time }))
-    .sort((a, b) => {
-      if (a.time !== b.time) {
-        if (a.time === null) return 1;
-        if (b.time === null) return -1;
-        return a.time < b.time ? -1 : 1;
-      }
-      return a.index - b.index;
-    })
+    .map((item, index) => ({ item, index, rank: rank(planOf(item).slot) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .map((entry) => entry.item);
 }
 
@@ -142,11 +147,11 @@ export function groupPlanner<T extends Pick<Reel, 'id' | 'status' | 'deletedAt'>
   const active = reels.filter((reel) => reel.deletedAt === null);
   const days = plannerWeek(today, offset).map((day) => ({
     ...day,
-    items: byTime(active.filter((reel) => planOf(reel).date === day.date)),
+    items: bySlot(active.filter((reel) => planOf(reel).date === day.date)),
   }));
   return {
     days,
-    overdue: offset === 0 ? byTime(active.filter((reel) => isOverdue(reel, today))) : [],
+    overdue: offset === 0 ? bySlot(active.filter((reel) => isOverdue(reel, today))) : [],
     unscheduled: active.filter(isUnscheduledCandidate),
   };
 }
@@ -160,9 +165,9 @@ export function quickDays(today: string, count = 7): Array<{ date: string; label
 }
 
 /**
- * The patch a plan change sends. Clearing the date always clears the time too, so
- * unscheduling is one action and never leaves a dangling time.
+ * The patch a plan change sends. Clearing the date always clears the slot too, so
+ * unscheduling is one action and never leaves a dangling slot.
  */
-export function planChanges(date: string | null, time: string | null): PlanFields {
-  return { plannedPublicationDate: date, plannedPublicationTime: date === null ? null : time || null };
+export function planChanges(date: string | null, slot: PublicationSlot | null): PlanFields {
+  return { plannedPublicationDate: date, plannedPublicationSlot: date === null ? null : slot };
 }

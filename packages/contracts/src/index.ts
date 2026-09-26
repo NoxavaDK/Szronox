@@ -3,6 +3,8 @@ export type Id = string;
 export type IsoDateTime = string;
 /** Calendar date without time zone, `YYYY-MM-DD`. */
 export type IsoDate = string;
+/** CONTENT-PLANNER-01: the only three publication times of day (Rano / Popołudnie / Wieczór). */
+export type PublicationSlot = 'morning' | 'afternoon' | 'evening';
 export type ReelStatus = 'idea' | 'to_record' | 'editing' | 'ready' | 'published';
 export type Priority = 'urgent' | 'normal' | 'evergreen';
 export interface MutationContext { operationId: Id; expectedVersion: number }
@@ -156,8 +158,8 @@ export interface Reel {
    * or null when unplanned. Planning never changes `status`.
    */
   plannedPublicationDate: IsoDate | null;
-  /** Optional local time `HH:MM`; only ever set together with a date. */
-  plannedPublicationTime: string | null;
+  /** Optional part of the day; only ever set together with a date. */
+  plannedPublicationSlot: PublicationSlot | null;
   createdBy: Id;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
@@ -200,7 +202,7 @@ export interface ReelPatchRequest extends MutationContext {
   changes: Partial<Pick<Reel,
     'title' | 'status' | 'priority' | 'inputNote' | 'script' | 'editingNotes' |
     'editorId' | 'publishedAt' | 'publicationUrls' | 'publicationDescription' |
-    'publicationHashtags' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationTime'>>;
+    'publicationHashtags' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationSlot'>>;
 }
 export interface AddHookRequest extends MutationContext { text: string; position?: number }
 export interface EditHookRequest extends MutationContext { text: string }

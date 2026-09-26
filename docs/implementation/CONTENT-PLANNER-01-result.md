@@ -30,3 +30,14 @@ User-authorized bounded task (2026-09-25): a deliberately simple Content Planner
 ## Limits
 
 Drag-and-drop was exercised with synthetic DragEvents, not a physical mouse drag. Touch interaction was emulated, not on a device.
+
+## Correction: three publication slots (operator, 2026-09-26)
+
+The free, optional clock time is replaced by exactly three optional slots: Rano / Popołudnie / Wieczór (`plannedPublicationSlot: 'morning' | 'afternoon' | 'evening' | null`).
+
+- `database/migrations/0012_publication_slot.sql`: new `planned_publication_slot` column, restricted to the three values and requiring a date. It converts any 0011 time (<12:00 morning, <17:00 afternoon, otherwise evening) and clears it; DEV had no planned Reels. The unused time column stays for rollback compatibility.
+- API: `plannedPublicationTime` is gone from the wire and refused by PATCH. Clearing the date clears the slot, and a slot without a date is refused.
+- UI: the `Zaplanuj` sheet shows three slot buttons (tap again to clear) in place of the time input. Planner cards show the slot name. Within a day the order is Rano → Popołudnie → Wieczór → no slot. Labels read `Jutro, wieczór`. Drag-and-drop keeps the slot.
+- Tests: API planner 12/12, including a 0012 conversion test; web planner 11/11 in three time zones; local real-Chrome acceptance 48/48, including a check that the sheet has exactly three slots and no time input.
+- Coordination: the in-progress UX-PUBLICATION-02 branch (`codex/ux-publication-02`, `c4a174a`) predates this change. It doesn't edit `planner.ts`, `ScheduleSheet` or `PlannerPane`, but it does edit `App.tsx` and the controller near the `scheduleReel` call sites. It must rebase and use the slot contract (T00 amendment).
+- Rollback: a `before insert/update` trigger nulls the slot whenever the date is null, so the previous release (`25e58b0`, which only knows date/time) can still unschedule a Reel that has a slot. Rolled-back code simply doesn't show slots; they stay in the database.

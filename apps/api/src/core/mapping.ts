@@ -42,9 +42,9 @@ export interface ReelRow {
   publication_description: string;
   publication_hashtags: string;
   feed_cover_done: boolean;
-  /** Selected as text (`YYYY-MM-DD` / `HH:MM`), so no driver date parsing shifts the day. */
+  /** Selected as text (`YYYY-MM-DD`), so no driver date parsing shifts the day. */
   planned_publication_date: string | null;
-  planned_publication_time: string | null;
+  planned_publication_slot: Reel['plannedPublicationSlot'];
   created_by: string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -160,7 +160,7 @@ export function toReel(
     publicationHashtags: row.publication_hashtags,
     feedCoverDone: row.feed_cover_done,
     plannedPublicationDate: row.planned_publication_date ?? null,
-    plannedPublicationTime: row.planned_publication_time ?? null,
+    plannedPublicationSlot: row.planned_publication_slot ?? null,
     createdBy: row.created_by,
     createdAt: isoRequired(row.created_at),
     updatedAt: isoRequired(row.updated_at),
