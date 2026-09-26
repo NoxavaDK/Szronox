@@ -77,3 +77,35 @@ No migration (existing `kdrive_folder` column), dependency or lockfile change. N
 
 - 403, 429 and 5xx shapes are still not observed live; they are classified and unit-tested only.
 - Opening `webUrl` in a signed-in browser for NOXAVA and SZRON is an operator check. The operator confirmed both have access to base folder `1349`.
+
+## DEV deployment (2026-09-26)
+
+Merge `8f5e48c` (implementation `97ff69d`) runs as image `szronox-dev:8f5e48c`, ID `sha256:e7b1b3306a60caa5a85279fee14ba2db64971ef865c221a9016ccf99b444a04d`. Archive SHA-256 `889d545cb8598f82e20cda1c63415073e96f9dfeabe3f06d20b162cccf436ddb`, identical after transfer.
+
+- **Backup:** `backups/pre-8f5e48c/` holds a 671,719-byte dump (20 TABLE DATA), `runtime.env` (release `650c581`), `dc-gemini.sh` and state files. The AI queue was empty.
+- **Token:** copied file-to-file from the laptop spike `.env` to `/opt/szronox-dev/secrets/kdrive_token` (0600, `ubuntu`, 80 bytes, fingerprint `303e56f0dad8`), never printed.
+- **Host config:**
+  - `compose.kdrive-secret.yaml` added.
+  - `runtime.env` gained `KDRIVE_DRIVE_ID=1990403` and `KDRIVE_ROOT_FOLDER_ID=1349`.
+  - `dc-gemini.sh` gained one `-f` line.
+  - Each was diffed against the backup.
+- **Rollout:** migrate checked 12 files and applied 0; grants exit 0; only the DEV API and worker were recreated (0 restarts).
+- **Checks:**
+  - Ready on loopback and HTTPS; `/`, `/sw.js` and `/manifest.webmanifest` return 200.
+  - The token file is readable in the API container only (absent from the worker), and the token does not appear in the API logs.
+  - `GET /kdrive-folder` without a session now returns 401 (it returned 404 before).
+  - Neighbours' StartedAt, Caddy MainPID 170439 and the Caddyfile hash are unchanged.
+- **Live acceptance** (`deploy/vps/kdrive-live.mjs`, real kDrive): 14/14.
+  - Resolve returned `none` (configured).
+  - Create returned folder `1381`, `SMOKE KDRIVE-01 [3d025dcd]`, with the Reel at version +1 and its status unchanged.
+  - A replay returned the same folder, and a second create was refused (`already_linked`).
+  - Resolve then returned `available` with the same folder and web reference `https://ksuite.infomaniak.com/kdrive/app/drive/1990403/files/1381`.
+  - kDrive's own metadata confirms a directory whose parent is `1349`.
+  - The web link answers 302 to login.
+  - No response contained the token; the routes require a session and CSRF.
+  - The SMOKE Reel was soft-deleted.
+  - Folder `1381` was left in `1349` by design, and nothing existing in kDrive was modified.
+
+**Rollback (code only):** restore `app.pre-8f5e48c` as `app` and `backups/pre-8f5e48c/runtime.env` (release `650c581`, no KDRIVE_* keys), optionally restore `backups/pre-8f5e48c/dc-gemini.sh`, then run `config/dc-gemini.sh up -d --no-deps api worker`. No migration is involved. Stored folder references stay in `kdrive_folder` and are ignored by `650c581`.
+
+**Open operator gate:** open a folder link in a signed-in browser as NOXAVA and as SZRON. That becomes clickable in the app with KDRIVE-01b; until then, test link: `https://ksuite.infomaniak.com/kdrive/app/drive/1990403/files/1381`.
