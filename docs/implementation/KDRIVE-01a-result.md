@@ -141,3 +141,19 @@ Built on master after UX-PUBLICATION-02/UX-ASTRA-03 integration (`86d9b8e`).
   - A folder deleted at kDrive shows as unavailable with the reference kept, and relink by pasted link works.
   - Desktop: create is refused while an edit is saving, then works with the edit kept.
   - Three rounds of Zaplanuj → Anuluj → Wstecz leave no duplicate or stale Detail.
+
+## DEV deployment of `5e2d022` (2026-09-27) — KDRIVE-01b plus UX-PUBLICATION-02 / UX-ASTRA-03
+
+Operator: "deploy to DEV". Image `szronox-dev:5e2d022`, ID `sha256:8f60e97c270932ea6bdd16c27d3ed8d20a30a5decd5e0564d888c9d0b8c818be`. Archive SHA-256 `f30e8df9b3e39f76afd4b7dcd8d63f8ae746549e9420854cac7ee711695a05be`, identical after transfer.
+
+- **Backup:** `backups/pre-5e2d022/` holds a 672,520-byte dump (20 TABLE DATA), `runtime.env` (release `8f5e48c`), `dc-gemini.sh` and state files. The AI queue was empty.
+- **Rollout:** only `SZRONOX_RELEASE` changed (diffed). Migrate checked 12 files and applied 0; grants exit 0; only the DEV API and worker were recreated (0 restarts).
+- **Checks:**
+  - Ready on loopback and HTTPS; `/`, `/sw.js` and `/manifest.webmanifest` return 200.
+  - The kDrive token is still readable by the API only and absent from its logs.
+  - The served bundle `index-Zk6QzR7o.js` contains the kDrive actions, the namespaced schedule-sheet key, the `Wszystkie` status filter and the `Dwa panele` workspace.
+  - Neighbours' StartedAt, Caddy MainPID 170439 and the Caddyfile hash are unchanged.
+- **kDrive live acceptance** (`deploy/vps/kdrive-live.mjs`): 14/14 on the new release. A SMOKE Reel got folder `1382` in `1349` (left in place by design), and the SMOKE Reel was soft-deleted.
+- **Not run:** Astra's UI check. Live provider quality of the PUBLICATION-02 prompt is UNVERIFIED (no Gemini call was made in this deployment).
+
+**Rollback (code only):** restore `app.pre-5e2d022` as `app` and `backups/pre-5e2d022/runtime.env` (release `8f5e48c`), then run `config/dc-gemini.sh up -d --no-deps api worker`. No migration is involved.
