@@ -60,7 +60,7 @@ async function smokeReel(input, script, hookText) {
   let reel = (await call('POST', '/api/v1/reels', { operationId: randomUUID(), reelId, input: { images: [], ...input } })).json;
   reel = (await call('PATCH', `/api/v1/reels/${reelId}`, { operationId: randomUUID(), expectedVersion: reel.version, changes: { title: 'SMOKE UI-02 publikacja', script } })).json;
   if (hookText) {
-    reel = (await call('POST', `/api/v1/reels/${reelId}/hooks`, { operationId: randomUUID(), expectedVersion: reel.version, text: hookText })).json;
+    reel = (await call('POST', `/api/v1/reels/${reelId}/hooks`, { operationId: randomUUID(), expectedVersion: reel.version, text: hookText })).json.reel;
     reel = (await call('PUT', `/api/v1/reels/${reelId}/selected-hook`, { operationId: randomUUID(), expectedVersion: reel.version, hookId: reel.hooks[0].id })).json;
   }
   return reel;
