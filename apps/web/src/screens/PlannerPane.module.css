@@ -124,13 +124,22 @@
   color: var(--sz-color-text-secondary);
 }
 
-.group[data-today='true'] .dayLabel {
-  color: var(--sz-color-cobalt);
+/* UI-02: today is where you are — the action accent, a subtle edge and tint; no other day is coloured. */
+.group[data-today='true'] {
+  background: var(--sz-color-action-tint);
+  box-shadow: inset 3px 0 0 var(--sz-color-action);
+  padding-left: var(--sz-space-2);
+  padding-bottom: var(--sz-space-1);
 }
+.group[data-today='true'] .dayLabel {
+  color: var(--sz-color-action);
+}
+.group[data-today='true'] .card { background: transparent; }
 
 .group[data-tone='overdue'] .groupLabel {
-  color: var(--sz-color-warning);
+  color: var(--sz-color-attention);
 }
+.group[data-tone='overdue'] .groupLabel::before { content: '!'; font-weight: 800; }
 
 .dayDate {
   font-weight: 500;

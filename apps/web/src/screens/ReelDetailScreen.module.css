@@ -10,8 +10,10 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: var(--sz-space-5);
+  /* UI-02: tighter before the editorial work; touch targets keep their own minimum size. */
+  gap: var(--sz-space-3);
 }
+@media (min-width: 700px) { .screen { gap: var(--sz-space-4); } }
 
 .header {
   display: flex;
@@ -59,14 +61,22 @@
   overflow-y: auto;
   overflow-wrap: anywhere;
   font-family: var(--sz-font-family);
-  font-size: var(--sz-text-reel-title-size);
-  line-height: var(--sz-text-reel-title-line);
-  font-weight: var(--sz-text-reel-title-weight);
+  /* UI-02: the Reel title leads the page, clearly above metadata and section labels. */
+  font-size: 19px;
+  line-height: 25px;
+  font-weight: 680;
   color: var(--sz-color-text-primary);
   padding: 0;
-  min-height: calc(var(--sz-text-reel-title-line) + var(--sz-text-reel-title-line));
-  max-height: calc(var(--sz-text-reel-title-line) + var(--sz-text-reel-title-line));
+  min-height: 50px;
+  max-height: 50px;
 }
+@media (min-width: 700px) { .titleField { font-size: 21px; line-height: 27px; min-height: 54px; max-height: 54px; } }
+.titleMeta { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.titleEdit {
+  appearance: none; border: 0; background: none; padding: 0; min-height: 28px;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--sz-color-action); cursor: pointer;
+}
+.titleEdit:focus-visible { outline: 2px solid var(--sz-color-action); outline-offset: 2px; }
 
 .sourceDomain {
   color: var(--sz-color-text-secondary);
@@ -106,12 +116,11 @@
   gap: 4px;
 }
 
-.contextAction {
-  align-self: flex-start; min-height: var(--sz-touch-target); padding: 0 14px; border: 0; border-radius: 5px;
-  background: var(--sz-color-cobalt); color: white; font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer;
-}
-.contextAction:hover { filter: brightness(.94); }
-.contextAction:focus-visible { outline: 2px solid var(--sz-color-cobalt); outline-offset: 2px; }
+.contextAction { align-self: flex-start; min-height: var(--sz-touch-target); }
+.metaGroup { display: grid; gap: 2px; }
+.metaLinks { display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; font-size: var(--sz-text-metadata-size); color: var(--sz-color-text-secondary); }
+.readOnlyMeta { margin: 0; font-size: 13px; color: var(--sz-color-text-secondary); }
+.memeDetach { appearance: none; border: 0; background: none; min-width: 32px; min-height: 36px; font: inherit; font-size: 16px; color: var(--sz-color-text-secondary); cursor: pointer; }
 .otherHooks { border-top: 1px solid var(--sz-color-divider); }
 .otherHooks summary { display: flex; align-items: center; min-height: 44px; color: var(--sz-color-text-secondary); font-size: 13px; cursor: pointer; }
 
@@ -124,8 +133,11 @@
 }
 
 .metadataProgramme {
-  color: var(--sz-color-programme);
+  appearance: none; border: 0; background: none; padding: 0; min-height: 36px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; font-size: var(--sz-text-metadata-size); color: var(--sz-color-text-secondary); cursor: pointer;
 }
+.metadataProgramme[data-state='matched'] { color: var(--sz-color-complete); font-weight: 600; }
 
 .contentBlock {
   display: flex;
@@ -136,18 +148,22 @@
 .sectionLabel {
   font-size: var(--sz-text-section-label-size);
   line-height: var(--sz-text-section-label-line);
-  font-weight: var(--sz-text-section-label-weight);
+  font-weight: 700;
   letter-spacing: var(--sz-text-section-label-tracking);
   text-transform: uppercase;
-  color: var(--sz-color-text-secondary);
+  color: #3f3f3c;
   margin: 0;
 }
-.hookHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hookHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 20px; }
+.hookHint { font-size: 12px; color: var(--sz-color-text-secondary); }
 .hookChooseAction, .metadataInlineAction { border: 0; background: transparent; color: var(--sz-color-cobalt); font: inherit; font-size: 12.5px; font-weight: 600; min-height: var(--sz-touch-target); padding: 0 8px; cursor: pointer; }
 
 .hookList {
   display: flex;
   flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .hookRow {
@@ -165,9 +181,18 @@
 .hookRowSelected {
   margin: 0 calc(var(--sz-space-2) * -1);
   padding: 0 0 0 var(--sz-space-2);
-  background: rgba(49, 91, 216, 0.05);
-  box-shadow: inset 2px 0 0 var(--sz-color-cobalt);
+  background: var(--sz-color-action-tint);
+  box-shadow: inset 3px 0 0 var(--sz-color-action);
 }
+/* The radio-style mark inside the row target: empty ring, or a filled check when chosen. */
+.hookMark {
+  flex: 0 0 auto; width: 18px; height: 18px; margin-top: 3px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid #9a9a95; border-radius: 50%; color: var(--sz-color-on-cobalt);
+}
+.hookMark[data-selected='true'] { border-color: var(--sz-color-action); background: var(--sz-color-action); }
+.hookBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hookStatic { flex: 1; min-width: 0; padding: var(--sz-space-2) 0; display: flex; flex-direction: column; gap: 2px; }
 
 /* The whole text area of the row is one generous pointer/touch/keyboard target. */
 .hookSelect {
@@ -179,9 +204,9 @@
   min-height: var(--sz-touch-target);
   padding: var(--sz-space-2) 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-start;
-  gap: 2px;
+  gap: 10px;
   text-align: left;
   font-family: var(--sz-font-family);
   color: var(--sz-color-text-primary);
@@ -223,7 +248,7 @@
 }
 
 .hookSelectedTag {
-  color: var(--sz-color-cobalt);
+  color: var(--sz-color-action);
 }
 
 .hookOwnTag {
@@ -363,7 +388,20 @@
 .secondarySections {
   display: flex;
   flex-direction: column;
+  margin-top: var(--sz-space-3);
+  padding-top: var(--sz-space-2);
+  border-top: 2px solid var(--sz-color-divider);
 }
+.groupLabel {
+  margin: 0 0 2px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+}
+/* Publication is the finishing step: its own block, separated from production work. */
+.publicationGroup { margin-top: var(--sz-space-4); border-top: 2px solid var(--sz-color-divider); }
+.summaryLine { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; }
+.summaryComplete { display: inline-flex; align-items: center; gap: 3px; color: var(--sz-color-complete); }
+.summaryAttention { color: var(--sz-color-attention); font-weight: 650; }
 
 .saveState {
   font-size: 13px;

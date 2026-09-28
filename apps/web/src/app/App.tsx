@@ -9,6 +9,7 @@ import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import type { AttachmentRecovery } from '../data/attachment-recovery.js';
 import { reelLabel } from '../data/reel-label.js';
+import { detailPrimaryAction, isReadOnlyReel } from '../data/detail-actions.js';
 import { SCRIPT_REQUIRED, UNSAVED_BEFORE_PUBLICATION } from '../data/errors.js';
 import { useAppController } from '../controllers/useAppController.js';
 import { QuickAddScreen } from '../screens/QuickAddScreen.js';
@@ -129,12 +130,13 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [quickError, setQuickError] = useState<string | null>(null);
   const [quickConfirmDeleteId, setQuickConfirmDeleteId] = useState<string | null>(null);
   const [quickSaveState, setQuickSaveState] = useState<SaveState>('idle');
+  const [radialAnchor, setRadialAnchor] = useState<{ x: number; y: number } | null>(null);
   const [undo, setUndo] = useState<{ reelId: string; fromStatus: ReelStatus; version: number; message: string } | null>(null);
   const [undoSaveState, setUndoSaveState] = useState<SaveState>('idle');
   const undoTimer = useRef<number>();
 
   const closeQuickActions = () => {
-    setQuickOpen(null); setQuickOpenReelId(null); setQuickError(null); setQuickConfirmDeleteId(null); setQuickSaveState('idle');
+    setQuickOpen(null); setQuickOpenReelId(null); setQuickError(null); setQuickConfirmDeleteId(null); setQuickSaveState('idle'); setRadialAnchor(null);
   };
   // With the sheet open, an error belongs right next to the picker that produced it — the
   // same place Reel Detail's own selectors show one. A bare swipe commit has no sheet open
@@ -433,7 +435,6 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     */
     const label = reelLabel(reel);
     const kdriveView = kdriveFolderView(reel.kdriveFolder, kdriveStates[reel.id]);
-    const hasPublicationText = Boolean(reel.publicationDescription.trim() || reel.publicationHashtags.trim());
     const contextualAiEnabled = aiCapability.enabled && !c.hasUnsavedChanges();
     const scheduleFromDetail = () => {
       setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], publication: true } }));
@@ -451,18 +452,34 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       const exportLabel = window.prompt('Nazwa eksportu', url.split('/').pop() ?? 'eksport') ?? 'eksport';
       void c.replaceExport({ url, label: exportLabel });
     };
-    let contextAction: { label: string; onClick: () => void } | undefined;
-    // AI shortcuts are offered only when AI is available, exactly like the AI row and the
-    // PUBLIKACJA button; otherwise the next relevant shortcut applies.
-    if (!reel.script.trim() && contextualAiEnabled) contextAction = { label: 'Opracuj', onClick: () => setAiView({ reelId: reel.id, view: 'develop', autoStart: false }) };
-    else if (reel.status === 'editing' && !reel.currentExport) contextAction = { label: 'Dodaj eksport', onClick: () => {
-      setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], materials: true } }));
-      replaceExport();
-    } };
-    else if (reel.status === 'ready' && !reel.publicationDescription.trim() && contextualAiEnabled) contextAction = { label: 'Wygeneruj opis', onClick: generatePublication };
-    else if (hasPublicationText && !planOf(reel).date) contextAction = { label: 'Zaplanuj', onClick: scheduleFromDetail };
-    else if (planOf(reel).date) contextAction = { label: `Termin: ${planLabel(planOf(reel), today)} · Zmień termin`, onClick: scheduleFromDetail };
-    else if (reel.hooks.length > 0 && !reel.selectedHookId) contextAction = { label: 'Wybierz hook', onClick: () => document.querySelector('[data-hooks-section]')?.scrollIntoView({ block: 'center' }) };
+    const readOnly = isReadOnlyReel(reel);
+    const openSection = (section: DetailSection) => setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], [section]: true } }));
+    /** Open a section, then scroll to and focus a control inside it once it has rendered. */
+    const focusLater = (selector: string) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(selector);
+      target?.scrollIntoView({ block: 'center' });
+      target?.focus();
+    }));
+    // UI-02 C: one explicit, testable rule table (data/detail-actions.ts) picks the action; this
+    // only maps each kind to the existing work it opens. Nothing here mutates the Reel.
+    const primary = detailPrimaryAction({
+      reel, aiAvailable: contextualAiEnabled, canVerify: reel.editorId !== c.user?.id,
+      planLabel: planOf(reel).date ? planLabel(planOf(reel), today) : null,
+    });
+    const onPrimary: Record<NonNullable<typeof primary>['kind'], () => void> = {
+      restore: () => void c.restore(reel),
+      develop: () => setAiView({ reelId: reel.id, view: 'develop', autoStart: false }),
+      write_script: () => focusLater('#reel-script'),
+      add_export: () => { openSection('materials'); replaceExport(); },
+      reverify_export: () => { openSection('materials'); focusLater('[data-materials-verify] button'); },
+      generate_publication: generatePublication,
+      write_description: () => { openSection('publication'); focusLater('textarea[aria-label="Opis publikacji"]'); },
+      feed_cover: () => { openSection('publication'); focusLater('[data-feed-cover-toggle]'); },
+      schedule: scheduleFromDetail,
+      reschedule: scheduleFromDetail,
+      select_hook: () => focusLater('[data-hook-option]'),
+    };
+    const contextAction = primary ? { label: primary.label, tone: primary.tone, onClick: onPrimary[primary.kind] } : undefined;
 
     /**
      * Verification is derived, never chosen: the verifier is the peer of the
@@ -504,6 +521,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         verificationState: reel.verificationState,
       }}
       contextAction={contextAction}
+      readOnly={readOnly}
       selectors={{
         open: openSelector,
         onOpen: (selector) => { setSelectionError(null); setOpenSelector(selector); },
@@ -671,7 +689,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     quickActions={{
       openReelId: quickOpenReelId,
       open: quickOpen,
-      onOpenSheet: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('sheet'); },
+      onOpenSheet: (id) => { setQuickError(null); setRadialAnchor(null); setQuickOpenReelId(id); setQuickOpen('sheet'); },
+      onOpenRadial: (id, anchor) => { setQuickError(null); setRadialAnchor(anchor); setQuickOpenReelId(id); setQuickOpen('radial'); },
+      radialAnchor,
       onOpenStatus: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('status'); },
       onOpenAssign: (id) => { setQuickError(null); setQuickOpenReelId(id); setQuickOpen('assign'); },
       onDismiss: closeQuickActions,

@@ -156,6 +156,15 @@ export function groupPlanner<T extends Pick<Reel, 'id' | 'status' | 'deletedAt'>
   };
 }
 
+/**
+ * UI-02: accurate wording for an empty NIEZAPLANOWANE group. "Everything has a date" is only
+ * true when there is production work at all; with none, say so instead of reassuring.
+ */
+export function unscheduledEmptyLabel(reels: ReadonlyArray<Pick<Reel, 'status' | 'deletedAt'>>): string {
+  const inProduction = reels.some((reel) => reel.deletedAt === null && UNSCHEDULED_STATUSES.includes(reel.status));
+  return inProduction ? 'Każda rolka w produkcji ma już termin.' : 'Brak rolek do nagrania, w montażu ani gotowych.';
+}
+
 /** Day shortcuts for the Zaplanuj sheet: today plus the next six days. */
 export function quickDays(today: string, count = 7): Array<{ date: string; label: string; shortDate: string }> {
   return Array.from({ length: count }, (_, index) => {

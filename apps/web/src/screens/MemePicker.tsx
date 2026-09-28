@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Meme, Reel } from '../../../../packages/contracts/src/index.js';
 import type { CoreApiClient } from '../data/api.js';
 import { isAbandonedRequest, polishError } from '../data/errors.js';
@@ -13,6 +13,7 @@ export function MemePicker({ api, reel, onClose, onReel }:
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     let live = true;
     void api.memes(query).then(({ items }) => { if (live) setItems(items); })
@@ -58,14 +59,29 @@ export function MemePicker({ api, reel, onClose, onReel }:
     {message ? <p role="status">{message}</p> : null}
     {creating ? <>
       <label>Nazwa<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label>Zdjęcie<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-      <button type="button" disabled={busy} onClick={() => void create()}>Zapisz</button>
+      {/* The native control is visually hidden: its browser-default, English presentation is
+          replaced by application copy while the real input keeps the file picker accessible. */}
+      <div className={styles.fileField}>
+        <span className={styles.fieldLabel} id="meme-file-label">Zdjęcie</span>
+        <input ref={fileInput} id="meme-file" className={styles.fileInput} type="file" accept="image/jpeg,image/png,image/webp"
+          aria-labelledby="meme-file-label" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+        <div className={styles.fileRow}>
+          <button type="button" className={styles.secondaryButton} onClick={() => fileInput.current?.click()}>{file ? 'Zmień zdjęcie' : 'Wybierz zdjęcie'}</button>
+          <span className={styles.fileName}>{file ? file.name : 'Nie wybrano pliku'}</span>
+        </div>
+        <span className={styles.hint}>JPG, PNG lub WebP</span>
+      </div>
+      <div className={styles.formActions}>
+        <button type="button" className={styles.quietButton} disabled={busy} onClick={() => { setCreating(false); setMessage(null); }}>Anuluj</button>
+        <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void create()}>{busy ? 'Zapisywanie…' : 'Zapisz mem'}</button>
+      </div>
     </> : <>
       <input aria-label="Szukaj memu" placeholder="Szukaj memu..." value={query} onChange={(event) => setQuery(event.target.value)} />
+      {items.length === 0 ? <p className={styles.empty}>{query.trim() ? 'Brak memów pasujących do wyszukiwania.' : 'Biblioteka memów jest pusta.'}</p> : null}
       <div className={styles.rows}>{items.map((meme) => <button key={meme.id} type="button" disabled={busy} onClick={() => void attach(meme.id)}>
         <img src={meme.thumbnailRef ?? undefined} alt="" /><span>{meme.name}</span>
       </button>)}</div>
-      <button type="button" onClick={() => setCreating(true)}>+ NOWY MEM</button>
+      <button type="button" className={styles.addNew} onClick={() => setCreating(true)}>+ Nowy mem</button>
     </>}
   </div>;
 }

@@ -36,9 +36,16 @@ test('a HOOKI row selects on the row itself; edit and delete are sibling control
   assert.equal(selectButton.includes('onStartHookEdit'), false, 'edit is not inside the select target');
   assert.equal(selectButton.includes('onRemoveHook'), false, 'delete is not inside the select target');
   assert.ok(row.indexOf('aria-label="Edytuj hook"') > row.indexOf('</button>'), 'edit control follows the closed select button');
+  // UI-02: a visible radio-style mark plus the WYBRANY label — never colour alone.
+  assert.ok(selectButton.includes("<span className={styles.hookMark} data-selected={selected ? 'true' : undefined} aria-hidden=\"true\">"));
+  assert.ok(selectButton.includes('{selected ? <CheckIcon size={12} /> : null}'));
+  assert.ok(selectButton.includes('{selected ? <span className={styles.hookSelectedTag}>Wybrany</span> : null}'));
   // Both labels can appear together: provenance is not conditioned on selection.
-  assert.ok(selectButton.includes("{selected ? <span className={styles.hookSelectedTag}>✓ WYBRANY</span> : null}"));
-  assert.ok(selectButton.includes("{hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null}"));
+  assert.ok(selectButton.includes('{own}'));
+  assert.ok(screen.includes("const own = hook.source === 'user' ? <span className={styles.hookOwnTag}>własny</span> : null;"));
+  // One concise instruction instead of a second `Wybierz hook` action inside HOOKI.
+  assert.ok(screen.includes('Stuknij hook, aby go wybrać'));
+  assert.equal(screen.includes('hookChooseAction'), false);
   assert.equal(screen.includes('Użyj'), false, 'no per-hook use action');
 });
 
@@ -51,7 +58,8 @@ test('inline edit offers Gotowe and Anuluj, and keeps an orphaned draft visible'
 test('selected styling is explicit and not a text highlight', () => {
   const css = read('../../screens/ReelDetailScreen.module.css');
   const selected = between(css, '.hookRowSelected {', '}');
-  assert.ok(selected.includes('box-shadow: inset 2px 0 0 var(--sz-color-cobalt)'));
+  assert.ok(selected.includes('box-shadow: inset 3px 0 0 var(--sz-color-action)'));
+  assert.ok(between(css, ".hookMark[data-selected='true'] {", '}').includes('background: var(--sz-color-action)'), 'filled check mark when chosen');
   assert.equal(/purple|violet|::selection|color:/i.test(selected), false, 'no coloured text as state');
   assert.ok(between(css, '.hookSelect {', '}').includes('min-height: var(--sz-touch-target)'), 'generous target');
   assert.ok(between(css, '.hookSelect {', '}').includes('user-select: none'), 'state never depends on text selection');

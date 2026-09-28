@@ -1,7 +1,8 @@
 import '../ui/tokens.css';
 import { COPY, type PublicationSectionProps } from '../ui/screen-contracts.js';
-import { CoverIndicator, TextAction } from '../ui/primitives.js';
-import { CalendarIcon, ExternalLinkIcon } from '../ui/icons.js';
+import { ActionButton, CoverIndicator, TextAction } from '../ui/primitives.js';
+import { CalendarIcon, CheckIcon, ExternalLinkIcon } from '../ui/icons.js';
+import { publicationEmphasis } from '../data/detail-actions.js';
 import styles from './PublicationSection.module.css';
 
 /**
@@ -17,6 +18,8 @@ export function PublicationSection(props: PublicationSectionProps) {
     onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished, isReady,
     publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
   } = props;
+  // UI-02 F: generation leads while there is no description; copying leads once there is copy.
+  const emphasis = publicationEmphasis(description, hashtags);
 
   return (
     <div className={styles.section}>
@@ -47,13 +50,19 @@ export function PublicationSection(props: PublicationSectionProps) {
         {plan.label ? <span>Termin: <strong>{plan.label}</strong> · Zmień termin</span> : <span>Zaplanuj</span>}
       </button> : null}
 
-      {onGeneratePublication ? <div className={styles.generateRow}>
-        <TextAction onClick={onGeneratePublication} disabled={!generatePublicationEnabled}>Wygeneruj opis</TextAction>
+      {onGeneratePublication && !isPublished ? <div className={styles.generateRow} data-emphasis={emphasis.generate}>
+        <ActionButton tone={emphasis.generate} onClick={onGeneratePublication} disabled={!generatePublicationEnabled}>
+          {emphasis.generate === 'primary' ? 'Wygeneruj opis' : 'Wygeneruj nowy opis'}
+        </ActionButton>
         {generatePublicationHint ? <p className={styles.prerequisite}>{generatePublicationHint}</p> : null}
       </div> : null}
 
       <div className={styles.block}>
-        <span className={styles.label}>Opis</span>
+        <span className={styles.labelRow}>
+          <span className={styles.label}>Opis</span>
+          {/* Ready, quietly: a small check and word, not a banner. */}
+          {emphasis.ready ? <span className={styles.readyMark}><CheckIcon size={12} aria-hidden="true" /> gotowy</span> : null}
+        </span>
         <textarea
           className={styles.textField}
           aria-label="Opis publikacji"
@@ -72,7 +81,9 @@ export function PublicationSection(props: PublicationSectionProps) {
         />
       </div>
 
-      <TextAction className={styles.copyAction} onClick={onCopyDescription}>Kopiuj opis</TextAction>
+      <ActionButton className={styles.copyAction} tone={emphasis.copy === 'primary' ? 'primary' : 'quiet'} onClick={onCopyDescription}>
+        Kopiuj opis
+      </ActionButton>
       {isPublished || publishedAt || publicationLinks.length ? <div className={styles.block}>
         <span className={styles.label}>Po publikacji</span>
         <div className={styles.postPublication}>

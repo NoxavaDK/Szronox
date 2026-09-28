@@ -20,12 +20,13 @@
  *   1. The author's own words: `text`, or `additionalText` when there is no `text`. If those
  *      words are nothing but a bare URL — which is what an Android share of a link usually
  *      produces — it is treated as a URL rather than printed raw.
- *   2. The URL, shortened to host and path.
- *   3. The first image's file name. Real data the user recognises, preferred over a count.
- *   4. The image count, when the files carried no usable names.
- *   5. Any non-empty original shared field, in received order. A safety net for a payload
+ *   2. (UI-02, `reelLabel` only) the saved script's opening sentence.
+ *   3. The URL's readable slug — never an opaque platform code — else `Materiał z <host>`.
+ *   4. The first image's file name. Real data the user recognises, preferred over a count.
+ *   5. The image count, when the files carried no usable names.
+ *   6. Any non-empty original shared field, in received order. A safety net for a payload
  *      shaped differently from what capture mapped.
- *   6. `Bez tytułu`. Honest, and still better than a blank row.
+ *   7. `Bez tytułu`. Honest, and still better than a blank row.
  */
 
 import type { CaptureInput, Reel } from '../../../../packages/contracts/src/index.js';
@@ -83,7 +84,20 @@ function captureUrl(input: CaptureInput): string | undefined {
   return undefined;
 }
 
-const ROUTE_ONLY_SEGMENTS = new Set(['reel', 'reels', 'p', 'watch', 'video', 'videos', 'photo', 'photos', 'status', 'story', 'stories', 's', 'path', 'page']);
+const ROUTE_ONLY_SEGMENTS = new Set(['reel', 'reels', 'p', 'watch', 'video', 'videos', 'photo', 'photos', 'status', 'story', 'stories', 's', 'path', 'page',
+  'live', 'shorts', 'post', 'posts', 'share', 'embed', 'amp', 'index', 'html', 'php', 'www', 'tv', 'clip', 'clips', 'media']);
+
+/**
+ * UI-02: platform short codes (`h7v9vwm`, `azIr67Xq2v`) are identifiers, not words. A segment
+ * is readable only when every hyphen/underscore part is plain letters (or a short number such
+ * as a year), at least one part is a real word, and no part mixes case inside a word.
+ */
+function looksLikeWords(segment: string): boolean {
+  const parts = segment.split(/[-_\s.]+/).filter(Boolean);
+  if (parts.length === 0) return false;
+  if (!parts.some((part) => /^\p{L}{3,}$/u.test(part))) return false;
+  return parts.every((part) => (/^\p{L}+$/u.test(part) && !/\p{Ll}\p{Lu}/u.test(part)) || /^\d{1,4}$/.test(part));
+}
 
 function readablePath(raw: string): string | undefined {
   try {
@@ -96,8 +110,8 @@ function readablePath(raw: string): string | undefined {
       const lower = part.toLocaleLowerCase('pl-PL');
       if (part.length < 4 || ROUTE_ONLY_SEGMENTS.has(lower) || /^\d+$/.test(part)) return false;
       if (/^[A-Z0-9_-]{4,}$/.test(part)) return false;
-      if (/^[a-f0-9]{16,}$/i.test(part) || /^[A-Za-z0-9_-]{20,}$/.test(part)) return false;
-      return /[\p{L}]/u.test(part);
+      if (/^[a-f0-9]{16,}$/i.test(part) || /^[A-Za-z0-9]{20,}$/.test(part)) return false;
+      return /[\p{L}]/u.test(part) && looksLikeWords(part.replace(/\.[a-z0-9]{2,5}$/i, ''));
     });
     if (!candidate) return undefined;
     return candidate.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -144,8 +158,8 @@ export function imageCountLabel(count: number): string {
   return count === 1 ? '1 zdjęcie' : `${count} ${plural}`;
 }
 
-/** Derive a label from a capture alone. Exported for the capture-time preview and the tests. */
-export function captureLabel(input: CaptureInput): string {
+/** The person's own words in a capture — a share title, text or accompanying text — if any. */
+function authorWords(input: CaptureInput): string | undefined {
   const title = input.originalShare?.fields.find((field) => field.name.toLocaleLowerCase('pl-PL') === 'title' && field.value.trim() !== '')?.value;
   const candidates = [
     title,
@@ -157,6 +171,24 @@ export function captureLabel(input: CaptureInput): string {
     const line = candidate === undefined ? undefined : candidate.split(/\r?\n/).map((part) => part.trim()).find((part) => part !== '' && !isBareUrl(part));
     if (line !== undefined) return tidy(line);
   }
+  return undefined;
+}
+
+/**
+ * UI-02: the opening sentence of the saved script, when there is one — far more recognisable
+ * than a link's host or an image file name. Only the first non-empty line is considered.
+ */
+export function scriptLabel(script: string | undefined): string | undefined {
+  const line = script ? firstLine(script)?.trim() : undefined;
+  if (!line) return undefined;
+  const sentence = line.split(/(?<=[.!?…])\s+/u)[0];
+  return tidy(sentence.replace(/[.…]+$/u, '') || line);
+}
+
+/** Derive a label from a capture alone. Exported for the capture-time preview and the tests. */
+export function captureLabel(input: CaptureInput): string {
+  const words = authorWords(input);
+  if (words !== undefined) return words;
 
   for (const raw of [input.url, input.text, input.additionalText, ...(input.originalShare?.fields ?? []).map((field) => field.value)]) {
     if (raw?.trim() && isBareUrl(raw.trim())) return urlLabel(raw);
@@ -184,10 +216,15 @@ export function captureLabel(input: CaptureInput): string {
  * `inputNote` is deliberately not consulted, even though capture seeds it from the same text.
  * It is editable, so using it would make the label drift as notes are edited; `originalInput`
  * is immutable, which makes the label stable for the life of the Reel.
+ *
+ * UI-02: when the capture holds no words of its own (a bare link, an image), the saved script's
+ * opening sentence is preferred over an opaque link token or file name. It can change as the
+ * script is edited — acceptable for a label that exists only until someone writes a title.
  */
-export function reelLabel(reel: Pick<Reel, 'title' | 'originalInput'>): ReelLabel {
+export function reelLabel(reel: Pick<Reel, 'title' | 'originalInput'> & Partial<Pick<Reel, 'script'>>): ReelLabel {
   const domain = sourceDomain(captureUrl(reel.originalInput));
   if (reel.title.trim() !== '') return { text: reel.title, derived: false, ...(domain ? { sourceDomain: domain } : {}) };
-  const text = captureLabel(reel.originalInput);
+  // Author words first, then the saved script, then link/image fallbacks. Nothing is fetched.
+  const text = authorWords(reel.originalInput) ?? scriptLabel(reel.script) ?? captureLabel(reel.originalInput);
   return { text, derived: true, ...(domain ? { sourceDomain: domain } : {}) };
 }
