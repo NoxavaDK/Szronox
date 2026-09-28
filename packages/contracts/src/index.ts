@@ -258,8 +258,12 @@ export interface AiInputSnapshot {
   originalInput: CaptureInput;
   script: string;
   scriptRevision: number;
-  /** PUBLICATION-02: new grounded publication runs; absent on legacy script-only runs. */
-  publicationContextVersion?: 2;
+  /**
+   * PUBLICATION-02: grounded publication runs; absent on legacy script-only runs. v3 (UI-02)
+   * also reads the linked source and saved input images, with a bounded web-search fallback.
+   * Freshness is identical for v2 and v3.
+   */
+  publicationContextVersion?: 2 | 3;
   hooks: Array<Pick<ReelHook, 'id' | 'text' | 'source' | 'position'>>;
   /** The selected hook at snapshot time; absent in runs recorded before HOOKS-SELECT-EDIT. */
   selectedHookId?: Id | null;
@@ -339,7 +343,23 @@ export interface LanguageResult { scriptSuggestion: string; notes: string[] }
  * Wygeneruj opis: two separate proposals from the server-snapshotted saved script. Neither is
  * persisted until explicitly applied per field.
  */
-export interface PublicationResult { publicationDescriptionSuggestion: string; publicationHashtagsSuggestion: string }
+export interface PublicationResult {
+  publicationDescriptionSuggestion: string;
+  publicationHashtagsSuggestion: string;
+  /**
+   * v3 only. `saved_material`: grounded in the Reel's own saved input; `web_search`: the bounded
+   * fallback found quoted support; `script_only`: no reliable supporting material was found.
+   */
+  publicationGrounding?: 'saved_material' | 'web_search' | 'script_only';
+  /**
+   * v3 only. Evidence for the proposal, never inserted into the copy. Every URL is the saved
+   * link or a provider-returned search result the worker actually retrieved.
+   */
+  publicationSources?: Array<{
+    id: string; url: string; title: string; origin: 'saved_link' | 'google_search';
+    retrievedAt: IsoDateTime; providerReference: string | null;
+  }>;
+}
 /** Zero to three candidates; an empty result never mutates Reel programme state. */
 export interface ProgrammeResult { candidates: ProgrammeMatch[] }
 export interface AiResultMap {

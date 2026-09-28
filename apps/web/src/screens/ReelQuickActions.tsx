@@ -10,8 +10,9 @@ import {
   type ReelQuickActionsProps,
   type ReelUndoView,
 } from '../ui/screen-contracts.js';
-import { Avatar, TextAction } from '../ui/primitives.js';
-import { CheckIcon } from '../ui/icons.js';
+import { ActionButton, Avatar, TextAction } from '../ui/primitives.js';
+import { CalendarIcon, CheckIcon, OverflowIcon } from '../ui/icons.js';
+import { radialActions, radialLayout, RADIAL_ITEM_SIZE, type RadialActionId } from '../ui/radial-menu.js';
 import styles from './ReelQuickActions.module.css';
 
 /**
@@ -49,7 +50,7 @@ export function ReelQuickActionsSheet({
     return () => { returnFocus.current?.focus(); };
   }, [open]);
 
-  if (open === null) return null;
+  if (open === null || open === 'radial') return null;
 
   /**
    * Contains Tab/Shift+Tab within the sheet (`aria-modal` promises this; nothing enforced
@@ -89,8 +90,9 @@ export function ReelQuickActionsSheet({
             <h2 className={styles.heading}>{COPY.deleteConfirmTitle}</h2>
             <p className={styles.quiet}>{COPY.deleteConfirmBody}</p>
             <div className={styles.confirmActions}>
-              <TextAction onClick={onCancelDelete}>{COPY.deleteCancel}</TextAction>
-              <TextAction onClick={onConfirmDelete}>{COPY.deleteConfirm}</TextAction>
+              <TextAction onClick={onCancelDelete} tone="quiet">{COPY.deleteCancel}</TextAction>
+              {/* Red from the first step to the final one: destruction never turns blue. */}
+              <ActionButton tone="danger" onClick={onConfirmDelete}>{COPY.deleteConfirm}</ActionButton>
             </div>
             {selectionError ? <p className={styles.error} role="alert">{selectionError}</p> : null}
           </>
@@ -198,6 +200,69 @@ export function ReelQuickActionsSheet({
           </>
         )}
         {saveState === 'saving' ? <p className={styles.quiet} role="status">Zapisywanie…</p> : null}
+      </div>
+    </div>
+  );
+}
+
+const RADIAL_GLYPH: Record<RadialActionId, JSX.Element> = {
+  status: <span aria-hidden="true" className={styles.radialGlyph}>⇄</span>,
+  schedule: <CalendarIcon aria-hidden="true" />,
+  assign: <span aria-hidden="true" className={styles.radialGlyph}>@</span>,
+  more: <OverflowIcon aria-hidden="true" />,
+};
+
+/**
+ * UI-02 radial quick-action menu (mobile long-press). Small and fast: four labelled targets on
+ * an arc around the touch point, repositioned so no edge clips them. Tapping outside or Escape
+ * closes it with no effect. Each action only opens an existing sheet — the mutation still takes
+ * that sheet's explicit choice — and `Więcej` opens the full sheet, where every radial action
+ * is also listed, so the gesture is never the only route.
+ */
+export function RadialQuickMenu({ item, quickActions }: { item: ReelListItemView; quickActions: ReelQuickActionsProps }) {
+  const { open, radialAnchor, onDismiss, onOpenStatus, onOpenAssign, onOpenSchedule, onOpenSheet } = quickActions;
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open !== 'radial') return;
+    menuRef.current?.querySelector<HTMLElement>('button')?.focus();
+  }, [open]);
+  if (open !== 'radial' || !radialAnchor) return null;
+  const actions = radialActions(item).filter((action) => action.id !== 'schedule' || onOpenSchedule);
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  const layout = radialLayout(radialAnchor, viewport, actions.length);
+  const run = (id: RadialActionId) => {
+    if (id === 'status') onOpenStatus(item.id);
+    else if (id === 'assign') onOpenAssign(item.id);
+    else if (id === 'schedule') onOpenSchedule?.(item.id);
+    else onOpenSheet(item.id);
+  };
+  const onKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === 'Escape') { event.stopPropagation(); onDismiss(); return; }
+    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('button') ?? []);
+    const index = buttons.indexOf(document.activeElement as HTMLElement);
+    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
+    buttons[(index + step + buttons.length) % buttons.length]?.focus();
+  };
+  return (
+    <div className={styles.radialBackdrop} role="presentation" onClick={onDismiss} onContextMenu={(event) => { event.preventDefault(); onDismiss(); }}>
+      <span className={styles.radialOrigin} style={{ left: layout.centre.x, top: layout.centre.y }} aria-hidden="true" />
+      <div ref={menuRef} role="menu" aria-label={`${COPY.quickActionsHeading}: ${item.title}`} onKeyDown={onKeyDown} onClick={(event) => event.stopPropagation()}>
+        {actions.map((action, index) => (
+          <button
+            key={action.id}
+            type="button"
+            role="menuitem"
+            className={styles.radialItem}
+            data-action={action.id}
+            style={{ left: layout.items[index].x, top: layout.items[index].y, width: RADIAL_ITEM_SIZE, height: RADIAL_ITEM_SIZE }}
+            onClick={() => run(action.id)}
+          >
+            {RADIAL_GLYPH[action.id]}
+            <span className={styles.radialLabel}>{action.label}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -19,13 +19,15 @@ button, input, textarea { font: inherit; }
 .workspace[data-layout='two'] { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
 .workspace[data-layout='three'] { grid-template-columns: minmax(250px, 290px) minmax(0, 1fr) minmax(320px, 380px); }
 .workspace[data-layout='focus'] { grid-template-columns: minmax(0, 1fr); }
-.workspace-toolbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--sz-color-divider, #e4e4e1); background: var(--sz-color-background, #f7f7f5); }
+.workspace-toolbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--sz-color-pane-rule, #d4d4cf); background: var(--sz-color-nav-surface, #f2f2ef); }
 .workspace-side-switch, .workspace-layout-switch { display: flex; align-items: center; gap: 4px; }
 .workspace-toolbar button { min-height: 36px; border: 0; border-bottom: 2px solid transparent; padding: 0 10px; background: transparent; color: var(--sz-color-text-secondary, #636360); font: inherit; font-size: 13px; cursor: pointer; }
 .workspace-toolbar button[aria-pressed='true'] { border-bottom-color: var(--sz-color-cobalt, #315bd8); color: var(--sz-color-text-primary, #171717); }
 .workspace-pane { grid-row: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.workspace-plan, .workspace-side { border-right: 1px solid var(--sz-color-divider, #e4e4e1); }
-.workspace-reels { border-left: 1px solid var(--sz-color-divider, #e4e4e1); }
+/* UI-02: navigation panes are the frame, the editor is the working surface; a firmer boundary. */
+.workspace-plan, .workspace-side { border-right: 1px solid var(--sz-color-pane-rule, #d4d4cf); --sz-color-background: var(--sz-color-nav-surface, #f2f2ef); background: var(--sz-color-nav-surface, #f2f2ef); }
+.workspace-reels { border-left: 1px solid var(--sz-color-pane-rule, #d4d4cf); --sz-color-background: var(--sz-color-nav-surface, #f2f2ef); background: var(--sz-color-nav-surface, #f2f2ef); }
+.workspace-centre { --sz-color-background: var(--sz-color-editor-surface, #fcfcfa); background: var(--sz-color-editor-surface, #fcfcfa); }
 .workspace-centre { grid-column: 2; }
 .workspace[data-layout='three'] .workspace-centre { grid-column: 2; }
 .workspace[data-layout='focus'] .workspace-centre { grid-column: 1; }

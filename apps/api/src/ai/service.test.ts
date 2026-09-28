@@ -156,8 +156,9 @@ test('new generate_publication snapshots versioned grounded context and ignores 
     assert.equal(stored.rows[0].action, 'generate_publication');
     assert.equal(stored.rows[0].input_snapshot.script, 'Stary skrypt.');
     assert.equal(stored.rows[0].input_snapshot.scriptRevision, 0);
-    assert.equal(stored.rows[0].input_snapshot.publicationContextVersion, 2);
-    assert.equal(stored.rows[0].prompt_id, 'gemini-02-publication-provisional-v2');
+    assert.equal(stored.rows[0].input_snapshot.publicationContextVersion, 3);
+    assert.equal(stored.rows[0].prompt_id, 'gemini-02-publication-provisional-v3');
+    // v3 may read completed capture images; a pending one is neither snapshotted nor a blocker.
     assert.deepEqual(stored.rows[0].input_snapshot.imageObjects, []);
     // Other actions keep their upload gate.
     await assert.rejects(service.enqueue(actor, reelId, {
@@ -182,7 +183,7 @@ test('PUBLICATION-02 freshness follows selected hook and eligible saved text, no
     const stored = await db.query<{ input_snapshot: { publicationContextVersion: number; inputNote: string; selectedHookId: string; hooks: Array<{ id: string; text: string }>; originalInput: { url?: string } } }>(
       'select input_snapshot from app.ai_runs where id=$1', [runId]);
     const snapshot = stored.rows[0].input_snapshot;
-    assert.equal(snapshot.publicationContextVersion, 2);
+    assert.equal(snapshot.publicationContextVersion, 3);
     assert.equal(snapshot.selectedHookId, hookId);
     assert.ok(snapshot.hooks.some((hook) => hook.id === hookId && hook.text === 'Wybrany hook'));
     assert.deepEqual(snapshot.originalInput, {
@@ -194,10 +195,13 @@ test('PUBLICATION-02 freshness follows selected hook and eligible saved text, no
 
     await db.query("update app.reels set priority='urgent',version=version+1 where id=$1", [reelId]);
     assert.equal((await service.get(actor, runId)).isStale, false);
+    // Unrelated metadata: title, editing notes, planning and cover never stale publication copy.
+    await db.query("update app.reels set title='Nowy tytuł',editing_notes='Uwagi',feed_cover_done=true,version=version+1 where id=$1", [reelId]);
+    assert.equal((await service.get(actor, runId)).isStale, false);
     await db.query("update app.reels set input_note='Zmiana notatki',version=version+1 where id=$1", [reelId]);
     assert.equal((await service.get(actor, runId)).isStale, true);
     await assert.rejects(service.apply(actor, runId, {
-      operationId: '05100000-0000-4000-8000-000000000002', expectedVersion: 3,
+      operationId: '05100000-0000-4000-8000-000000000002', expectedVersion: 4,
       selection: 'publication_description', text: 'Opis AI', replaceCurrentValue: '', confirmReplacement: true,
     }), code('STALE_PUBLICATION_RESULT'));
   } finally { await db.close(); }

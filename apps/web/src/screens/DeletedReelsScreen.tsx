@@ -15,10 +15,11 @@ import styles from './ReelListScreen.module.css';
 export function DeletedReelsScreen({ onBack, loadState, items, onOpenReel, onRetry }: DeletedReelsScreenProps) {
   return (
     <div className={styles.screen}>
-      <header className={styles.header}>
-        <button type="button" onClick={onBack} aria-label="Wstecz"><BackArrowIcon /></button>
+      <header className={`${styles.header} ${styles.headerStart}`}>
+        <button type="button" className={styles.backButton} onClick={onBack} aria-label="Wstecz"><BackArrowIcon /></button>
         <h1 className={styles.title}>{COPY.deletedEntry}</h1>
       </header>
+      <p className={styles.screenNote}>Usunięte rolki można otworzyć i przywrócić.</p>
 
       {loadState === 'loading' ? <StatusBanner tone="loading" message="Wczytywanie…" /> : null}
       {loadState === 'offline' ? <StatusBanner tone="offline" message="Brak połączenia" /> : null}
@@ -31,8 +32,8 @@ export function DeletedReelsScreen({ onBack, loadState, items, onOpenReel, onRet
 
       <ul className={styles.list}>
         {items.map((item) => (
-          <li key={item.id} className={styles.row}>
-            <button type="button" className={styles.rowMain} onClick={() => onOpenReel(item.id)}>
+          <li key={item.id}>
+            <button type="button" className={`${styles.row} ${styles.deletedRow}`} onClick={() => onOpenReel(item.id)}>
               <span className={styles.titleLine}>
                 {/* Same treatment as the active list: an untitled Reel is labelled from its
                     capture, quietly, rather than rendering an empty row. */}
@@ -40,6 +41,7 @@ export function DeletedReelsScreen({ onBack, loadState, items, onOpenReel, onRet
                   {item.title}
                 </span>
               </span>
+              <span className={styles.deletedAction}>Otwórz</span>
             </button>
           </li>
         ))}

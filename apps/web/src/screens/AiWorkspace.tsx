@@ -16,6 +16,7 @@ const actionLabel: Record<AiAction, string> = {
   language_check: 'Sprawdź język', find_programme: 'Sprawdź postulat',
   generate_publication: 'Wygeneruj opis',
 };
+const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } };
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return <section className={styles.section}><h2>{label}</h2>{children}</section>;
 }
@@ -210,9 +211,10 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
     {run?.state === 'queued' || run?.state === 'running' ? <p className={styles.quiet} role="status">Trwa opracowywanie… Wynik będzie dostępny po ponownym otwarciu.</p> : null}
     {run?.state === 'failed' ? <><p className={styles.message} role="alert">Nie udało się ukończyć. {run.error ? polishError(new ClientApiError(503, run.error)) : ''}</p><button type="button" onClick={() => void begin()}>Spróbuj ponownie</button></> : null}
     {run?.isStale ? <p className={styles.message}>{run.action === 'generate_publication'
-      ? 'Skrypt zmienił się od wygenerowania opisu. Wygeneruj opis ponownie.'
+      ? 'Skrypt, wybrany hook lub źródła zmieniły się od wygenerowania opisu. Wygeneruj opis ponownie.'
       : 'Treść rolki zmieniła się od tego opracowania. Przed użyciem propozycji sprawdź aktualny tekst.'}</p> : null}
-    {run?.warnings.map((warning, index) => <p className={styles.message} key={index}>{warning}</p>)}
+    {run?.warnings.filter((warning) => !(pub?.publicationGrounding && warning.startsWith('Nie znaleziono wiarygodnych materiałów')))
+      .map((warning, index) => <p className={styles.message} key={index}>{warning}</p>)}
 
     {d ? <>
       <Section label="CO SIĘ WYDARZYŁO"><p>{d.eventSummary}</p></Section>
@@ -234,6 +236,17 @@ export function AiWorkspace({ api, reel, initialView, autoStart, programmeIndexe
     {pub ? <>
       {publicationField('publication_description', 'description', pub.publicationDescriptionSuggestion)}
       {publicationField('publication_hashtags', 'hashtags', pub.publicationHashtagsSuggestion)}
+      {/* UI-02 H: evidence for this proposal only — never inserted into the copy itself. */}
+      {pub.publicationGrounding ? <Section label="ŹRÓDŁA">
+        <p className={styles.quiet}>{pub.publicationGrounding === 'saved_material'
+          ? 'Opis uzupełniono na podstawie zapisanych materiałów rolki.'
+          : pub.publicationGrounding === 'web_search'
+            ? 'Rolka nie miała użytecznych materiałów, więc informacje uzupełniono z wyszukiwania.'
+            : 'Nie znaleziono wiarygodnych materiałów uzupełniających — opis oparto tylko na skrypcie.'}</p>
+        {(pub.publicationSources ?? []).map((item) => <a key={item.id} className={styles.source} href={item.url} target="_blank" rel="noopener noreferrer">
+          {item.origin === 'saved_link' ? 'Link z rolki' : item.title} · {hostOf(item.url)} ↗
+        </a>)}
+      </Section> : null}
       <button type="button" className={styles.bottom} disabled={busy} onClick={() => void begin('generate_publication')}>Wygeneruj ponownie</button>
     </> : null}
 

@@ -5,7 +5,8 @@ import type { ReelListItemView, ReelListScreenProps, ReelQuickActionsProps } fro
 import { Avatar, AttentionStrip, CoverIndicator, FloatingAddButton, PriorityGlyph, StatusBanner } from '../ui/primitives.js';
 import { StatusSelector } from '../ui/StatusSelector.js';
 import { useRowGesture, prefersReducedMotion } from '../ui/gestures.js';
-import { ReelQuickActionsSheet, UndoSnackbar, quickAdvanceLabel } from './ReelQuickActions.js';
+import { RadialQuickMenu, ReelQuickActionsSheet, UndoSnackbar, quickAdvanceLabel } from './ReelQuickActions.js';
+import { OverflowIcon } from '../ui/icons.js';
 import { COPY } from '../ui/screen-contracts.js';
 import { STATUS_LABELS } from '../ui/screen-contracts.js';
 import styles from './ReelListScreen.module.css';
@@ -39,7 +40,7 @@ export function ReelListScreen(props: ReelListScreenProps) {
           <button type="button" className={styles.planLink} onClick={props.onOpenPlan}>Plan</button>
         ) : null}
         {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}
-        <button type="button" onClick={props.onOpenDeleted} aria-label="Usunięte">⋮</button>
+        <button type="button" className={styles.headerMenu} onClick={props.onOpenDeleted} aria-label="Usunięte"><OverflowIcon /></button>
         <Avatar user={currentUser} size={32} />
         {props.onSignOut ? <button type="button" className={styles.signOutButton} onClick={props.onSignOut}>Wyloguj</button> : null}
       </header>
@@ -88,6 +89,7 @@ export function ReelListScreen(props: ReelListScreenProps) {
       <FloatingAddButton onClick={onAddNew} label="Nowy pomysł" />
 
       {openItem && quickActions ? <ReelQuickActionsSheet item={openItem} quickActions={quickActions} /> : null}
+      {openItem && quickActions ? <RadialQuickMenu item={openItem} quickActions={quickActions} /> : null}
       {quickActions?.undo ? <UndoSnackbar undo={quickActions.undo} /> : null}
     </div>
   );
@@ -110,7 +112,11 @@ function ReelRow({
 
   const { offset, close, handlers } = useRowGesture({
     disabled: !gesturesEnabled,
-    onLongPress: () => quickActions?.onOpenSheet(item.id),
+    // Touch: the radial menu at the finger. Mouse/pen, or a host without it: the full sheet.
+    onLongPress: ({ x, y, pointerType }) => {
+      if (pointerType === 'touch' && quickActions?.onOpenRadial) quickActions.onOpenRadial(item.id, { x, y });
+      else quickActions?.onOpenSheet(item.id);
+    },
     onSwipeOpen: () => onRevealChange(item.id),
   });
 
@@ -153,7 +159,7 @@ function ReelRow({
   };
 
   return (
-    <li className={styles.rowWrapper}>
+    <li className={styles.rowWrapper} data-has-more={gesturesEnabled ? 'true' : undefined}>
       <div className={quickStyles.revealTrack} data-active={offset !== 0 ? 'true' : undefined} aria-hidden={offset === 0}>
         <div className={quickStyles.revealRight}>
           {advance ? (
@@ -202,6 +208,7 @@ function ReelRow({
         onKeyDown={onKeyDown}
         {...handlers}
       >
+        {/* Pilne keeps one rail and one word; the extra `!` glyph is dropped as redundant. */}
         {isUrgent ? <span className={styles.urgentRail} aria-hidden /> : null}
         <div className={styles.rowMain}>
           <div className={styles.titleLine}>
@@ -210,11 +217,13 @@ function ReelRow({
             <span className={item.titleIsDerived ? `${styles.rowTitle} ${styles.rowTitleDerived}` : styles.rowTitle}>
               {item.title}
             </span>
-            {item.priority !== 'normal' ? <PriorityGlyph priority={item.priority} /> : null}
+            {item.priority === 'evergreen' ? <PriorityGlyph priority={item.priority} /> : null}
           </div>
           <div className={styles.metaLine}>
             {item.sourceDomain ? <span className={styles.metaItem}>{item.sourceDomain}</span> : null}
-            {showStatus ? <span className={item.status === 'ready' ? `${styles.metaItem} ${styles.metaReady}` : styles.metaItem}>{item.status === 'ready' ? '✓ Gotowe' : STATUS_LABELS[item.status]}</span> : null}
+            {showStatus ? <span className={item.status === 'ready' || item.status === 'published' ? `${styles.metaItem} ${styles.metaReady}` : styles.metaItem}>
+              {item.status === 'ready' || item.status === 'published' ? `✓ ${STATUS_LABELS[item.status]}` : STATUS_LABELS[item.status]}
+            </span> : null}
             {isUrgent ? (
               <span className={`${styles.metaItem} ${styles.metaUrgent}`}>Pilne</span>
             ) : item.elapsedLabel ? (
@@ -230,14 +239,14 @@ function ReelRow({
               <span
                 className={`${styles.metaItem} ${item.verificationState === 'verified' ? styles.metaVerified : item.verificationState === 'outdated' ? styles.metaOutdated : ''}`}
               >
-                {item.verificationState === 'verified' ? 'Zweryfikowano' : item.verificationState === 'outdated' ? 'Nieaktualne' : 'Nie sprawdzone'}
+                {item.verificationState === 'verified' ? '✓ Zweryfikowano' : item.verificationState === 'outdated' ? '◷ Sprawdź ponownie' : 'Nie sprawdzone'}
               </span>
             ) : null}
             {item.planLabel ? (
               <span className={`${styles.metaItem} ${styles.metaPlan}`}>{item.planLabel}</span>
             ) : null}
             {item.programmeState === 'matched' ? (
-              <span className={`${styles.metaItem} ${styles.metaProgramme}`}>Program</span>
+              <span className={`${styles.metaItem} ${styles.metaProgramme}`}>✓ Program</span>
             ) : null}
             {item.memeName ? (
               <span className={`${styles.metaItem} ${styles.metaMeme}`}>{item.memeName}</span>
@@ -250,6 +259,18 @@ function ReelRow({
           </span>
         ) : null}
       </button>
+      {/* UI-02: a quiet, always-visible route to the same quick actions; gestures stay shortcuts. */}
+      {gesturesEnabled && offset === 0 ? (
+        <button
+          type="button"
+          className={styles.rowMore}
+          aria-label={`${COPY.quickActionsHeading}: ${item.title}`}
+          aria-haspopup="dialog"
+          onClick={() => quickActions?.onOpenSheet(item.id)}
+        >
+          <OverflowIcon />
+        </button>
+      ) : null}
     </li>
   );
 }

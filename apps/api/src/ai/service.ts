@@ -97,13 +97,18 @@ function visibleSnapshot(snapshot: InternalSnapshot): AiInputSnapshot {
   };
 }
 
+const groundedPublication = (snapshot: AiInputSnapshot) =>
+  snapshot.publicationContextVersion === 2 || snapshot.publicationContextVersion === 3;
+
 function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | null }, action: AiAction): unknown {
   const hooks = snapshot.hooks.map(({ id, text, source, position }) => ({ id, text, source, position }));
   // PUBLICATION-01 runs remain script-only. New PUBLICATION-02 runs also depend on the
   // selected hook and exact eligible saved text. Publication target fields are guarded per
   // apply by replaceCurrentValue, so editing either target does not stale the proposal.
   if (action === 'generate_publication') {
-    if (snapshot.publicationContextVersion !== 2) return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
+    // v3 reads the same textual context plus the immutable original URL and capture images, so
+    // its freshness is exactly v2's. Search results are evidence, not inputs.
+    if (!groundedPublication(snapshot)) return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
     const selectedHook = snapshot.hooks.find((hook) => hook.id === snapshot.selectedHookId);
     return {
       script: snapshot.script, scriptRevision: snapshot.scriptRevision,
@@ -250,7 +255,7 @@ export class AiService {
       const snapshot: InternalSnapshot = {
         reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput,
         script: reel.script, scriptRevision: reel.scriptRevision,
-        ...(publication ? { publicationContextVersion: 2 as const } : {}),
+        ...(publication ? { publicationContextVersion: 3 as const } : {}),
         hooks: reel.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
         // Read in this same locked transaction, so it always names one of the hooks above.
         selectedHookId: reel.selectedHookId,
@@ -265,11 +270,14 @@ export class AiService {
         // each candidate carries its own version, because there is no single answer.
         programmeDocumentVersionId: release?.documentVersionIds.length === 1 ? release.documentVersionIds[0] : null,
         programmeReleaseId: release?.releaseId ?? null,
-        // The publication action never reads images, so it snapshots none.
-        programmeEvidence, imageObjects: publication ? [] : images.rows.map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
+        // Publication (v3) reads only completed, validated capture images and never waits for
+        // or fails on an incomplete upload: an image is optional grounding there.
+        programmeEvidence, imageObjects: images.rows
+          .filter((image) => !publication || (image.state === 'ready' && image.storageKey && image.validated_mime_type && image.validated_at))
+          .map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
       };
       const id = randomUUID();
-      const promptId = publication ? 'gemini-02-publication-provisional-v2' : PROMPT_ID;
+      const promptId = publication ? 'gemini-02-publication-provisional-v3' : PROMPT_ID;
       await tx.query(
         `insert into app.ai_runs (id,reel_id,requested_by,action,input_snapshot,input_hash,model,prompt_id,prompt_stage)
          values ($1,$2,$3,$4,$5,$6,$7,$8,'development_provisional')`,
@@ -335,7 +343,7 @@ export class AiService {
             : input.hooks.map((hook) => hook.id === live.selected_hook_id ? { ...hook, text: live.selected_hook_text ?? '' } : hook),
         };
         const changedContext = live.script !== input.script || live.script_revision !== input.scriptRevision ||
-          (input.publicationContextVersion === 2 && hash(relevant(input, 'generate_publication')) !== hash(relevant(publicationLive, 'generate_publication')));
+          (groundedPublication(input) && hash(relevant(input, 'generate_publication')) !== hash(relevant(publicationLive, 'generate_publication')));
         if (changedContext) throw stale('STALE_PUBLICATION_RESULT');
         const description = body.selection === 'publication_description';
         if (body.confirmReplacement !== true || typeof body.replaceCurrentValue !== 'string') {

@@ -137,6 +137,8 @@ export const COPY = {
   verificationUnverified: '○ Nie sprawdzone',
   verificationMarkVerified: 'Oznacz jako sprawdzony',
   verificationOutdated: '◷ Nieaktualne',
+  /** UI-02 attention wording for a stale verification: distinct from verified and from failed. */
+  verificationRecheck: 'Eksport zmieniony · Sprawdź ponownie',
   verificationMarkNewVerified: 'Oznacz nowy eksport jako sprawdzony',
 
   /** sec. 7 */
@@ -281,6 +283,8 @@ export interface SourcesSectionProps {
   onChangeInputNote: (value: string) => void;
   inputNoteSaveState: SaveState;
   inputNoteConflict?: ConflictRecoveryView;
+  /** UI-02: a deleted Reel shows its sources without an editable note. */
+  readOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +425,7 @@ export interface ReelListItemView {
  * Only one row's surface is open at a time; opening another closes the previous one — this
  * is state, not merely visual, because it is what "closes on view change" observably means.
  */
-export type ListQuickActionsView = 'sheet' | 'status' | 'assign' | null;
+export type ListQuickActionsView = 'sheet' | 'status' | 'assign' | 'radial' | null;
 
 export interface ReelUndoView {
   message: string;
@@ -435,6 +439,13 @@ export interface ReelQuickActionsProps {
   openReelId: Id | null;
   open: ListQuickActionsView;
   onOpenSheet: (id: Id) => void;
+  /**
+   * UI-02: a touch long-press opens the small radial menu at the touch point instead of the
+   * sheet. Optional — without it a long-press keeps opening the sheet. `radialAnchor` is the
+   * viewport point it opened at, set only while `open === 'radial'`.
+   */
+  onOpenRadial?: (id: Id, anchor: { x: number; y: number }) => void;
+  radialAnchor?: { x: number; y: number } | null;
   /** The ambiguous-successor case ("never guess"), and the sheet's own `Zmień status` item. */
   onOpenStatus: (id: Id) => void;
   onOpenAssign: (id: Id) => void;
@@ -631,8 +642,16 @@ export interface ReelDetailScreenProps {
   sourceDomain?: string;
 
   metadata: ReelDetailMetadataView;
-  /** One phase-relevant shortcut to existing work; never changes status by itself. */
-  contextAction?: { label: string; onClick: () => void };
+  /**
+   * One phase-relevant shortcut to existing work; never changes status by itself. UI-02: chosen
+   * by `detailPrimaryAction` (data/detail-actions.ts); `tone` is its semantic colour role.
+   */
+  contextAction?: { label: string; onClick: () => void; tone?: 'primary' | 'attention' | 'quiet' };
+  /**
+   * UI-02: a deleted Reel is read-only. Restore is the context action; editing, generation, hook
+   * and meme controls are not rendered at all rather than shown as available.
+   */
+  readOnly?: boolean;
   /**
    * CONTENT-PLANNER-01 `Zaplanuj publikację`: the Reel's one plan, read from the Reel itself.
    * `label` is null when unplanned. Optional so fixtures without planning still render.
@@ -643,7 +662,10 @@ export interface ReelDetailScreenProps {
   overflow: ReelOverflowProps;
   onOpenFeedCover: () => void;
 
-  /** Present only when this Reel is soft-deleted; offers `Przywróć rolkę`. */
+  /**
+   * Present only when this Reel is soft-deleted. UI-02: `Przywróć rolkę` is then the primary
+   * context action; the banner only explains the state and reports the restore's progress.
+   */
   restore?: RestoreBannerProps;
 
   hooks: HookView[];
@@ -723,6 +745,8 @@ export interface PublicationSectionProps {
   plan?: { label: string | null; onOpen: () => void };
   isPublished?: boolean;
   isReady?: boolean;
+  /** UI-02: a deleted Reel shows its copy without edit, generate or copy-as-action emphasis. */
+  readOnly?: boolean;
 
   /**
    * `Wygeneruj opis` (PUBLICATION-01): opens the publication proposal view generated from the

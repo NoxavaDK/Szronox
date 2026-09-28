@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { DragEvent as ReactDragEvent, ReactNode } from 'react';
 import '../ui/tokens.css';
 import type { Reel } from '../../../../packages/contracts/src/index.js';
-import { SLOT_LABELS, groupPlanner, planOf, weekRangeLabel } from '../data/planner.js';
+import { SLOT_LABELS, groupPlanner, planOf, unscheduledEmptyLabel, weekRangeLabel } from '../data/planner.js';
 import { reelLabel } from '../data/reel-label.js';
 import { STATUS_LABELS } from '../ui/screen-contracts.js';
 import { CoverIndicator, StatusBanner } from '../ui/primitives.js';
@@ -148,7 +148,7 @@ export function PlannerPane(props: PlannerPaneProps) {
             {groups.unscheduled.length > 0 ? (
               <ul className={styles.cards}>{groups.unscheduled.map(card)}</ul>
             ) : (
-              <p className={styles.emptyDay}>Wszystko w produkcji ma termin.</p>
+              <p className={styles.emptyDay}>{unscheduledEmptyLabel(reels)}</p>
             )}
           </div>
         </>

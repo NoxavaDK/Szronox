@@ -91,8 +91,11 @@ interface GestureRefState {
 
 export interface RowGestureOptions {
   disabled?: boolean;
-  /** Stationary hold: open the quick-actions sheet for this row. */
-  onLongPress: () => void;
+  /**
+   * Stationary hold. UI-02: reports where and with what it happened, so a touch long-press can
+   * open the radial menu at the finger while mouse/pen keep opening the sheet.
+   */
+  onLongPress: (hold: { x: number; y: number; pointerType: string }) => void;
   /** A horizontal swipe was released past the open threshold. */
   onSwipeOpen: (direction: SwipeDirection) => void;
   /** Maximum px the row may translate while revealing either side. */
@@ -144,6 +147,7 @@ export function useRowGesture({ disabled, onLongPress, onSwipeOpen, maxReveal = 
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     ref.current.startX = event.clientX;
     ref.current.startY = event.clientY;
+    const hold = { x: event.clientX, y: event.clientY, pointerType: event.pointerType };
     ref.current.axis = 'undetermined';
     ref.current.pointerId = event.pointerId;
     ref.current.suppressClick = false;
@@ -153,7 +157,7 @@ export function useRowGesture({ disabled, onLongPress, onSwipeOpen, maxReveal = 
       ref.current.suppressClick = true;
       // Progressive enhancement only: devices/browsers without vibration simply do nothing.
       navigator.vibrate?.(10);
-      onLongPress();
+      onLongPress(hold);
       reset();
     }, thresholds.longPressMs);
   }, [clearTimer, disabled, onLongPress, reset, thresholds.longPressMs]);

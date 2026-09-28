@@ -28,7 +28,7 @@ import {
   type ReelOverflowProps,
   type SourcesSectionProps,
 } from './screen-contracts.js';
-import { Avatar, PriorityGlyph, TextAction } from './primitives.js';
+import { ActionButton, Avatar, PriorityGlyph, TextAction } from './primitives.js';
 import { CheckIcon, ChevronRightIcon, ExternalLinkIcon, WarningIcon } from './icons.js';
 import styles from './detail-sections.module.css';
 
@@ -224,7 +224,7 @@ export function SourcesSection(props: SourcesSectionProps) {
   const {
     expanded, onToggle, summary, originalUrl, originalText, additionalText,
     attachments, onOpenAttachment, inputNote, onChangeInputNote,
-    inputNoteSaveState, inputNoteConflict, onOpenSource,
+    inputNoteSaveState, inputNoteConflict, onOpenSource, readOnly,
   } = props;
 
   return (
@@ -287,6 +287,7 @@ export function SourcesSection(props: SourcesSectionProps) {
               aria-label={COPY.inputNoteHeading}
               value={inputNote}
               rows={3}
+              readOnly={readOnly}
               onChange={(event) => onChangeInputNote(event.target.value)}
             />
             <SaveHint state={inputNoteSaveState} />
@@ -346,14 +347,14 @@ function VerificationRow(
         </div>
       ) : null}
       {verification.kind === 'verified' ? (
-        <p className={styles.verified}>{verifiedByLabel(verification.verifierName)}</p>
+        <p className={styles.verified}><CheckIcon size={14} aria-hidden="true" /> Zweryfikowano · {verifiedByLabel(verification.verifierName).replace(/^✓\s*/, '')}</p>
       ) : null}
       {verification.kind === 'outdated' ? (
         <div className={styles.outdated}>
-          <span>{COPY.verificationOutdated}</span>
+          <span className={styles.outdatedLabel}><WarningIcon size={14} aria-hidden="true" /> {COPY.verificationRecheck}</span>
           <p className={styles.quiet}>{previousExportVerifiedBy(verification.previousVerifierName)}</p>
           {verification.canVerifyNewRevision ? (
-            <TextAction onClick={onMarkVerified}>{COPY.verificationMarkNewVerified}</TextAction>
+            <span data-materials-verify><TextAction onClick={onMarkVerified}>{COPY.verificationMarkNewVerified}</TextAction></span>
           ) : null}
         </div>
       ) : null}
@@ -439,7 +440,7 @@ export function ReelOverflow(props: ReelOverflowProps) {
       {open && !confirmingDelete ? (
         <div className={styles.sheetBackdrop} onClick={onDismiss} role="presentation">
           <div className={styles.sheet} role="menu" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className={styles.option} role="menuitem" onClick={onRequestDelete}>
+            <button type="button" className={styles.option} data-tone="danger" role="menuitem" onClick={onRequestDelete}>
               {COPY.deleteReel}
             </button>
           </div>
@@ -452,8 +453,9 @@ export function ReelOverflow(props: ReelOverflowProps) {
             <h2 className={styles.sheetHeading}>{COPY.deleteConfirmTitle}</h2>
             <p className={styles.quiet}>{COPY.deleteConfirmBody}</p>
             <div className={styles.confirmActions}>
-              <TextAction onClick={onCancelDelete}>{COPY.deleteCancel}</TextAction>
-              <TextAction onClick={onConfirmDelete}>{COPY.deleteConfirm}</TextAction>
+              <TextAction onClick={onCancelDelete} tone="quiet">{COPY.deleteCancel}</TextAction>
+              {/* The final destructive step stays red, as it started in the menu. */}
+              <ActionButton tone="danger" onClick={onConfirmDelete}>{COPY.deleteConfirm}</ActionButton>
             </div>
             <SaveHint state={deleteState} />
           </div>
@@ -463,12 +465,15 @@ export function ReelOverflow(props: ReelOverflowProps) {
   );
 }
 
-/** `Przywróć rolkę`, shown when an opened Reel is soft-deleted (sec. 8). */
-export function RestoreBanner({ onRestore, saveState }: RestoreBannerProps) {
+/**
+ * Shown when an opened Reel is soft-deleted (sec. 8). UI-02: `Przywróć rolkę` itself is the
+ * Detail's primary context action, so the banner explains the state rather than repeating it.
+ * `onRestore` stays in the contract for hosts that render the banner alone.
+ */
+export function RestoreBanner({ saveState }: RestoreBannerProps) {
   return (
     <div className={styles.restore} role="status">
-      <span className={styles.quiet}>Ta rolka jest usunięta.</span>
-      <TextAction onClick={onRestore}>{COPY.restoreReel}</TextAction>
+      <span className={styles.restoreText}>Ta rolka jest usunięta. Przywróć ją, aby znów ją edytować.</span>
       <SaveHint state={saveState} />
     </div>
   );

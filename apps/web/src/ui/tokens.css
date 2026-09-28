@@ -19,6 +19,29 @@
   /* Text sits on top of a semantic colour; surfaces stay neutral. */
   --sz-color-on-cobalt: #ffffff;
 
+  /*
+   * UI-02 semantic roles. Components use these, never one-off colours. Four families plus
+   * neutrals; colour always accompanies a label or symbol, never replaces it.
+   *   action   — the next action, the current/selected Reel or hook, active navigation
+   *   complete — genuinely finished: ready, verified, cover done, explicit success
+   *   attention— stale or missing prerequisite, overdue (amber, with wording/icon)
+   *   danger   — delete, destructive confirmation, genuine error, Pilne
+   */
+  --sz-color-action: var(--sz-color-cobalt);
+  --sz-color-action-tint: color-mix(in srgb, var(--sz-color-cobalt) 8%, var(--sz-color-background));
+  --sz-color-complete: var(--sz-color-success);
+  --sz-color-complete-tint: color-mix(in srgb, var(--sz-color-success) 9%, var(--sz-color-background));
+  --sz-color-attention: var(--sz-color-warning);
+  --sz-color-attention-tint: color-mix(in srgb, #c7881a 12%, var(--sz-color-background));
+  --sz-color-danger: var(--sz-color-urgent);
+  --sz-color-danger-tint: color-mix(in srgb, var(--sz-color-urgent) 8%, var(--sz-color-background));
+  /* Reference content (sources): secondary in hierarchy, never faint. ~10:1 on the background. */
+  --sz-color-text-reference: #353532;
+  /* Desktop: the editor reads as the working surface, the navigation pane as its frame. */
+  --sz-color-editor-surface: #fcfcfa;
+  --sz-color-nav-surface: #f2f2ef;
+  --sz-color-pane-rule: #d4d4cf;
+
   --sz-font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --sz-text-screen-title-size: 22px;

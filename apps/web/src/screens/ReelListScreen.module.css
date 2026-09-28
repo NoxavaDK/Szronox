@@ -91,7 +91,7 @@
 }
 
 .rowSelected {
-  background: color-mix(in srgb, var(--sz-color-cobalt) 8%, var(--sz-color-background));
+  background: var(--sz-color-action-tint);
   box-shadow: inset 3px 0 0 var(--sz-color-cobalt);
 }
 
@@ -168,18 +168,19 @@
   font-weight: 650;
 }
 
-.metaReady { color: var(--sz-color-success); font-weight: 650; }
+.metaReady { color: var(--sz-color-complete); font-weight: 650; }
 
 .metaVerified {
   color: var(--sz-color-success);
 }
 
 .metaOutdated {
-  color: var(--sz-color-warning);
+  color: var(--sz-color-attention);
+  font-weight: 600;
 }
 
 .metaProgramme {
-  color: var(--sz-color-programme);
+  color: var(--sz-color-text-secondary);
 }
 
 .metaMeme {
@@ -233,8 +234,10 @@
 /* Beside the title, so the right-hand controls (and the fixed Wyloguj) keep their place. */
 .planLink { margin-left: 0; margin-right: auto; }
 
+/* A planned date is metadata, not an action or a success. */
 .metaPlan {
-  color: var(--sz-color-cobalt);
+  color: var(--sz-color-text-primary);
+  font-weight: 600;
 }
 
 /* As a side pane the list fills its column; the add button stays inside that column. */
@@ -242,3 +245,34 @@
   max-width: none;
   margin: 0;
 }
+
+/* UI-02: Usunięte uses the list's own controls, not browser-default buttons. */
+.headerStart { justify-content: flex-start; gap: var(--sz-space-2); }
+.backButton {
+  appearance: none; border: 0; background: none; width: var(--sz-touch-target); height: var(--sz-touch-target);
+  margin-left: calc(var(--sz-space-2) * -1); display: inline-flex; align-items: center; justify-content: center;
+  color: var(--sz-color-text-primary); cursor: pointer;
+}
+.backButton:focus-visible { outline: 2px solid var(--sz-color-action); outline-offset: 2px; }
+.screenNote { margin: calc(var(--sz-space-2) * -1) 0 var(--sz-space-3); font-size: 13px; color: var(--sz-color-text-secondary); }
+.deletedRow { justify-content: space-between; font: inherit; color: var(--sz-color-text-primary); }
+.deletedAction { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--sz-color-action); }
+.list { list-style: none; margin: 0; padding: 0; }
+.list > li:last-child > .deletedRow { border-bottom: 1px solid var(--sz-color-divider); }
+
+/* UI-02 visible quick-actions affordance, outside the row's own button (no nested buttons). */
+.rowWrapper[data-has-more='true'] .row { padding-right: 44px; }
+.rowMore {
+  appearance: none; position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+  width: 40px; height: var(--sz-touch-target); border: 0; background: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #8a8a85; cursor: pointer; z-index: 1;
+}
+.rowMore:hover { color: var(--sz-color-text-primary); }
+.rowMore:focus-visible { outline: 2px solid var(--sz-color-action); outline-offset: -2px; }
+
+.headerMenu {
+  appearance: none; border: 0; background: none; width: var(--sz-touch-target); height: var(--sz-touch-target);
+  display: inline-flex; align-items: center; justify-content: center; color: var(--sz-color-text-secondary); cursor: pointer;
+}
+.headerMenu:focus-visible { outline: 2px solid var(--sz-color-action); outline-offset: -2px; }

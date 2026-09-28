@@ -78,6 +78,35 @@ export function Button({
   );
 }
 
+/**
+ * UI-02 semantic action button: one component for every emphasised action, so a role always
+ * looks the same. `primary` = filled action colour, `attention` = amber tint with its own
+ * wording, `danger` = filled red (final destructive confirmation), `quiet` = text action.
+ */
+export function ActionButton({
+  children, onClick, tone = 'primary', disabled, className, ariaLabel,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  tone?: 'primary' | 'attention' | 'danger' | 'quiet';
+  disabled?: boolean;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={className ? `${styles.actionButton} ${className}` : styles.actionButton}
+      data-tone={tone}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </button>
+  );
+}
+
 const priorityGlyph: Record<Priority, string> = { urgent: '!', normal: '●', evergreen: '∞' };
 
 /** Passive priority indicator (glyph + label) for metadata clusters and list rows. */
