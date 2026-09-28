@@ -333,6 +333,10 @@ The operator authorized one bounded Luna implementation of the [UX-PUBLICATION-0
 
 The operator explicitly authorized Luna to implement the actionable latest Astra usability notes. [UX-ASTRA-03-dispatch.md](UX-ASTRA-03-dispatch.md) pins the bounded visual corrections, duplicate-Detail investigation and related confirmed Opus navigation/draft/accessibility repairs. It supersedes only the named selection, identity, width, action, summary, color/contrast and supporting-control treatments. Preserve the two-pane default already approved in UX-PUBLICATION-02, slot planner, exact original inputs, explicit hook/AI selection/application and all server invariants. No title fetching, new statuses, migrations, dependency changes, merge or deployment is authorized.
 
+## LIST-FILTER-02 — pipeline default correction (operator, 2026-09-28)
+
+The Rolki Status filter defaults to `Wszystkie`. In that view, `Wszystkie` means all active, unpublished pipeline Reels: `idea`, `to_record`, `editing` and `ready`. It excludes `published`. The explicit `Opublikowane` option remains available and shows published Reels. The other four status options retain their exact filters. This is a list-view rule, not a sixth status or a change to Reel state, deleted-Reel visibility, API list semantics, planner membership or publication history. [LIST-FILTER-02-preparation.md](LIST-FILTER-02-preparation.md) defines the bounded implementation handoff; implementation is not yet dispatched.
+
 ## KDRIVE-01a — kDrive folder API (operator-authorized 2026-09-26)
 
 The operator authorized KDRIVE-01a (API, configuration, tests and DEV deployment). The web wiring (KDRIVE-01b) follows after UX-ASTRA-03 is integrated. The T00 routes are now implemented:

@@ -82,3 +82,7 @@ On 2026-09-26 the user authorized one Luna implementation of the Astra-reviewed 
 ## UX-ASTRA-03 — explicitly approved Luna continuation
 
 The user provided Astra's live DEV usability notes and explicitly approved preparing concrete action points and launching Luna to implement them. Continue the pending UX branch with remaining visual corrections, evidence-led duplicate-Detail investigation and the related confirmed Opus switching/save/accessibility defects. Exact model, file ownership, baseline and acceptance: [UX-ASTRA-03-dispatch.md](UX-ASTRA-03-dispatch.md). Preserve implemented UX-PUBLICATION-02 behavior and accepted API/worker evidence. No merge or deployment.
+
+## LIST-FILTER-02 — prepared, not dispatched
+
+On 2026-09-28 the operator requested that Rolki default to `Wszystkie`, meaning all unpublished pipeline Reels, while `Opublikowane` remains an explicit history filter. The bounded Luna assignment, exact model, dependencies, editable files and acceptance are in [LIST-FILTER-02-preparation.md](LIST-FILTER-02-preparation.md). Preparation only; wait for explicit implementation dispatch under AGENTS.md. No code, worktree, merge or deployment is authorized by this entry.
