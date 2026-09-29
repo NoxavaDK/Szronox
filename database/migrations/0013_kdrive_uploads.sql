@@ -35,6 +35,7 @@ create table app.kdrive_uploads (
   final_name text,
   error jsonb,
   start_operation_id uuid not null unique,
+  start_payload_hash text not null check (start_payload_hash ~ '^[0-9a-f]{64}$'),
   attach_operation_id uuid unique,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

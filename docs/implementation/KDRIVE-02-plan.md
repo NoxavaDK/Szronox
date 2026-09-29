@@ -182,7 +182,8 @@ Confirmed live in `docs/implementation/KDRIVE-02-probe.md`. Build on these; do n
     chunk_hashes text[] not null default '{}', chunk0_sha256 text,
     kdrive_session_token text, kdrive_upload_host text, folder_id text, state text check in
     ('open','finished','attached','cancelled','expired','failed'), kdrive_file_id text,
-    final_name text, error jsonb, created_at, updated_at, operation ids)`.
+    final_name text, error jsonb, start_operation_id uuid unique, start_payload_hash text,
+    attach_operation_id uuid unique, created_at, updated_at)`.
     The session token is provider state, not a user credential; it is never returned to the browser.
   - `app.reels.feed_cover_asset jsonb null`.
   - `app.memes.kdrive_file jsonb null`, `app.memes.kdrive_copy_state text not null default
