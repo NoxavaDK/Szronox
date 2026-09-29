@@ -178,7 +178,8 @@ Confirmed live in `docs/implementation/KDRIVE-02-probe.md`. Build on these; do n
 - Migration `0013_kdrive_uploads.sql`:
   - `app.kdrive_uploads(id uuid pk, reel_id uuid fk, purpose text check in ('video','cover'),
     requested_by uuid, file_name text, mime_type text, byte_size bigint, chunk_size int,
-    total_chunks int, received_chunks int[] not null default '{}', chunk0_sha256 text,
+    total_chunks int, received_chunks int[] not null default '{}',
+    chunk_hashes text[] not null default '{}', chunk0_sha256 text,
     kdrive_session_token text, kdrive_upload_host text, folder_id text, state text check in
     ('open','finished','attached','cancelled','expired','failed'), kdrive_file_id text,
     final_name text, error jsonb, created_at, updated_at, operation ids)`.

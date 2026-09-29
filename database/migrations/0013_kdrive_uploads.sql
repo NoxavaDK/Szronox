@@ -23,6 +23,9 @@ create table app.kdrive_uploads (
   chunk_size integer not null check (chunk_size > 0),
   total_chunks integer not null check (total_chunks > 0),
   received_chunks integer[] not null default '{}',
+  -- One lowercase SHA-256 hex digest per chunk, in chunk-number order. Retained
+  -- across restarts to form kDrive's total_chunk_hash without rereading the file.
+  chunk_hashes text[] not null default '{}',
   chunk0_sha256 text,
   kdrive_session_token text,
   kdrive_upload_host text,
