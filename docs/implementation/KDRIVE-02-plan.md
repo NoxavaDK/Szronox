@@ -79,7 +79,7 @@ live DEV: create one SMOKE meme with a small PNG, attached to a SMOKE Reel, then
   kDrive not configured → state `not_configured`, no outbound call.
 - **Record:** `memes.kdrive_file jsonb null` (`{ driveId, fileId, name, copiedAt }`) plus
   `kdrive_copy_state text`. Nothing in the UI depends on it beyond a quiet `Kopia w kDrive` /
-  `Kopia w kDrive nie powiodła się · Ponów` line in the meme picker row details.
+  `Kopia w kDrive nie powiodła się · Ponów` line in the meme picker row details. `Ponów` explicitly starts a new bounded retry cycle for that meme; it is idempotent on `operationId` and offered only after the prior cycle reaches `failed`.
 - **Existing memes:** a one-off operator CLI `copy-memes-to-kdrive` (idempotent: skips `copied`),
   run on DEV only with approval. Deleting a meme never deletes its kDrive copy.
 - Where the retry runs: the API process (small bounded in-process queue woken on create and every
@@ -212,7 +212,7 @@ Confirmed live in `docs/implementation/KDRIVE-02-probe.md`. Build on these; do n
   turns complete-green) and shows a quiet `Okładka wgrana i oznaczona jako gotowa.`; the toggle can
   still untick it. In Gotowe, the `Brak okładki do feedu` primary action becomes
   `Wgraj okładkę` (opens the picker; combined folder creation when needed).
-- **Meme picker:** after `Zapisz mem`, the row shows the quiet kDrive copy state (§2a).
+- **Meme picker:** after `Zapisz mem`, the row shows the quiet kDrive copy state (§2a); `Ponów` starts one idempotent bounded retry cycle after failure.
 - Leaving/closing while uploading: `beforeunload` warning; the upload survives switching Reels
   inside the app (kept in the controller, keyed by Reel), not a reload.
 - No kDrive folder: the upload button reads `Utwórz folder i wgraj` (one click, explicit);
@@ -233,7 +233,7 @@ Confirmed live in `docs/implementation/KDRIVE-02-probe.md`. Build on these; do n
   `apps/api/src/core/{repository,routes,config,mapping}.ts` (Reel mapping of `feedCoverAsset`, attach
   writes only), `apps/api/src/storage/routes.ts` (MEME-UPLOAD content-type guard only),
   `apps/api/src/app.ts`, `apps/api/src/runtime/api.ts`, `apps/api/src/kdrive*.test.ts`,
-  `apps/api/src/ai/library.ts` (meme create hook for the kDrive copy only), new
+  `apps/api/src/ai/library.ts` (meme create and explicit kDrive copy retry only), new
   `apps/api/src/kdrive/{meme-copy,copy-memes-cli}.ts`,
   `apps/web/src/screens/{MemePicker,PublicationSection}*`, `apps/web/src/ui/detail-sections*`,
   `apps/web/src/ui/screen-contracts.ts`, `apps/web/src/app/App.tsx`,
