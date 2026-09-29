@@ -268,19 +268,18 @@ Web:
   export and stale verification; `Utwórz folder i wgraj` shown only without a folder.
 - one build/typecheck pass; targeted suites; a local Chrome run at 360/390/1100 px with the fake.
 
-### Root review, integration, DEV deployment
+### Root review and local integration
 
-Root reviews the diff and boundaries, runs targeted checks only on concrete risk, merges, applies
-migration 0013 on DEV with backup, and runs `deploy/vps/kdrive-upload-live.mjs`: one SMOKE Reel with
-a folder under `1349`, a ~40 MB generated MP4 (3 chunks) and a small cover image uploaded, attached
-and confirmed through kDrive metadata; a resumed upload after a simulated drop; cancel; the
-token-leak check; the combined folder+upload on a Reel with no folder; the cover auto-tick; SMOKE
-Reel soft-deleted, kDrive test files left in `1349` by design. Also the MEME-UPLOAD live check (§2)
-and its copy appearing as `MEM - …` in `SzroNox Memy` under `1349`.
+Root reviews the bounded diff and boundaries, runs only targeted checks on concrete integration
+risk, and integrates the code locally. The migration and live helper may be prepared, but applying
+migration 0013 to DEV, deploying, calling live kDrive, creating SMOKE records/files, or running
+`deploy/vps/kdrive-upload-live.mjs` are not authorized by this plan; each requires separate operator
+approval.
 
-Open manual gates after deploy: a real phone upload of a real Reel-sized video over mobile data;
-opening the uploaded file from the app as NOXAVA and as SZRON; tab-switch/background behaviour on
-Android.
+Open manual gates after a separately approved DEV deployment: a real phone upload of a Reel-sized
+video over mobile data; opening the uploaded file from the app as NOXAVA and as SZRON; tab-switch and
+background behaviour on Android. The single-file URL also remains unverified; until confirmed in a
+signed-in browser, `Otwórz` opens the Reel folder.
 
 ## 8. Operator decisions (2026-09-29)
 
