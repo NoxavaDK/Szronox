@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Meme, Reel } from '../../../../packages/contracts/src/index.js';
 import type { CoreApiClient } from '../data/api.js';
+import { AttachmentUploader } from '../data/attachments.js';
 import { isAbandonedRequest, polishError } from '../data/errors.js';
 import styles from './MemePicker.module.css';
 
@@ -32,25 +33,25 @@ export function MemePicker({ api, reel, onClose, onReel }:
 
   async function create() {
     if (!file || !name.trim()) { setMessage('Podaj nazwę i wybierz zdjęcie.'); return; }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setMessage('Wybierz zdjęcie JPG, PNG lub WebP.'); return;
+    }
     setBusy(true); setMessage(null);
     try {
       const attachmentId = crypto.randomUUID();
-      const initiated = await api.initiateAttachment(reel.id, {
-        operationId: crypto.randomUUID(), attachmentId, fileName: file.name,
-        mimeType: file.type, byteSize: file.size, purpose: 'material',
+      const uploader = new AttachmentUploader({ api });
+      await uploader.uploadOne({
+        reelId: reel.id,
+        descriptor: { attachmentId, fileName: file.name, mimeType: file.type, byteSize: file.size },
+        blob: file,
+        operations: { initiate: crypto.randomUUID(), complete: crypto.randomUUID() },
       });
-      const transport = new URL(initiated.upload.uploadUrl, location.origin);
-      if (transport.origin !== location.origin) throw new Error('CROSS_ORIGIN_UPLOAD');
-      await api.uploadAttachmentContent(transport.pathname + transport.search, file, {
-        method: initiated.upload.method, headers: initiated.upload.headers,
-      });
-      await api.completeAttachment(reel.id, attachmentId, { operationId: crypto.randomUUID() });
       const current = await api.reel(reel.id);
       const created = await api.createMeme({ operationId: crypto.randomUUID(), name: name.trim(), imageAssetId: attachmentId,
         attachToReel: { reelId: reel.id, expectedVersion: current.version } });
       if (created.reel) onReel(created.reel);
       onClose();
-    } catch (error) { if (!isAbandonedRequest(error)) setMessage(polishError(error)); }
+    } catch (error) { if (!isAbandonedRequest(error)) setMessage(polishError(error) || 'Nie udało się wgrać zdjęcia. Spróbuj ponownie.'); }
     finally { setBusy(false); }
   }
 
@@ -73,7 +74,7 @@ export function MemePicker({ api, reel, onClose, onReel }:
       </div>
       <div className={styles.formActions}>
         <button type="button" className={styles.quietButton} disabled={busy} onClick={() => { setCreating(false); setMessage(null); }}>Anuluj</button>
-        <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void create()}>{busy ? 'Zapisywanie…' : 'Zapisz mem'}</button>
+        <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void create()}>{busy ? 'Wysyłanie…' : 'Zapisz mem'}</button>
       </div>
     </> : <>
       <input aria-label="Szukaj memu" placeholder="Szukaj memu..." value={query} onChange={(event) => setQuery(event.target.value)} />

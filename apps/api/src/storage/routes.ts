@@ -152,6 +152,16 @@ export function registerAttachmentRoutes(
 
   app.put('/api/v1/reels/:id/attachments/:attachmentId/content', {
     bodyLimit: limits.maxByteSize + 1,
+    // Reject the JSON parser path before Fastify consumes binary bytes as UTF-8. A
+    // content-length mismatch in that parser otherwise masks the real client error.
+    preParsing: async (request, reply, payload) => {
+      const contentType = request.headers['content-type'];
+      if (typeof contentType !== 'string' || !/^(?:image\/(?:jpeg|png|webp)|application\/octet-stream)$/i.test(contentType)) {
+        const error = validationError('Upload Content-Type does not match an attachment MIME type', { reason: 'content_type_mismatch' });
+        return reply.code(error.status).send(error.toEnvelope()) as never;
+      }
+      return payload;
+    },
   }, handle(async (request, reply) => {
     const actor = await dependencies.authenticate(request);
     const { id, attachmentId } = request.params as { id: string; attachmentId: string };
@@ -164,6 +174,9 @@ export function registerAttachmentRoutes(
       token,
       now(),
     );
+    if (request.headers['content-type'] !== plan.mimeType) {
+      throw validationError('Upload Content-Type does not match the declared attachment MIME type', { reason: 'content_type_mismatch' });
+    }
     const contentLength = request.headers['content-length'];
     if (contentLength !== undefined && Number(contentLength) !== plan.byteSize) {
       throw validationError('Content-Length does not match the declared attachment size');
