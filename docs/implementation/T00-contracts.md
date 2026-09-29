@@ -335,7 +335,13 @@ The operator explicitly authorized Luna to implement the actionable latest Astra
 
 ## LIST-FILTER-02 — pipeline default correction (operator, 2026-09-28)
 
-The Rolki Status filter defaults to `Wszystkie`. In that view, `Wszystkie` means all active, unpublished pipeline Reels: `idea`, `to_record`, `editing` and `ready`. It excludes `published`. The explicit `Opublikowane` option remains available and shows published Reels. The other four status options retain their exact filters. This is a list-view rule, not a sixth status or a change to Reel state, deleted-Reel visibility, API list semantics, planner membership or publication history. [LIST-FILTER-02-preparation.md](LIST-FILTER-02-preparation.md) defines the bounded implementation handoff; implementation is not yet dispatched.
+The Rolki Status filter defaults to `Wszystkie`. In that view, `Wszystkie` means all active, unpublished pipeline Reels: `idea`, `to_record`, `editing` and `ready`. It excludes `published`. The explicit `Opublikowane` option remains available and shows published Reels. The other four status options retain their exact filters. This is a list-view rule, not a sixth status or a change to Reel state, deleted-Reel visibility, API list semantics, planner membership or publication history. [LIST-FILTER-02-preparation.md](LIST-FILTER-02-preparation.md) defines the bounded implementation handoff, combined with SCRIPT-COPY-01 by explicit operator approval on 2026-09-29.
+
+## SCRIPT-COPY-01 — recording copy (operator, 2026-09-29)
+
+Reel Detail has a compact `Kopiuj skrypt` action beside the `Skrypt` heading, available independently of AI capability. On explicit click, copy the currently visible editable script. Prefix it with the **explicitly selected** hook's current visible text when one exists, separated by exactly two newline characters. If no hook is selected, the selected hook was deleted, or its text is empty, copy the script alone; never infer or auto-select another hook. Use the current inline edit text for that selected hook while its editor is open, and preserve the text inside both parts without rewriting it. An empty/whitespace-only script has no copy action to perform.
+
+Copying has no save, network, AI or status side effect. Report success only after the clipboard write succeeds. On unavailable/failed clipboard access, state the failure in Polish and expose the same composed text for manual selection/copy. Keep feedback attached to the Reel that initiated the action. A read-only published Reel can still be copied. Preserve the existing publication-copy behavior and all selected-hook persistence rules. This change is combined with LIST-FILTER-02 in one bounded Luna implementation; no merge or deployment follows from this approval.
 
 ## KDRIVE-01a — kDrive folder API (operator-authorized 2026-09-26)
 
