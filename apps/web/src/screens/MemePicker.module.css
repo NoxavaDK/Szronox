@@ -11,3 +11,4 @@
 .screen .primaryButton:disabled,.screen .quietButton:disabled{opacity:.5}
 .screen .addNew{font-weight:650;margin-top:8px}
 .empty{color:#636360;font-size:14px;margin:8px 0}
+.copyState{margin:0 0 8px 56px;color:#636360;font-size:12px;line-height:16px}

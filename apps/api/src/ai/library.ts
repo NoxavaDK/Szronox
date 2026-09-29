@@ -5,11 +5,19 @@ import { pgErrorCode, PG_UNIQUE_VIOLATION } from '../db/client.js';
 import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
 import { CoreError, editConflict, idempotencyConflict, internalError, notFound, validationError } from '../core/errors.js';
 import type { CoreDependencies } from '../core/routes.js';
+import { httpKdriveClient } from '../kdrive/client.js';
+import { createMemeCopyService } from '../kdrive/meme-copy.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function uuid(value: unknown): string { if (typeof value !== 'string' || !UUID.test(value)) throw validationError('Expected UUID'); return value; }
 function version(value: unknown): number { if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw validationError('Expected positive version'); return value; }
-function memeResponse(row: { id: string; name: string }) { return { id: row.id, name: row.name, thumbnailRef: `/api/v1/memes/${row.id}/image`, assetRef: `/api/v1/memes/${row.id}/image` }; }
+function memeResponse(row: { id: string; name: string; kdrive_copy_state?: string; kdrive_file?: { driveId?: string; name?: string; fileId?: string } | null }) {
+  const state = row.kdrive_copy_state ?? 'pending';
+  const driveId = typeof row.kdrive_file?.driveId === 'string' ? row.kdrive_file.driveId : null;
+  return { id: row.id, name: row.name, thumbnailRef: `/api/v1/memes/${row.id}/image`, assetRef: `/api/v1/memes/${row.id}/image`,
+    kdriveCopy: { state, ...(state === 'copied' && row.kdrive_file?.name ? { name: row.kdrive_file.name } : {}),
+      ...(state === 'copied' && driveId && row.kdrive_file?.fileId ? { webUrl: `https://ksuite.infomaniak.com/kdrive/app/drive/${encodeURIComponent(driveId)}/files/${encodeURIComponent(row.kdrive_file.fileId)}` } : {}) } };
+}
 
 async function idempotent<T>(db: Database, actor: Actor, operationId: string, route: string, payload: unknown, mutate: (tx: Queryable) => Promise<T>): Promise<T> {
   const replay = async (tx: Queryable): Promise<T | null> => {
@@ -38,6 +46,9 @@ async function idempotent<T>(db: Database, actor: Actor, operationId: string, ro
 
 export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependencies): void {
   const core = new CoreRepository(deps.db);
+  const memeCopies = createMemeCopyService({ db: deps.db, storage: deps.storage, config: deps.kdrive ?? null,
+    folders: deps.kdrive ? httpKdriveClient({ driveId: deps.kdrive.driveId, token: deps.kdrive.token }) : null });
+  memeCopies.startRetryLoop();
   const handle = (body: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>) =>
     async (request: FastifyRequest, reply: FastifyReply) => {
       try { return await body(request, reply); }
@@ -51,8 +62,8 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
   app.get('/api/v1/memes', handle(async (request) => {
     await deps.authenticate(request);
     const query = String((request.query as { q?: string })?.q ?? '').trim().slice(0, 100);
-    const rows = await deps.db.query<{ id: string; name: string }>(
-      `select id,name from app.memes where $1='' or position(lower($1) in lower(name))>0
+    const rows = await deps.db.query<{ id: string; name: string; kdrive_copy_state: string; kdrive_file: { name?: string; fileId?: string; driveId?: string } | null }>(
+      `select id,name,kdrive_copy_state,kdrive_file from app.memes where $1='' or position(lower($1) in lower(name))>0
        order by name,id limit 40`, [query]);
     return { items: rows.rows.map(memeResponse) };
   }));
@@ -97,6 +108,8 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
       }
       return { meme: memeResponse({ id, name }), reel: reelId ? await core.loadReel(tx, reelId) : null };
     });
+    void memeCopies.enqueue(result.meme.id).catch(() => undefined);
+    if (!deps.kdrive) result.meme.kdriveCopy = { state: 'not_configured' };
     return reply.code(201).send(result);
   }));
 

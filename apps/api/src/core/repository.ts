@@ -63,7 +63,7 @@ const REEL_COLUMNS = `
   script_revision, editor_id, selected_hook_id, current_export, verification, programme_state, programme_attachment,
   programme_input_hash, programme_document_version_id, kdrive_folder, editing_started_at,
   published_at, publication_urls, publication_description, publication_hashtags,
-  feed_cover_done, created_by, created_at, updated_at, deleted_at,
+  feed_cover_done, feed_cover_asset, created_by, created_at, updated_at, deleted_at,
   to_char(planned_publication_date, 'YYYY-MM-DD') as planned_publication_date,
   planned_publication_slot
 `;
@@ -780,6 +780,57 @@ export class CoreRepository {
       const row = updated.rows[0];
       if (!row) throw editConflict(before.version);
       return result(await this.assemble(tx, row));
+    });
+  }
+
+  /** Atomic finish-file attachment used by KDRIVE-02. The provider file is never deleted on conflict. */
+  async attachKdriveFile(actor: Actor, reelId: string, request: {
+    operationId: string; expectedVersion: number; uploadId: string; purpose: 'video' | 'cover';
+    driveId: string; fileId: string; name: string; byteSize: number; url: string;
+  }): Promise<Reel> {
+    const route = `POST /reels/${reelId}/kdrive-uploads/${request.uploadId}/attach`;
+    return this.idempotent(actor, request.operationId, route, request, async (tx) => {
+      const upload = await tx.query<{ requested_by: string; purpose: string; state: string; kdrive_file_id: string; final_name: string | null; byte_size: string | number }>(
+        'select requested_by,purpose,state,kdrive_file_id,final_name,byte_size from app.kdrive_uploads where id=$1 and reel_id=$2 for update',
+        [request.uploadId, reelId],
+      );
+      const completed = upload.rows[0];
+      if (!completed) throw notFound('Finished kDrive upload not found');
+      if (completed.requested_by !== actor.id) throw forbidden('Upload belongs to another user');
+      if (completed.purpose !== request.purpose || completed.kdrive_file_id !== request.fileId
+          || completed.final_name !== request.name || Number(completed.byte_size) !== request.byteSize) throw validationError('Upload metadata changed before attachment');
+      const before = await this.loadReel(tx, reelId);
+      if (completed.state === 'attached') return before;
+      if (completed.state !== 'finished') throw validationError('Upload is not finished', { reason: 'upload_not_open' });
+      if (before.version !== request.expectedVersion) throw editConflict(before.version);
+      const asset = { driveId: request.driveId, fileId: request.fileId, name: request.name, byteSize: request.byteSize,
+        uploadedAt: new Date().toISOString(), uploadedBy: actor.id };
+      if (request.purpose === 'cover') {
+        const updated = await tx.query<ReelRow>(
+          `update app.reels set feed_cover_asset=$1, feed_cover_done=true, version=version+1, updated_at=now()
+           where id=$2 and version=$3 and deleted_at is null returning ${REEL_COLUMNS}`,
+          [JSON.stringify(asset), reelId, request.expectedVersion],
+        );
+        if (!updated.rows[0]) throw editConflict(before.version);
+        const attached = await tx.query(`update app.kdrive_uploads set state='attached',attach_operation_id=$1,updated_at=now()
+          where id=$2 and reel_id=$3 and purpose='cover' and state='finished'`,
+        [request.operationId, request.uploadId, reelId]);
+        if (attached.rowCount !== 1) throw validationError('Upload is not available for attachment', { reason: 'upload_not_open' });
+        return this.assemble(tx, updated.rows[0]);
+      }
+      const revision = (before.currentExport?.revision ?? 0) + 1;
+      const currentExport: ExportReference = { url: request.url, label: request.name, driveId: request.driveId, fileId: request.fileId, revision };
+      const updated = await tx.query<ReelRow>(
+        `update app.reels set current_export=$1,version=version+1,updated_at=now()
+         where id=$2 and version=$3 and deleted_at is null returning ${REEL_COLUMNS}`,
+        [JSON.stringify(currentExport), reelId, request.expectedVersion],
+      );
+      if (!updated.rows[0]) throw editConflict(before.version);
+      const attached = await tx.query(`update app.kdrive_uploads set state='attached',attach_operation_id=$1,updated_at=now()
+        where id=$2 and reel_id=$3 and purpose='video' and state='finished'`,
+      [request.operationId, request.uploadId, reelId]);
+      if (attached.rowCount !== 1) throw validationError('Upload is not available for attachment', { reason: 'upload_not_open' });
+      return this.assemble(tx, updated.rows[0]);
     });
   }
 

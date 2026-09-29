@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CaptureImageDescriptor, Reel, ReelPatchRequest, ReelStatus, User } from '../../../../packages/contracts/src/index.js';
+import type { CaptureImageDescriptor, KdriveUploadPurpose, KdriveUploadState, Reel, ReelPatchRequest, ReelStatus, User } from '../../../../packages/contracts/src/index.js';
 import type { AuthStatus, BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
 import type { AttachmentRecovery, AttachmentProgress } from '../data/attachment-recovery.js';
 import { ClientApiError, isAbandonedRequest, polishError } from '../data/errors.js';
 import { composePublicationText } from '../data/publication.js';
+import { uploadKdriveFile, uploadPercent, type KdriveUploadProgress } from '../data/kdrive-upload.js';
 import { planChanges, type PublicationSlot } from '../data/planner.js';
 import type { CaptureDraft, DraftStore, ReelDraft } from '../drafts/store.js';
 import { createRequestFromDraft } from '../drafts/create-request.js';
@@ -56,6 +57,11 @@ export interface CaptureForm {
   detectedKind: 'image' | 'url' | 'text' | null;
 }
 
+export interface KdriveUploadJob {
+  reelId: string; purpose: KdriveUploadPurpose; file: File | null; fileName: string; uploadId: string | null;
+  completedBytes: number; totalBytes: number; phase: KdriveUploadProgress['phase'] | 'error' | 'done'; error: string | null; percent: number; finished: boolean;
+}
+
 /** What the share actually carried, for the detected-type chip. */
 function detectedKindOf(input: CaptureDraft['input']): 'image' | 'url' | 'text' {
   if (input.images.length > 0) return 'image';
@@ -89,6 +95,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'offline' | 'conflict' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [capture, setCapture] = useState<CaptureForm | null>(null);
+  const [kdriveUploadJobs, setKdriveUploadJobs] = useState<Record<string, KdriveUploadJob>>({});
+  const kdriveUploadControllers = useRef(new Map<string, AbortController>());
   const [deleted, setDeleted] = useState<Reel[]>([]);
   const [conflictsByReel, setConflictsByReel] = useState<Record<string, ConflictState>>({});
   const conflict = current ? conflictsByReel[current.id] ?? null : null;
@@ -130,6 +138,92 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, []);
   useEffect(() => { currentRef.current = current; }, [current]);
   useEffect(() => { hookEditsRef.current = hookEdits; }, [hookEdits]);
+
+  useEffect(() => {
+    if (route.name !== 'detail') return;
+    let live = true;
+    void api.openKdriveUploads(route.reelId).then((items) => {
+      if (!live) return;
+      setKdriveUploadJobs((old) => {
+        const next = { ...old };
+        for (const item of items) if (!next[route.reelId]) next[route.reelId] = {
+          reelId: route.reelId, purpose: item.purpose, file: null, fileName: item.fileName, uploadId: item.uploadId,
+          completedBytes: item.receivedChunks.reduce((sum, index) => sum + Math.min(item.chunkSize, item.byteSize - index * item.chunkSize), 0),
+          totalBytes: item.byteSize, phase: 'error', error: 'Wysyłanie przerwane — wybierz ten sam plik, aby wznowić.',
+          percent: Math.floor(item.receivedChunks.length / item.totalChunks * 100), finished: false,
+        };
+        return next;
+      });
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [api, route]);
+
+  useEffect(() => {
+    const active = Object.values(kdriveUploadJobs).some((job) => ['uploading', 'finishing', 'attaching'].includes(job.phase));
+    if (!active) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [kdriveUploadJobs]);
+
+  const startKdriveUpload = useCallback(async (reelId: string, purpose: KdriveUploadPurpose, file: File, createFolder: boolean) => {
+    const reel = currentRef.current?.id === reelId ? currentRef.current : reels.find((item) => item.id === reelId);
+    if (!reel || kdriveUploadControllers.current.has(reelId)) return;
+    const supported = purpose === 'video' ? ['video/mp4', 'video/quicktime'] : ['image/jpeg', 'image/png', 'image/webp'];
+    const maxBytes = purpose === 'video' ? 4 * 1024 * 1024 * 1024 : 25 * 1024 * 1024;
+    if (!file.size || !supported.includes(file.type)) { setMessage(purpose === 'video' ? 'Wybierz plik MP4 lub QuickTime.' : 'Wybierz zdjęcie JPG, PNG lub WebP.'); return; }
+    if (file.size > maxBytes) { setMessage(purpose === 'video' ? 'Wideo przekracza limit 4 GiB.' : 'Okładka przekracza limit 25 MiB.'); return; }
+    const controller = new AbortController(); kdriveUploadControllers.current.set(reelId, controller);
+    setKdriveUploadJobs((old) => ({ ...old, [reelId]: { reelId, purpose, file, fileName: file.name, uploadId: null, completedBytes: 0, totalBytes: file.size, phase: 'uploading', error: null, percent: 0, finished: false } }));
+    let wakeLock: { release(): Promise<void> } | null = null;
+    if (purpose === 'video') {
+      try { wakeLock = await (navigator as Navigator & { wakeLock?: { request(type: 'screen'): Promise<{ release(): Promise<void> }> } }).wakeLock?.request('screen') ?? null; } catch { /* unavailable or denied */ }
+    }
+    try {
+      const open = await api.openKdriveUploads(reelId);
+      const matching = open.find((item) => item.purpose === purpose && item.fileName === file.name && item.byteSize === file.size && item.mimeType === file.type);
+      if (open.some((item) => item.purpose === purpose) && !matching) throw new Error('Wysyłanie przerwane — wybierz ten sam plik, aby wznowić albo anuluj wysyłanie.');
+      const saved = await uploadKdriveFile({ api, reel, purpose, file, createFolder, existing: matching, signal: controller.signal,
+        onProgress(progress) { setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], uploadId: progress.uploadId, completedBytes: progress.completedBytes, totalBytes: progress.totalBytes, phase: progress.phase, percent: uploadPercent(progress), error: null, finished: old[reelId]?.finished === true || progress.phase === 'attaching' } })); },
+      });
+      setReels((old) => old.map((item) => item.id === saved.id ? saved : item));
+      setPlanReels((old) => old.map((item) => item.id === saved.id ? saved : item));
+      if (currentRef.current?.id === saved.id) { currentRef.current = saved; setCurrent(saved); }
+      setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'done', percent: 100, completedBytes: file.size, error: null } }));
+      setMessage(purpose === 'cover' ? 'Okładka wgrana i oznaczona jako gotowa.' : 'Eksport wgrany. Sprawdź ponownie.');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const reason = error instanceof ClientApiError ? error.api.details?.reason : undefined;
+      const text = reason === 'kdrive_not_configured' ? 'Integracja kDrive nie jest skonfigurowana na tym serwerze.'
+        : reason === 'folder_required' ? 'Utwórz folder i wgraj plik.'
+          : reason === 'folder_missing' || reason === 'folder_unavailable' ? 'Połącz ponownie folder kDrive przed wysłaniem pliku.'
+            : error instanceof ClientApiError ? polishError(error) : error instanceof Error ? error.message : polishError(error);
+      setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'error', error: text || 'Nie udało się wgrać pliku. Spróbuj ponownie.' } }));
+    } finally { kdriveUploadControllers.current.delete(reelId); await wakeLock?.release().catch(() => undefined); }
+  }, [api, reels]);
+
+  const cancelKdriveUpload = useCallback(async (reelId: string) => {
+    const job = kdriveUploadJobs[reelId];
+    kdriveUploadControllers.current.get(reelId)?.abort();
+    if (job?.uploadId) await api.cancelKdriveUpload(job.uploadId).catch(() => undefined);
+    setKdriveUploadJobs((old) => { const next = { ...old }; delete next[reelId]; return next; });
+  }, [api, kdriveUploadJobs]);
+
+  const retryKdriveAttach = useCallback(async (reelId: string) => {
+    const job = kdriveUploadJobs[reelId]; const reel = currentRef.current?.id === reelId ? currentRef.current : reels.find((item) => item.id === reelId);
+    if (!job?.uploadId || !reel) return;
+    setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'attaching', error: null, finished: true } }));
+    try {
+      const saved = await api.attachKdriveUpload(job.uploadId, { operationId: crypto.randomUUID(), expectedVersion: reel.version });
+      setReels((old) => old.map((item) => item.id === saved.id ? saved : item)); setPlanReels((old) => old.map((item) => item.id === saved.id ? saved : item));
+      if (currentRef.current?.id === saved.id) { currentRef.current = saved; setCurrent(saved); }
+      setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'done', percent: 100, error: null } }));
+      setMessage(job.purpose === 'cover' ? 'Okładka wgrana i oznaczona jako gotowa.' : 'Eksport wgrany. Sprawdź ponownie.');
+    } catch (error) {
+      const message = error instanceof ClientApiError ? polishError(error) : polishError(error);
+      setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'error', error: message } }));
+    }
+  }, [api, kdriveUploadJobs, reels]);
 
   /**
    * Report attachment progress.
@@ -990,6 +1084,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * key is the account id.
    */
   const clearAccountView = useCallback(() => {
+    for (const controller of kdriveUploadControllers.current.values()) controller.abort();
+    kdriveUploadControllers.current.clear(); setKdriveUploadJobs({});
     for (const timer of saveTimers.current.values()) window.clearTimeout(timer);
     saveTimers.current.clear();
     pendingPatches.current.clear();
@@ -1057,5 +1153,5 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
     patchReelById, removeReelById, copyReelLink, hasUnsavedChanges,
-    layout, setLayout, planReels, planLoadState, loadPlanner, scheduleReel };
+    layout, setLayout, planReels, planLoadState, loadPlanner, scheduleReel, kdriveUploadJobs, startKdriveUpload, cancelKdriveUpload, retryKdriveAttach };
 }

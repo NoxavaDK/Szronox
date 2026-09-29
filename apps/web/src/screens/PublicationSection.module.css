@@ -50,6 +50,9 @@
   margin-left: auto;
 }
 
+.uploadStatus { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sz-space-2); color: var(--sz-color-text-secondary); font-size: 13px; }
+.uploadStatus progress { flex: 1 1 120px; min-width: 120px; height: 6px; accent-color: var(--sz-color-cobalt); }
+
 .planRow {
   appearance: none; display: flex; align-items: center; gap: var(--sz-space-2);
   min-height: 44px; width: 100%; padding: 0; border: 0; border-top: 1px solid var(--sz-color-divider);

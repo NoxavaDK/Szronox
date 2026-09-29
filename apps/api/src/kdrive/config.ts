@@ -20,10 +20,12 @@ export interface KdriveEnv {
   KDRIVE_DRIVE_ID?: string;
   KDRIVE_ROOT_FOLDER_ID?: string;
   KDRIVE_TOKEN_FILE?: string;
+  KDRIVE_MEME_FOLDER_ID?: string;
 }
 
 export interface KdriveConfig extends KdriveSettings {
   token: string;
+  memeFolderId?: string | null;
 }
 
 export class KdriveConfigError extends Error {
@@ -55,5 +57,7 @@ export function parseKdriveConfig(env: KdriveEnv, readSecret: (path: string) => 
     throw new KdriveConfigError(`KDRIVE_TOKEN_FILE could not be read: ${env.KDRIVE_TOKEN_FILE!.trim()}`);
   }
   if (token === '' || /\s/.test(token)) throw new KdriveConfigError('KDRIVE_TOKEN_FILE must contain exactly one token');
-  return { driveId, rootFolderId, token };
+  const memeFolderId = present(env.KDRIVE_MEME_FOLDER_ID) ? env.KDRIVE_MEME_FOLDER_ID.trim() : null;
+  if (memeFolderId !== null && !NUMERIC_ID.test(memeFolderId)) throw new KdriveConfigError('KDRIVE_MEME_FOLDER_ID must be a numeric id');
+  return { driveId, rootFolderId, token, memeFolderId };
 }

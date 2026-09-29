@@ -4,7 +4,8 @@ import type {
   ErrorResponse, InitiateAttachmentRequest, InitiateAttachmentResponse, Reel, ReelListQuery,
   ReelPatchRequest, RemoveHookRequest, RenewAttachmentUploadResponse, ReplaceExportRequest,
   SelectHookRequest, SelectHookResponse, KdriveFolderRequest, KdriveFolderResponse, KdriveFolderState,
-  UploadTransport, User, VerifyExportRequest,
+  UploadTransport, User, VerifyExportRequest, KdriveUploadStartRequest, KdriveUploadStartResponse,
+  KdriveUploadState, AttachKdriveUploadRequest,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
 
@@ -132,6 +133,12 @@ export class CoreApiClient {
   /** KDRIVE-01: resolve the stored folder, or explicitly create/link one. */
   kdriveFolder = (id: string) => this.request<KdriveFolderState>(`/reels/${encodeURIComponent(id)}/kdrive-folder`);
   commandKdriveFolder = (id: string, body: KdriveFolderRequest) => this.request<KdriveFolderResponse>(`/reels/${encodeURIComponent(id)}/kdrive-folder`, { method: 'POST', body: JSON.stringify(body) });
+  startKdriveUpload = (id: string, body: KdriveUploadStartRequest) => this.request<KdriveUploadStartResponse>(`/reels/${encodeURIComponent(id)}/kdrive-uploads`, { method: 'POST', body: JSON.stringify(body) });
+  openKdriveUploads = (id: string) => this.request<KdriveUploadState[]>(`/reels/${encodeURIComponent(id)}/kdrive-uploads?state=open`);
+  sendKdriveChunk = (uploadId: string, index: number, bytes: Blob, signal?: AbortSignal) => this.request<void>(`/kdrive-uploads/${encodeURIComponent(uploadId)}/chunks/${index}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes, ...(signal ? { signal } : {}) });
+  finishKdriveUpload = (uploadId: string) => this.request<KdriveUploadState>(`/kdrive-uploads/${encodeURIComponent(uploadId)}/finish`, { method: 'POST', body: JSON.stringify({}) });
+  attachKdriveUpload = (uploadId: string, body: AttachKdriveUploadRequest) => this.request<Reel>(`/kdrive-uploads/${encodeURIComponent(uploadId)}/attach`, { method: 'POST', body: JSON.stringify(body) });
+  cancelKdriveUpload = (uploadId: string) => this.request<void>(`/kdrive-uploads/${encodeURIComponent(uploadId)}`, { method: 'DELETE' });
 
   aiCapabilities = () => this.request<{ enabled: boolean; programmeIndexed: boolean }>('/ai/capabilities');
   startAi = (id: string, body: StartAiRunRequest) => this.request<{ id: string; state: 'queued' }>(`/reels/${id}/ai-runs`, { method: 'POST', body: JSON.stringify(body) });

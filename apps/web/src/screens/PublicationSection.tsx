@@ -13,6 +13,7 @@ import styles from './PublicationSection.module.css';
 export function PublicationSection(props: PublicationSectionProps) {
   const {
     feedCoverDone, hasFeedCoverAsset, onToggleFeedCoverDone, onAddOrChangeFeedCoverAsset, onOpenFeedCoverAsset,
+    kdriveEnabled = true, createFolderForCover = false, uploadJob, onCancelUpload, onRetryUpload,
     description, onChangeDescription,
     hashtags, onChangeHashtags,
     onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished, isReady,
@@ -37,12 +38,22 @@ export function PublicationSection(props: PublicationSectionProps) {
             <span>{feedCoverDone ? 'Gotowa' : 'Nie gotowa'}</span>
           </button>
           <div className={styles.coverActions}>
-            <TextAction onClick={onAddOrChangeFeedCoverAsset}>
-              {hasFeedCoverAsset ? 'Zmień' : '+ Dodaj'}
+            <TextAction onClick={onAddOrChangeFeedCoverAsset} disabled={!kdriveEnabled}>
+              {createFolderForCover ? 'Utwórz folder i wgraj' : hasFeedCoverAsset ? 'Zmień' : '+ Dodaj'}
             </TextAction>
             {hasFeedCoverAsset ? <TextAction onClick={onOpenFeedCoverAsset}>Otwórz</TextAction> : null}
           </div>
         </div>
+        {uploadJob?.purpose === 'cover' ? <div className={styles.uploadStatus} aria-live="polite">
+          <span>{uploadJob.fileName}</span>
+          {uploadJob.phase === 'error' ? <span role="status">{uploadJob.error}</span> : <>
+            <span>{uploadJob.phase === 'uploading' ? `${(uploadJob.completedBytes / 1048576).toFixed(1)} z ${(uploadJob.totalBytes / 1048576).toFixed(1)} MB` : uploadJob.phase === 'finishing' ? 'Kończenie wysyłania…' : uploadJob.phase === 'attaching' ? 'Dołączanie okładki…' : 'Wysłano'}</span>
+            <progress value={uploadJob.percent} max={100} aria-label="Postęp wysyłania okładki" />
+          </>}
+          {uploadJob.phase === 'error' && onRetryUpload ? <TextAction onClick={onRetryUpload}>Ponów</TextAction> : null}
+          {['uploading', 'finishing', 'attaching', 'error'].includes(uploadJob.phase) && onCancelUpload ? <TextAction onClick={onCancelUpload}>Anuluj</TextAction> : null}
+        </div> : null}
+        {feedCoverDone && uploadJob?.phase === 'done' && uploadJob.purpose === 'cover' ? <p className={styles.prerequisite}>Okładka wgrana i oznaczona jako gotowa.</p> : null}
       </div>
 
       {plan ? <button type="button" className={styles.planRow} onClick={plan.onOpen} data-planned={plan.label ? 'true' : undefined}>

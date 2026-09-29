@@ -425,6 +425,25 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onSwitch={(view, autoStart = false) => setAiView({ reelId: reel.id, view, autoStart })} />;
     const editor = editorOf(reel.editorId);
     const peerName = c.peer?.name ?? '';
+    const kdriveView = kdriveFolderView(reel.kdriveFolder, kdriveStates[reel.id]);
+    const uploadJob = c.kdriveUploadJobs[reel.id];
+    const uploadView = uploadJob ? { purpose: uploadJob.purpose, fileName: uploadJob.fileName, completedBytes: uploadJob.completedBytes,
+      totalBytes: uploadJob.totalBytes, percent: uploadJob.percent, phase: uploadJob.phase, error: uploadJob.error } as const : null;
+    const uploadAllowed = kdriveConfigured !== false && !kdriveView.unavailable;
+    const chooseKdriveFile = (purpose: 'video' | 'cover') => {
+      if (!uploadAllowed) { c.setMessage(kdriveConfigured === false ? 'Integracja kDrive nie jest skonfigurowana na tym serwerze.' : 'Połącz ponownie folder kDrive przed wysłaniem pliku.'); return; }
+      if (c.hasUnsavedChanges()) { c.setMessage('Poczekaj, aż zmiany w rolce zostaną zapisane, i spróbuj ponownie.'); return; }
+      const input = document.createElement('input'); input.type = 'file';
+      input.accept = purpose === 'video' ? 'video/mp4,video/quicktime' : 'image/jpeg,image/png,image/webp';
+      input.onchange = () => { const file = input.files?.[0]; if (file) void c.startKdriveUpload(reel.id, purpose, file, !reel.kdriveFolder); };
+      input.click();
+    };
+    const retryOrResumeUpload = () => {
+      if (!uploadJob) return;
+      if (uploadJob.finished) void c.retryKdriveAttach(reel.id);
+      else if (uploadJob.file) void c.startKdriveUpload(reel.id, uploadJob.purpose, uploadJob.file, !reel.kdriveFolder);
+      else chooseKdriveFile(uploadJob.purpose);
+    };
 
     /**
      * A derived label reaches the title field as a placeholder, never as its value.
@@ -434,7 +453,6 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
      * instead of an empty box.
     */
     const label = reelLabel(reel);
-    const kdriveView = kdriveFolderView(reel.kdriveFolder, kdriveStates[reel.id]);
     const contextualAiEnabled = aiCapability.enabled && !c.hasUnsavedChanges();
     const scheduleFromDetail = () => {
       setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], publication: true } }));
@@ -631,6 +649,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         currentExport: { label: reel.currentExport?.label ?? null, revision: reel.currentExport?.revision ?? null },
         onOpenExport: () => { if (reel.currentExport) window.open(reel.currentExport.url, '_blank', 'noopener,noreferrer'); },
         onReplaceExport: replaceExport,
+        onUploadVideo: () => chooseKdriveFile('video'), uploadEnabled: uploadAllowed,
+        uploadJob: uploadView?.purpose === 'video' ? uploadView : null,
+        onCancelUpload: () => void c.cancelKdriveUpload(reel.id), onRetryUpload: retryOrResumeUpload,
         verification,
         onMarkVerified: () => void c.verifyExport(),
         saveState: c.saveState,
@@ -639,10 +660,13 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onTogglePublication={() => toggleSection('publication')}
       publication={{
         feedCoverDone: reel.feedCoverDone,
-        hasFeedCoverAsset: false,
+        hasFeedCoverAsset: Boolean(reel.feedCoverAsset),
         onToggleFeedCoverDone: () => c.changeReel({ feedCoverDone: !reel.feedCoverDone }),
-        onAddOrChangeFeedCoverAsset: () => c.setMessage('Dodawanie pliku okładki nie jest jeszcze dostępne.'),
-        onOpenFeedCoverAsset: () => {},
+        onAddOrChangeFeedCoverAsset: () => chooseKdriveFile('cover'),
+        onOpenFeedCoverAsset: () => { if (reel.feedCoverAsset && reel.kdriveFolder) window.open(kdriveWebUrl(reel.kdriveFolder.driveId, reel.kdriveFolder.folderId), '_blank', 'noopener,noreferrer'); },
+        kdriveEnabled: uploadAllowed, createFolderForCover: !reel.kdriveFolder,
+        uploadJob: uploadView?.purpose === 'cover' ? uploadView : null,
+        onCancelUpload: () => void c.cancelKdriveUpload(reel.id), onRetryUpload: retryOrResumeUpload,
         description: reel.publicationDescription,
         onChangeDescription: (publicationDescription) => c.changeReel({ publicationDescription }),
         hashtags: reel.publicationHashtags,

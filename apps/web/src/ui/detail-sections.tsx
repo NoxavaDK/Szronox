@@ -367,7 +367,8 @@ export function MaterialsSection(props: MaterialsSectionProps) {
   const {
     expanded, onToggle, summary, kdriveFolder, kdriveEnabled, currentExport,
     onCreateKdriveFolder, onOpenKdriveFolder, onRelinkKdriveFolder,
-    onOpenExport, onReplaceExport, verification, onMarkVerified, saveState,
+    onOpenExport, onReplaceExport, onUploadVideo, uploadEnabled, uploadJob, onCancelUpload, onRetryUpload,
+    verification, onMarkVerified, saveState,
   } = props;
 
   return (
@@ -415,10 +416,13 @@ export function MaterialsSection(props: MaterialsSectionProps) {
                 <TextAction onClick={onOpenExport}>
                   Otwórz <ExternalLinkIcon aria-hidden="true" />
                 </TextAction>
-                {/* Every explicit replacement makes a new revision, same file or not. */}
-                <TextAction onClick={onReplaceExport}>{currentExport.label ? COPY.exportReplace : 'Dodaj eksport'}</TextAction>
               </div>
             )}
+            {uploadJob?.purpose === 'video' ? <KdriveUploadStatus job={uploadJob} onCancel={onCancelUpload} onRetry={onRetryUpload} /> : null}
+            {!uploadJob || uploadJob.purpose !== 'video' || uploadJob.phase === 'done' ? <div className={styles.sourceRow}>
+              <TextAction onClick={() => onUploadVideo?.()} disabled={!uploadEnabled}>{kdriveFolder.name === null ? 'Utwórz folder i wgraj' : 'Wgraj wideo'}</TextAction>
+              <TextAction onClick={onReplaceExport}>Wklej link</TextAction>
+            </div> : null}
           </div>
 
           <VerificationRow verification={verification} onMarkVerified={onMarkVerified} />
@@ -427,6 +431,19 @@ export function MaterialsSection(props: MaterialsSectionProps) {
       ) : null}
     </section>
   );
+}
+
+function KdriveUploadStatus({ job, onCancel, onRetry }: { job: NonNullable<MaterialsSectionProps['uploadJob']>; onCancel?: () => void; onRetry?: () => void }) {
+  const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return <div className={styles.sourceRow} aria-live="polite">
+    <span className={styles.sourceValue}>{job.fileName}</span>
+    {job.phase === 'error' ? <span className={styles.unsupported}>{job.error}</span> : <>
+      <span className={styles.quiet}>{job.phase === 'uploading' ? `${mb(job.completedBytes)} z ${mb(job.totalBytes)}` : job.phase === 'finishing' ? 'Kończenie wysyłania…' : job.phase === 'attaching' ? 'Dołączanie eksportu…' : 'Wysłano'}</span>
+      <progress value={job.percent} max={100} aria-label="Postęp wysyłania wideo" />
+    </>}
+    {job.phase === 'error' && onRetry ? <TextAction onClick={onRetry}>Ponów</TextAction> : null}
+    {['uploading', 'finishing', 'attaching', 'error'].includes(job.phase) && onCancel ? <TextAction onClick={onCancel}>Anuluj</TextAction> : null}
+  </div>;
 }
 
 // ── Overflow / delete (sec. 7) ─────────────────────────────────────────────

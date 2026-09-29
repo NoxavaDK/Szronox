@@ -359,6 +359,11 @@ export interface MaterialsSectionProps {
   onOpenExport: () => void;
   /** Every explicit replacement creates a new revision, even for the same file. */
   onReplaceExport: () => void;
+  onUploadVideo?: () => void;
+  uploadEnabled?: boolean;
+  uploadJob?: KdriveUploadView | null;
+  onCancelUpload?: () => void;
+  onRetryUpload?: () => void;
 
   verification: VerificationViewState;
   onMarkVerified: () => void;
@@ -730,6 +735,11 @@ export interface PublicationSectionProps {
   onToggleFeedCoverDone: () => void;
   onAddOrChangeFeedCoverAsset: () => void;
   onOpenFeedCoverAsset: () => void;
+  kdriveEnabled?: boolean;
+  createFolderForCover?: boolean;
+  uploadJob?: KdriveUploadView | null;
+  onCancelUpload?: () => void;
+  onRetryUpload?: () => void;
 
   description: string;
   onChangeDescription: (value: string) => void;
@@ -760,4 +770,9 @@ export interface PublicationSectionProps {
   publicationLinks: PublicationLinkView[];
   onAddPublicationLink: () => void;
   onOpenPublicationLink: (id: Id) => void;
+}
+
+export interface KdriveUploadView {
+  purpose: 'video' | 'cover'; fileName: string; completedBytes: number; totalBytes: number;
+  percent: number; phase: 'uploading' | 'finishing' | 'attaching' | 'error' | 'done'; error: string | null;
 }

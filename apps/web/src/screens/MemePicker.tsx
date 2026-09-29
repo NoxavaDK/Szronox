@@ -79,9 +79,14 @@ export function MemePicker({ api, reel, onClose, onReel }:
     </> : <>
       <input aria-label="Szukaj memu" placeholder="Szukaj memu..." value={query} onChange={(event) => setQuery(event.target.value)} />
       {items.length === 0 ? <p className={styles.empty}>{query.trim() ? 'Brak memów pasujących do wyszukiwania.' : 'Biblioteka memów jest pusta.'}</p> : null}
-      <div className={styles.rows}>{items.map((meme) => <button key={meme.id} type="button" disabled={busy} onClick={() => void attach(meme.id)}>
-        <img src={meme.thumbnailRef ?? undefined} alt="" /><span>{meme.name}</span>
-      </button>)}</div>
+      <div className={styles.rows}>{items.map((meme) => <div key={meme.id}>
+        <button type="button" disabled={busy} onClick={() => void attach(meme.id)}>
+          <img src={meme.thumbnailRef ?? undefined} alt="" /><span>{meme.name}</span>
+        </button>
+        {meme.kdriveCopy.state === 'copied' ? <p className={styles.copyState}>Kopia w kDrive</p>
+          : meme.kdriveCopy.state === 'failed' ? <p className={styles.copyState}>Kopia w kDrive nie powiodła się · Ponów</p>
+            : meme.kdriveCopy.state === 'pending' ? <p className={styles.copyState}>Kopia w kDrive · Oczekuje</p> : null}
+      </div>)}</div>
       <button type="button" className={styles.addNew} onClick={() => setCreating(true)}>+ Nowy mem</button>
     </>}
   </div>;
