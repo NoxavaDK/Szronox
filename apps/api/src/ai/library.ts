@@ -6,35 +6,37 @@ import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
 import { CoreError, editConflict, idempotencyConflict, internalError, notFound, validationError } from '../core/errors.js';
 import type { CoreDependencies } from '../core/routes.js';
 import { httpKdriveClient } from '../kdrive/client.js';
-import { createMemeCopyService } from '../kdrive/meme-copy.js';
+import { createMemeCopyService, type MemeCopyService } from '../kdrive/meme-copy.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function uuid(value: unknown): string { if (typeof value !== 'string' || !UUID.test(value)) throw validationError('Expected UUID'); return value; }
 function version(value: unknown): number { if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw validationError('Expected positive version'); return value; }
-function memeResponse(row: { id: string; name: string; kdrive_copy_state?: string; kdrive_file?: { driveId?: string; name?: string; fileId?: string } | null }) {
+function memeResponse(row: { id: string; name: string; kdrive_copy_state?: string; kdrive_file?: { name?: string } | null }) {
   const state = row.kdrive_copy_state ?? 'pending';
-  const driveId = typeof row.kdrive_file?.driveId === 'string' ? row.kdrive_file.driveId : null;
   return { id: row.id, name: row.name, thumbnailRef: `/api/v1/memes/${row.id}/image`, assetRef: `/api/v1/memes/${row.id}/image`,
-    kdriveCopy: { state, ...(state === 'copied' && row.kdrive_file?.name ? { name: row.kdrive_file.name } : {}),
-      ...(state === 'copied' && driveId && row.kdrive_file?.fileId ? { webUrl: `https://ksuite.infomaniak.com/kdrive/app/drive/${encodeURIComponent(driveId)}/files/${encodeURIComponent(row.kdrive_file.fileId)}` } : {}) } };
+    kdriveCopy: { state, ...(state === 'copied' && row.kdrive_file?.name ? { name: row.kdrive_file.name } : {}) } };
 }
 
-async function idempotent<T>(db: Database, actor: Actor, operationId: string, route: string, payload: unknown, mutate: (tx: Queryable) => Promise<T>): Promise<T> {
+async function idempotent<T>(db: Database, actor: Actor, operationId: string, route: string, payload: unknown, mutate: (tx: Queryable) => Promise<T>, onFresh?: (result: T) => void): Promise<T> {
   const replay = async (tx: Queryable): Promise<T | null> => {
     const rows = await tx.query<{ actor_id: string; route: string; payload_hash: string; result: T }>('select actor_id,route,payload_hash,result from app.operations where operation_id=$1', [operationId]);
     if (!rows.rows[0]) return null;
     if (rows.rows[0].actor_id !== actor.id || rows.rows[0].route !== route || rows.rows[0].payload_hash !== payloadHash(payload)) throw idempotencyConflict();
     return rows.rows[0].result;
   };
+  let fresh = false;
   try {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const prior = await replay(tx);
       if (prior !== null) return prior;
       const result = await mutate(tx);
       await tx.query('insert into app.operations(operation_id,actor_id,route,payload_hash,result) values($1,$2,$3,$4,$5)',
         [operationId, actor.id, route, payloadHash(payload), JSON.stringify(result)]);
+      fresh = true;
       return result;
     });
+    if (fresh) onFresh?.(result);
+    return result;
   } catch (error) {
     if (pgErrorCode(error) === PG_UNIQUE_VIOLATION) {
       const prior = await replay(db);
@@ -44,9 +46,9 @@ async function idempotent<T>(db: Database, actor: Actor, operationId: string, ro
   }
 }
 
-export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependencies): void {
+export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependencies, copyService?: Pick<MemeCopyService, 'enqueue' | 'retry' | 'startRetryLoop'>): void {
   const core = new CoreRepository(deps.db);
-  const memeCopies = createMemeCopyService({ db: deps.db, storage: deps.storage, config: deps.kdrive ?? null,
+  const memeCopies = copyService ?? createMemeCopyService({ db: deps.db, storage: deps.storage, config: deps.kdrive ?? null,
     folders: deps.kdrive ? httpKdriveClient({ driveId: deps.kdrive.driveId, token: deps.kdrive.token }) : null });
   memeCopies.startRetryLoop();
   const handle = (body: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>) =>
@@ -107,10 +109,34 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
         await tx.query('update app.reels set version=version+1,updated_at=now() where id=$1', [reelId]);
       }
       return { meme: memeResponse({ id, name }), reel: reelId ? await core.loadReel(tx, reelId) : null };
-    });
-    void memeCopies.enqueue(result.meme.id).catch(() => undefined);
+    }, (created) => { void memeCopies.enqueue(created.meme.id).catch(() => undefined); });
     if (!deps.kdrive) result.meme.kdriveCopy = { state: 'not_configured' };
     return reply.code(201).send(result);
+  }));
+
+  app.post('/api/v1/memes/:id/kdrive-copy/retry', handle(async (request) => {
+    const actor = await deps.authenticate(request);
+    const memeId = uuid((request.params as { id: string }).id);
+    if (!deps.kdrive) throw new CoreError({ status: 503, code: 'PROVIDER_UNAVAILABLE', message: 'kDrive integration is not configured', retryable: false, details: { reason: 'kdrive_not_configured' } });
+    const data = (request.body ?? {}) as Record<string, unknown>;
+    const operationId = uuid(data.operationId);
+    let shouldRetry = false;
+    await idempotent(deps.db, actor, operationId, 'POST /memes/:id/kdrive-copy/retry', { memeId }, async (tx) => {
+      const current = await tx.query<{ kdrive_copy_state: string }>('select kdrive_copy_state from app.memes where id=$1 for update', [memeId]);
+      if (!current.rows[0]) throw notFound('Meme not found');
+      if (current.rows[0].kdrive_copy_state !== 'failed') {
+        throw validationError('Only a failed kDrive copy can be retried', { reason: 'meme_copy_not_failed' });
+      }
+      const reset = await tx.query(`update app.memes set kdrive_copy_state='pending',kdrive_copy_attempts=0,kdrive_copy_error=null
+        where id=$1 and kdrive_copy_state='failed' returning id`, [memeId]);
+      if (!reset.rows[0]) throw validationError('Only a failed kDrive copy can be retried', { reason: 'meme_copy_not_failed' });
+      return { memeId };
+    }, () => { shouldRetry = true; });
+    if (shouldRetry) await memeCopies.retry(memeId);
+    const current = await deps.db.query<{ id: string; name: string; kdrive_copy_state: string; kdrive_file: { name?: string } | null }>(
+      'select id,name,kdrive_copy_state,kdrive_file from app.memes where id=$1', [memeId]);
+    if (!current.rows[0]) throw notFound('Meme not found');
+    return memeResponse(current.rows[0]);
   }));
 
   app.post('/api/v1/reels/:id/memes', handle(async (request, reply) => {

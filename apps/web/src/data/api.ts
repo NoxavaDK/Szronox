@@ -147,6 +147,7 @@ export class CoreApiClient {
   applyAi = (id: string, body: ApplyAiRequest) => this.request<Reel>(`/ai-runs/${id}/apply`, { method: 'POST', body: JSON.stringify(body) });
   memes = (query = '') => this.request<{ items: Meme[] }>(`/memes?q=${encodeURIComponent(query)}`);
   createMeme = (body: CreateMemeRequest) => this.request<{ meme: Meme; reel: Reel | null }>('/memes', { method: 'POST', body: JSON.stringify(body) });
+  retryMemeCopy = (memeId: string, body: { operationId: string }) => this.request<Meme>(`/memes/${encodeURIComponent(memeId)}/kdrive-copy/retry`, { method: 'POST', body: JSON.stringify(body) });
   attachMeme = (reelId: string, body: AttachMemeRequest) => this.request<Reel>(`/reels/${reelId}/memes`, { method: 'POST', body: JSON.stringify(body) });
   detachMeme = (reelId: string, memeId: string, body: { operationId: string; expectedVersion: number }) => this.request<Reel>(`/reels/${reelId}/memes/${memeId}`, { method: 'DELETE', body: JSON.stringify(body) });
   detachProgramme = (reelId: string, body: { operationId: string; expectedVersion: number }) => this.request<Reel>(`/reels/${reelId}/programme-association`, { method: 'DELETE', body: JSON.stringify(body) });

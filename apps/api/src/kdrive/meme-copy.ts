@@ -19,6 +19,7 @@ export class MemeCopyService {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private readonly queued = new Set<string>();
+  private readonly inFlight = new Map<string, Promise<void>>();
   private readonly folders: KdriveClient | null;
   private readonly uploads: KdriveUploadClient | null;
   constructor(private readonly options: MemeCopyOptions) {
@@ -31,8 +32,18 @@ export class MemeCopyService {
       await this.options.db.query(`update app.memes set kdrive_copy_state='not_configured' where id=$1 and kdrive_copy_state='pending'`, [memeId]);
       return;
     }
+    if (this.queued.has(memeId) || this.inFlight.has(memeId)) return;
     this.queued.add(memeId);
-    await this.copyOne(memeId);
+    await this.runCopy(memeId);
+  }
+
+  /** Start one explicitly requested retry cycle after the API atomically resets a failed row. */
+  async retry(memeId: string): Promise<void> {
+    const current = this.inFlight.get(memeId);
+    if (current) await current;
+    this.queued.delete(memeId);
+    this.queued.add(memeId);
+    await this.runCopy(memeId);
   }
 
   startRetryLoop(): void {
@@ -52,7 +63,7 @@ export class MemeCopyService {
         where kdrive_copy_state='pending' and kdrive_copy_attempts>0 order by id limit 25`);
       const ids = [...new Set([...this.queued, ...retryable.rows.map((row) => row.id)])].slice(0, 25);
       for (const id of ids) {
-        await this.copyOne(id);
+        await this.runCopy(id);
         const status = await this.options.db.query<{ kdrive_copy_state: string; kdrive_copy_attempts: number }>('select kdrive_copy_state,kdrive_copy_attempts from app.memes where id=$1', [id]);
         if (!status.rows[0] || status.rows[0].kdrive_copy_state === 'copied' || status.rows[0].kdrive_copy_attempts >= 3) this.queued.delete(id);
       }
@@ -66,7 +77,9 @@ export class MemeCopyService {
     let copied = 0;
     for (const row of rows.rows) {
       await this.options.db.query(`update app.memes set kdrive_copy_state='pending',kdrive_copy_attempts=0,kdrive_copy_error=null where id=$1 and kdrive_copy_state<>'copied'`, [row.id]);
-      await this.copyOne(row.id, true);
+      this.queued.delete(row.id);
+      this.queued.add(row.id);
+      await this.runCopy(row.id, true);
       const result = await this.options.db.query<{ kdrive_copy_state: string }>('select kdrive_copy_state from app.memes where id=$1', [row.id]);
       if (result.rows[0]?.kdrive_copy_state === 'copied') copied += 1;
     }
@@ -93,6 +106,19 @@ export class MemeCopyService {
       }
       throw error;
     }
+  }
+
+  private runCopy(id: string, force = false): Promise<void> {
+    const existing = this.inFlight.get(id);
+    if (existing) return existing;
+    const task = (async () => {
+      await this.copyOne(id, force);
+      const status = await this.options.db.query<{ kdrive_copy_state: string; kdrive_copy_attempts: number }>(
+        'select kdrive_copy_state,kdrive_copy_attempts from app.memes where id=$1', [id]);
+      if (!status.rows[0] || status.rows[0].kdrive_copy_state === 'copied' || status.rows[0].kdrive_copy_attempts >= 3) this.queued.delete(id);
+    })().finally(() => { this.inFlight.delete(id); });
+    this.inFlight.set(id, task);
+    return task;
   }
 
   private async copyOne(id: string, force = false): Promise<void> {

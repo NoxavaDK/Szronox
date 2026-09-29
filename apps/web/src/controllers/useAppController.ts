@@ -205,7 +205,16 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const cancelKdriveUpload = useCallback(async (reelId: string) => {
     const job = kdriveUploadJobs[reelId];
     kdriveUploadControllers.current.get(reelId)?.abort();
-    if (job?.uploadId) await api.cancelKdriveUpload(job.uploadId).catch(() => undefined);
+    if (job?.uploadId) {
+      try { await api.cancelKdriveUpload(job.uploadId); }
+      catch (error) {
+        const text = error instanceof ClientApiError ? polishError(error) : polishError(error);
+        const message = `Nie udało się anulować wysyłania. Sesja kDrive może nadal być aktywna. ${text}`.trim();
+        setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'error', error: message } }));
+        setMessage(message);
+        return;
+      }
+    }
     setKdriveUploadJobs((old) => { const next = { ...old }; delete next[reelId]; return next; });
   }, [api, kdriveUploadJobs]);
 

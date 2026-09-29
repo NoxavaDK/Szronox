@@ -13,6 +13,7 @@ export function MemePicker({ api, reel, onClose, onReel }:
   const [name, setName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [retryingMemeId, setRetryingMemeId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -29,6 +30,19 @@ export function MemePicker({ api, reel, onClose, onReel }:
       onReel(saved); onClose();
     } catch (error) { if (!isAbandonedRequest(error)) setMessage(polishError(error)); }
     finally { setBusy(false); }
+  }
+
+  async function retryCopy(memeId: string) {
+    if (retryingMemeId) return;
+    setRetryingMemeId(memeId);
+    try {
+      const updated = await api.retryMemeCopy(memeId, { operationId: crypto.randomUUID() });
+      setItems((current) => current.map((item) => item.id === memeId ? updated : item));
+      const refreshed = await api.memes(query);
+      setItems(refreshed.items);
+    } catch (error) {
+      if (!isAbandonedRequest(error)) setMessage(polishError(error) || 'Nie udało się ponowić kopii w kDrive.');
+    } finally { setRetryingMemeId(null); }
   }
 
   async function create() {
@@ -84,7 +98,7 @@ export function MemePicker({ api, reel, onClose, onReel }:
           <img src={meme.thumbnailRef ?? undefined} alt="" /><span>{meme.name}</span>
         </button>
         {meme.kdriveCopy.state === 'copied' ? <p className={styles.copyState}>Kopia w kDrive</p>
-          : meme.kdriveCopy.state === 'failed' ? <p className={styles.copyState}>Kopia w kDrive nie powiodła się · Ponów</p>
+          : meme.kdriveCopy.state === 'failed' ? <p className={styles.copyState}>Kopia w kDrive nie powiodła się · <button type="button" className={styles.copyRetry} disabled={retryingMemeId !== null} onClick={() => void retryCopy(meme.id)}>{retryingMemeId === meme.id ? 'Ponawianie…' : 'Ponów'}</button></p>
             : meme.kdriveCopy.state === 'pending' ? <p className={styles.copyState}>Kopia w kDrive · Oczekuje</p> : null}
       </div>)}</div>
       <button type="button" className={styles.addNew} onClick={() => setCreating(true)}>+ Nowy mem</button>

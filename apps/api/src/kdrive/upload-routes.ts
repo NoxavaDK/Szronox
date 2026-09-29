@@ -21,7 +21,7 @@ const SAFE_NAME = /[\\/:*?"<>|\u0000-\u001f\u007f]/g;
 interface UploadRow {
   id: string; reel_id: string; purpose: 'video' | 'cover'; requested_by: string; file_name: string; mime_type: string;
   byte_size: string | number; chunk_size: number; total_chunks: number; received_chunks: number[]; chunk0_sha256: string | null;
-  chunk_hashes: string[]; kdrive_session_token: string; kdrive_upload_host: string; folder_id: string; state: KdriveUploadState['state'];
+  chunk_hashes: string[]; kdrive_session_token: string | null; kdrive_upload_host: string | null; folder_id: string; state: KdriveUploadState['state'];
   kdrive_file_id: string; final_name: string | null; start_payload_hash: string;
 }
 
@@ -105,26 +105,45 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
     const reel = await repo.getReel(reelId);
     if (reel.version !== normalized.expectedVersion) throw editConflict(reel.version);
     let folderId: string;
+    let reservationReelVersion: number;
     if (!reel.kdriveFolder) {
       if (!normalized.createFolder) throw validationError('Create the Reel folder before uploading', { reason: 'folder_required' });
       const linked = await folders.command(actor, reelId, { operationId, expectedVersion: reel.version, mode: 'create' });
       if (linked.folder.state !== 'available') throw validationError('The Reel folder could not be made available', { reason: 'folder_unavailable' });
       folderId = linked.folder.folderId;
+      reservationReelVersion = linked.reel.version;
     } else {
       const resolved = await folders.resolve(reelId);
       if (resolved.state === 'available') folderId = resolved.folderId;
       else throw validationError('The linked kDrive folder is not available; reconnect it first', { reason: resolved.state === 'missing' ? 'folder_missing' : 'folder_unavailable' });
+      reservationReelVersion = reel.version;
     }
-    const counts = await deps.db.query<{ reel_count: number; user_count: number }>(`select count(*) filter(where reel_id=$1 and state='open')::int reel_count,
-      count(*) filter(where requested_by=$2 and state='open')::int user_count from app.kdrive_uploads`, [reelId, actor.id]);
-    if (counts.rows[0].reel_count >= 2 || counts.rows[0].user_count >= 4) throw new CoreError({ status: 429, code: 'RATE_LIMITED', message: 'Too many active uploads', retryable: true });
     const totalChunks = Math.ceil(byteSize / CHUNK_SIZE); const uploadName = prefixedName(purpose, normalized.fileName);
     const id = randomUUID();
     try {
-      await deps.db.query(`insert into app.kdrive_uploads(id,reel_id,purpose,requested_by,file_name,mime_type,byte_size,chunk_size,total_chunks,
-        kdrive_session_token,kdrive_upload_host,folder_id,state,kdrive_file_id,final_name,start_operation_id,start_payload_hash,error)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,'','',$10,'failed','',$11,$12,$13,$14)`,
-        [id, reelId, purpose, actor.id, normalized.fileName, mimeType, byteSize, CHUNK_SIZE, totalChunks, folderId, uploadName, operationId, startHash, JSON.stringify({ reason: 'start_in_progress' })]);
+      await deps.db.transaction(async (tx) => {
+        // Serialize every start by requester, then by Reel. Counting and writing the
+        // reservation in the same transaction prevents two starts from observing the
+        // same free capacity. The reservation's state/error pair counts until kDrive
+        // confirms that the session has started or the request is known to have failed.
+        const userLock = await tx.query('select id from app.users where id=$1 for update', [actor.id]);
+        if (!userLock.rows[0]) throw notFound('User not found');
+        const reelLock = await tx.query<{ version: number }>(
+          'select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
+        if (!reelLock.rows[0]) throw notFound('Reel not found');
+        if (reelLock.rows[0].version !== reservationReelVersion) throw editConflict(reelLock.rows[0].version);
+        const counts = await tx.query<{ reel_count: number; user_count: number }>(`select
+          count(*) filter(where reel_id=$1 and (state='open' or (state='failed' and error->>'reason' in ('start_in_progress','start_uncertain'))))::int reel_count,
+          count(*) filter(where requested_by=$2 and (state='open' or (state='failed' and error->>'reason' in ('start_in_progress','start_uncertain'))))::int user_count
+          from app.kdrive_uploads`, [reelId, actor.id]);
+        if (counts.rows[0].reel_count >= 2 || counts.rows[0].user_count >= 4) {
+          throw new CoreError({ status: 429, code: 'RATE_LIMITED', message: 'Too many active uploads', retryable: true });
+        }
+        await tx.query(`insert into app.kdrive_uploads(id,reel_id,purpose,requested_by,file_name,mime_type,byte_size,chunk_size,total_chunks,
+          kdrive_session_token,kdrive_upload_host,folder_id,state,kdrive_file_id,final_name,start_operation_id,start_payload_hash,error)
+          values($1,$2,$3,$4,$5,$6,$7,$8,$9,'','',$10,'failed','',$11,$12,$13,$14)`,
+          [id, reelId, purpose, actor.id, normalized.fileName, mimeType, byteSize, CHUNK_SIZE, totalChunks, folderId, uploadName, operationId, startHash, JSON.stringify({ reason: 'start_in_progress' })]);
+      });
     } catch (error) {
       const concurrent = await deps.db.query<UploadRow>('select * from app.kdrive_uploads where start_operation_id=$1', [operationId]);
       if (concurrent.rows[0]) {
@@ -138,7 +157,9 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
     let session: UploadSession;
     try { session = await provider.start({ folderId, fileName: uploadName, byteSize, totalChunks }); }
     catch (error) {
-      await deps.db.query(`update app.kdrive_uploads set error=$1,updated_at=now() where id=$2 and state='failed'`, [JSON.stringify({ reason: 'start_uncertain' }), id]);
+      const uncertain = !(error instanceof KdriveError) || error.retryable;
+      await deps.db.query(`update app.kdrive_uploads set error=$1,updated_at=now() where id=$2 and state='failed'`,
+        [JSON.stringify({ reason: uncertain ? 'start_uncertain' : 'start_failed' }), id]);
       throw error;
     }
     const started = await deps.db.query(`update app.kdrive_uploads set kdrive_session_token=$1,kdrive_upload_host=$2,kdrive_file_id=$3,final_name=$4,state='open',error=null,updated_at=now() where id=$5 and state='failed'`,
@@ -178,6 +199,7 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
       if (row.chunk_hashes[savedHashIndex] !== hash) throw validationError('Selected file does not match the saved upload', { reason: 'content_mismatch' });
       return reply.code(204).send();
     }
+    if (!row.kdrive_session_token || !row.kdrive_upload_host) throw internalError('Open upload is missing provider session state');
     const session: UploadSession = { token: row.kdrive_session_token, uploadUrl: row.kdrive_upload_host, fileId: row.kdrive_file_id, fileName: row.final_name ?? row.file_name };
     await deps.db.transaction(async (tx) => {
       const locked = await tx.query<UploadRow>('select * from app.kdrive_uploads where id=$1 and requested_by=$2 for update', [row.id, actor.id]);
@@ -206,6 +228,7 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
       if (row.state !== 'open') throw validationError('Upload is no longer open', { reason: 'upload_not_open' });
       if (row.received_chunks.length !== row.total_chunks || row.chunk_hashes.length !== row.total_chunks
           || new Set(row.received_chunks).size !== row.total_chunks || row.received_chunks.some((n) => n < 0 || n >= row.total_chunks)) throw validationError('Upload has missing chunks', { reason: 'upload_incomplete' });
+      if (!row.kdrive_session_token || !row.kdrive_upload_host) throw internalError('Open upload is missing provider session state');
       const session = { token: row.kdrive_session_token, uploadUrl: row.kdrive_upload_host, fileId: row.kdrive_file_id, fileName: row.final_name ?? row.file_name };
       const orderedHashes = Array.from({ length: row.total_chunks }, (_, index) => row.chunk_hashes[row.received_chunks.indexOf(index)]);
       let file;
@@ -216,7 +239,8 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
         file = await provider.getFile(row.kdrive_file_id);
         if (file.status !== 'ok' || file.size !== Number(row.byte_size)) throw error;
       }
-      await tx.query(`update app.kdrive_uploads set state='finished',final_name=$1,kdrive_file_id=$2,updated_at=now() where id=$3 and state='open'`, [file.name, file.id, row.id]);
+      await tx.query(`update app.kdrive_uploads set state='finished',final_name=$1,kdrive_file_id=$2,
+        kdrive_session_token=null,kdrive_upload_host=null,updated_at=now() where id=$3 and state='open'`, [file.name, file.id, row.id]);
       return state({ ...row, state: 'finished', final_name: file.name, kdrive_file_id: file.id });
     });
     return reply.code(200).send(result);
@@ -237,8 +261,9 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
     if (row.state === 'cancelled' || row.state === 'expired') return reply.code(204).send();
     if (row.state !== 'open') throw validationError('A finished kDrive file cannot be deleted', { reason: 'upload_not_open' });
     if (!provider) throw new CoreError({ status: 503, code: 'PROVIDER_UNAVAILABLE', message: 'kDrive integration is not configured', retryable: false });
+    if (!row.kdrive_session_token) throw internalError('Open upload is missing provider session state');
     await provider.cancel({ token: row.kdrive_session_token });
-    await deps.db.query(`update app.kdrive_uploads set state='cancelled',kdrive_session_token='',kdrive_upload_host='',updated_at=now() where id=$1 and state='open'`, [row.id]);
+    await deps.db.query(`update app.kdrive_uploads set state='cancelled',kdrive_session_token=null,kdrive_upload_host=null,updated_at=now() where id=$1 and state='open'`, [row.id]);
     return reply.code(204).send();
   }));
 
@@ -247,8 +272,9 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
     const timer = setInterval(() => { void (async () => {
       const expired = await deps.db.query<UploadRow>(`select * from app.kdrive_uploads where state='open' and updated_at < now()-interval '24 hours' limit 100`);
       for (const row of expired.rows) {
+        if (!row.kdrive_session_token) continue;
         try { await provider.cancel({ token: row.kdrive_session_token }); } catch { continue; }
-        await deps.db.query(`update app.kdrive_uploads set state='expired',kdrive_session_token='',kdrive_upload_host='',updated_at=now() where id=$1 and state='open'`, [row.id]);
+        await deps.db.query(`update app.kdrive_uploads set state='expired',kdrive_session_token=null,kdrive_upload_host=null,updated_at=now() where id=$1 and state='open'`, [row.id]);
       }
     })().catch(() => undefined); }, 5 * 60_000);
     timer.unref();

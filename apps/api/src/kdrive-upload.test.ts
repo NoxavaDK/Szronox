@@ -4,7 +4,7 @@ import test from 'node:test';
 import Fastify, { type FastifyRequest } from 'fastify';
 import { PGlite } from '@electric-sql/pglite';
 import type { KdriveUploadStartRequest } from '@szronox/contracts';
-import { pgliteDatabase } from './db/client.js';
+import { pgliteDatabase, type Database } from './db/client.js';
 import { migrate, seedUsers } from './db/migrate.js';
 import { forbidden, unauthenticated } from './core/errors.js';
 import { CoreRepository } from './core/repository.js';
@@ -22,27 +22,59 @@ function fakeProviders() {
   let folderCreates = 0; let starts = 0; let chunkCalls = 0; let finishCalls = 0; let cancelCalls = 0;
   let finishedFile: UploadFileInfo | null = null; let lastHashes: string[] = [];
   let finishUncertainty: KdriveError | null = null;
+  let startBarrier: Promise<void> | null = null;
+  let releaseStartBarrier: (() => void) | null = null;
+  let targetStarts = 0;
+  let reachedTarget!: () => void;
+  let targetStarted = Promise.resolve();
   const folderClient: KdriveClient = {
     async getFolder(id) { const folder = folders.get(id); if (!folder) throw new KdriveError('missing', false, 404, 'object_not_found'); return folder; },
     async listChildren(id) { return [...folders.values()].filter((folder) => folder.parentId === id); },
     async createFolder(parentId, name) { folderCreates += 1; const folder = { id: String(100 + folderCreates), name, parentId, type: 'dir', status: 'ok' }; folders.set(folder.id, folder); return folder; },
   };
   const uploadClient: KdriveUploadClient = {
-    async start(input) { starts += 1; return { token: `session-${starts}`, uploadUrl: 'https://x.upload.kdrive.infomaniak.com', fileId: String(500 + starts), fileName: input.fileName }; },
+    async start(input) {
+      starts += 1;
+      if (targetStarts > 0 && starts === targetStarts) reachedTarget();
+      if (startBarrier) await startBarrier;
+      return { token: `session-${starts}`, uploadUrl: 'https://x.upload.kdrive.infomaniak.com', fileId: String(500 + starts), fileName: input.fileName };
+    },
     async putChunk(_session, _index, _bytes, _hash) { chunkCalls += 1; },
     async finish(session, hashes) { finishCalls += 1; lastHashes = hashes; const suffix = Number(session.token.split('-')[1]); finishedFile = { id: String(500 + suffix), name: 'OKLADKA - cover.png', size: png.byteLength, status: 'ok' }; if (finishUncertainty) { const error = finishUncertainty; finishUncertainty = null; throw error; } return finishedFile; },
     async getFile(id) { if (!finishedFile || finishedFile.id !== id) throw new KdriveError('missing', false, 404, 'object_not_found'); return finishedFile; },
     async cancel(_session) { cancelCalls += 1; },
     async uploadSmall() { throw new Error('not used'); },
   };
-  return { folders, folderClient, uploadClient, ambiguousFinish(error: KdriveError) { finishUncertainty = error; }, counts: () => ({ folderCreates, starts, chunkCalls, finishCalls, cancelCalls, lastHashes }) };
+  return { folders, folderClient, uploadClient,
+    holdStarts(target: number) {
+      targetStarts = target;
+      targetStarted = new Promise<void>((resolve) => { reachedTarget = resolve; });
+      startBarrier = new Promise<void>((resolve) => { releaseStartBarrier = resolve; });
+      return { reached: targetStarted, release() { releaseStartBarrier?.(); startBarrier = null; } };
+    },
+    ambiguousFinish(error: KdriveError) { finishUncertainty = error; }, counts: () => ({ folderCreates, starts, chunkCalls, finishCalls, cancelCalls, lastHashes }) };
 }
 
-async function fixture(configured = true) {
+function serializedDatabase(database: Database): Database {
+  let tail = Promise.resolve();
+  const exclusive = <T>(run: () => Promise<T>): Promise<T> => {
+    const previous = tail; let release!: () => void;
+    tail = new Promise<void>((resolve) => { release = resolve; });
+    return previous.then(run).finally(release);
+  };
+  return {
+    query: <Row>(sql: string, params?: unknown[]) => exclusive(() => database.query<Row>(sql, params)),
+    execScript: (sql: string) => exclusive(() => database.execScript(sql)),
+    transaction: <T>(body: (tx: import('./db/client.js').Queryable) => Promise<T>) => exclusive(() => database.transaction(body)),
+    close: () => database.close(),
+  };
+}
+
+async function fixture(configured = true, serializeQueries = false) {
   const db = pgliteDatabase(await PGlite.create()); await migrate(db); await seedUsers(db, [NOXAVA, SZRON]);
   const provider = fakeProviders(); const app = Fastify({ logger: false });
   const deps: CoreDependencies = {
-    db, storage: { async initialize() {}, async statObject() { return { exists: false, byteSize: 0 }; }, async createSignedUpload() { throw new Error('unused'); } },
+    db: serializeQueries ? serializedDatabase(db) : db, storage: { async initialize() {}, async statObject() { return { exists: false, byteSize: 0 }; }, async createSignedUpload() { throw new Error('unused'); } },
     async authenticate(request: FastifyRequest) { if (request.headers['x-actor'] !== NOXAVA.id) throw unauthenticated(); if (request.method !== 'GET' && request.headers['x-csrf'] !== 'test') throw forbidden('test'); return NOXAVA; },
     allowlist: [NOXAVA, SZRON], kdrive: configured ? { driveId: '1', rootFolderId: '10', token: 'test-token', memeFolderId: null } : null,
   };
@@ -95,6 +127,9 @@ test('KDRIVE-02 validates chunk MIME and magic, accepts exact duplicates, finish
     assert.equal(duplicate.statusCode, 204); assert.equal(ctx.provider.counts().chunkCalls, 1);
     const finish = await ctx.app.inject({ method: 'POST', url: `/api/v1/kdrive-uploads/${id}/finish`, headers: ctx.headers, payload: {} });
     assert.equal(finish.statusCode, 200, finish.body); assert.equal(finish.json().state, 'finished');
+    const storedSession = await ctx.db.query<{ kdrive_session_token: string | null; kdrive_upload_host: string | null }>(
+      'select kdrive_session_token,kdrive_upload_host from app.kdrive_uploads where id=$1', [id]);
+    assert.equal(storedSession.rows[0].kdrive_session_token, null); assert.equal(storedSession.rows[0].kdrive_upload_host, null);
     const replay = await ctx.app.inject({ method: 'POST', url: `/api/v1/kdrive-uploads/${id}/finish`, headers: ctx.headers, payload: {} });
     assert.equal(replay.statusCode, 200); assert.equal(ctx.provider.counts().finishCalls, 1);
     const reel = await new CoreRepository(ctx.db).getReel(ctx.reelId);
@@ -109,6 +144,33 @@ test('unconfigured kDrive start is refused without outbound provider calls', asy
   try {
     const response = await ctx.app.inject({ method: 'POST', url: `/api/v1/reels/${ctx.reelId}/kdrive-uploads`, headers: ctx.headers, payload: startBody() });
     assert.equal(response.statusCode, 503); assert.equal(ctx.provider.counts().starts, 0); assert.equal(ctx.provider.counts().folderCreates, 0);
+  } finally { await ctx.close(); }
+});
+
+test('concurrent starts reserve capacity atomically at two per Reel and four per user', async () => {
+  const ctx = await fixture(true, true);
+  try {
+    const reelIds = [ctx.reelId, randomUUID(), randomUUID()];
+    for (const [index, reelId] of reelIds.entries()) {
+      if (index > 0) await new CoreRepository(ctx.db).createReel(NOXAVA, { operationId: randomUUID(), reelId, input: { text: `test ${index}`, images: [] } });
+      await ctx.db.query('update app.reels set kdrive_folder=$1,version=version+1 where id=$2', [JSON.stringify({ driveId: '1', folderId: '10' }), reelId]);
+    }
+    const barrier = ctx.provider.holdStarts(4);
+    const requests = [0, 0, 1, 1, 2].map((reelIndex) => ctx.app.inject({ method: 'POST',
+      url: `/api/v1/reels/${reelIds[reelIndex]}/kdrive-uploads`, headers: ctx.headers, payload: startBody(2) }));
+    await barrier.reached;
+    barrier.release();
+    const results = await Promise.all(requests);
+    assert.equal(results.filter((result) => result.statusCode === 201).length, 4);
+    assert.equal(results.filter((result) => result.statusCode === 429).length, 1);
+    assert.equal(ctx.provider.counts().starts, 4);
+    for (const result of results) assert.equal(result.body.includes('session-'), false);
+    const counts = await ctx.db.query<{ reel_id: string; n: number }>(`select reel_id,count(*)::int n from app.kdrive_uploads
+      where state in ('open','failed') group by reel_id`);
+    assert.ok(counts.rows.every((row) => row.n <= 2));
+    const total = await ctx.db.query<{ n: number }>(`select count(*)::int n from app.kdrive_uploads
+      where requested_by=$1 and state in ('open','failed')`, [NOXAVA.id]);
+    assert.equal(total.rows[0].n, 4);
   } finally { await ctx.close(); }
 });
 
