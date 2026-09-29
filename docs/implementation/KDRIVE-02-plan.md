@@ -225,10 +225,10 @@ Confirmed live in `docs/implementation/KDRIVE-02-probe.md`. Build on these; do n
 - **Worktree:** `codex/kdrive-02`. Luna does not merge, deploy, provision, call live kDrive except
   the approved probe, send messages, or spawn agents.
 - **Root-owned, read-only for Luna:** `AGENTS.md`, `T00-contracts.md`, this plan,
-  `packages/contracts/src/index.ts`, `database/migrations/**`, `database/grants.sql`, root
+  `packages/contracts/src/index.ts`, `database/migrations/**`, `deploy/vps/postgres/grants.sql`, root
   dependencies/lockfiles, `deploy/vps/compose.yaml`.
 - **Luna allowlist:** `apps/api/src/kdrive/**` (+ new `uploads.ts`, `upload-routes.ts`),
-  `apps/api/src/core/{repository,routes,config}.ts` (Reel mapping of `feedCoverAsset`, attach
+  `apps/api/src/core/{repository,routes,config,mapping}.ts` (Reel mapping of `feedCoverAsset`, attach
   writes only), `apps/api/src/storage/routes.ts` (MEME-UPLOAD content-type guard only),
   `apps/api/src/app.ts`, `apps/api/src/runtime/api.ts`, `apps/api/src/kdrive*.test.ts`,
   `apps/api/src/ai/library.ts` (meme create hook for the kDrive copy only), new
@@ -290,5 +290,6 @@ Android.
 5. **File names in kDrive:** prefixes `EKSPORT - `, `OKLADKA - `, `MEM - `; original name and
    extension kept after the prefix; kDrive renames on collision, nothing is overwritten.
 
-Still to confirm at GATE 1 (not a product decision): the live upload API shape (§4). On production
-the base folder and therefore the meme folder location will be a separate operator choice.
+GATE 1 passed on 2026-09-29; the confirmed live upload API shape is recorded in §4 and
+`KDRIVE-02-probe.md`. On production the base folder and therefore the meme folder location will be
+a separate operator choice.

@@ -36,6 +36,11 @@ grant select on
   app.reels, app.reel_hooks, app.attachments, app.reel_memes, app.memes, app.operations
   to szronox_worker;
 
+-- KDRIVE-02: resumable provider session state is API-only. The worker has no
+-- kDrive credentials and cannot observe or mutate upload sessions.
+grant select, insert, update, delete on app.kdrive_uploads to szronox_api;
+revoke all on app.kdrive_uploads from szronox_worker;
+
 -- GEMINI-02: worker writes only its job lifecycle and additive hooks. It can
 -- advance the Reel version after hook append, but cannot edit any Reel content.
 grant select, insert, update on app.ai_runs to szronox_api;

@@ -32,6 +32,12 @@ export interface Meme {
   name: string;
   thumbnailRef: string | null;
   assetRef: string;
+  kdriveCopy: MemeKdriveCopy;
+}
+export interface MemeKdriveCopy {
+  state: 'pending' | 'copied' | 'failed' | 'not_configured';
+  name?: string;
+  webUrl?: string;
 }
 export interface MemeSuggestion {
   memeId: Id;
@@ -153,6 +159,8 @@ export interface Reel {
   publicationHashtags: string;
   /** Required production deliverable; SQL feed_cover_done NOT NULL DEFAULT false. */
   feedCoverDone: boolean;
+  /** Optional kDrive file reference; uploading it also marks feedCoverDone in the same write. */
+  feedCoverAsset: FeedCoverAsset | null;
   /**
    * CONTENT-PLANNER-01: the one current publication plan, local calendar date `YYYY-MM-DD`,
    * or null when unplanned. Planning never changes `status`.
@@ -236,6 +244,41 @@ export type KdriveFolderState =
   | { state: 'available'; driveId: string; folderId: string; name: string; webUrl: string }
   | { state: 'missing' | 'access_denied' | 'unavailable'; driveId: string; folderId: string; webUrl: string; retryable: boolean };
 export interface KdriveFolderResponse { reel: Reel; folder: KdriveFolderState }
+export interface FeedCoverAsset {
+  driveId: string;
+  fileId: string;
+  name: string;
+  byteSize: number;
+  uploadedAt: IsoDateTime;
+  uploadedBy: Id;
+}
+export type KdriveUploadPurpose = 'video' | 'cover';
+export type KdriveUploadLifecycleState = 'open' | 'finished' | 'attached' | 'cancelled' | 'expired' | 'failed';
+/** Explicit kDrive relay upload. `expectedVersion` is consumed only if this operation creates and links a Reel folder. */
+export interface KdriveUploadStartRequest extends MutationContext {
+  purpose: KdriveUploadPurpose;
+  fileName: string;
+  byteSize: number;
+  mimeType: string;
+  createFolder?: boolean;
+}
+/** Safe resumable state; provider tokens and upload hosts are never exposed. */
+export interface KdriveUploadState {
+  uploadId: Id;
+  reelId: Id;
+  purpose: KdriveUploadPurpose;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  chunkSize: number;
+  totalChunks: number;
+  receivedChunks: number[];
+  state: KdriveUploadLifecycleState;
+  finalName?: string;
+  fileId?: string;
+}
+export interface KdriveUploadStartResponse extends KdriveUploadState {}
+export interface AttachKdriveUploadRequest extends MutationContext {}
 export interface ReelListQuery {
   /** Defaults to active. Deleted is a secondary view, never a ReelStatus. */
   visibility?: 'active' | 'deleted';
