@@ -100,6 +100,10 @@ export const ATTENTION_THRESHOLD_HOURS: Record<Priority, number> = {
 export const COPY = {
   /** CONTENT-PLANNER-01 list quick action. */
   schedule: 'Zaplanuj',
+  plannerIdeas: 'POMYSŁY',
+  plannerIdeasHint: 'Zaplanowanie zmieni status na „Do nagrania”.',
+  scheduleIdeaHint: 'Po zaplanowaniu pomysł trafi do „Do nagrania”.',
+  scheduleIdeaPromoted: 'Przeniesiono do „Do nagrania”',
   /** sec. 3 — the editor may legitimately be null. */
   editorNone: 'Brak',
   editorSectionLabel: 'MONTUJE',

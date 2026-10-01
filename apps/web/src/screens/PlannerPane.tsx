@@ -4,7 +4,7 @@ import '../ui/tokens.css';
 import type { Reel } from '../../../../packages/contracts/src/index.js';
 import { SLOT_LABELS, groupPlanner, planOf, unscheduledEmptyLabel, weekRangeLabel } from '../data/planner.js';
 import { reelLabel } from '../data/reel-label.js';
-import { STATUS_LABELS } from '../ui/screen-contracts.js';
+import { COPY, STATUS_LABELS } from '../ui/screen-contracts.js';
 import { CoverIndicator, StatusBanner } from '../ui/primitives.js';
 import { BackArrowIcon, CalendarIcon, ChevronRightIcon } from '../ui/icons.js';
 import styles from './PlannerPane.module.css';
@@ -146,7 +146,16 @@ export function PlannerPane(props: PlannerPaneProps) {
               Niezaplanowane{groups.unscheduled.length > 0 ? <span className={styles.count}> {groups.unscheduled.length}</span> : null}
             </h2>
             {groups.unscheduled.length > 0 ? (
-              <ul className={styles.cards}>{groups.unscheduled.map(card)}</ul>
+              <>
+                {groups.unscheduledProduction.length > 0 ? <ul className={styles.cards}>{groups.unscheduledProduction.map(card)}</ul> : null}
+                {groups.unscheduledIdeas.length > 0 ? (
+                  <div className={styles.ideasGroup}>
+                    <h3 className={styles.ideasLabel}>{COPY.plannerIdeas} <span>· {groups.unscheduledIdeas.length}</span></h3>
+                    <p className={styles.ideasHint}>{COPY.plannerIdeasHint}</p>
+                    <ul className={styles.cards}>{groups.unscheduledIdeas.map(card)}</ul>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <p className={styles.emptyDay}>{unscheduledEmptyLabel(reels)}</p>
             )}

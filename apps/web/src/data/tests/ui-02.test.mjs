@@ -202,11 +202,21 @@ test('the final Delete action is destructive red in Detail and in the list sheet
 
 test('planner empty state is accurate and DZIŚ is marked by more than colour', () => {
   assert.equal(unscheduledEmptyLabel([]), 'Brak rolek do nagrania, w montażu ani gotowych.');
-  assert.equal(unscheduledEmptyLabel([{ status: 'published', deletedAt: null }, { status: 'idea', deletedAt: null }]), 'Brak rolek do nagrania, w montażu ani gotowych.');
+  assert.equal(unscheduledEmptyLabel([{ status: 'published', deletedAt: null }, { status: 'idea', deletedAt: null }]), 'Każda rolka w produkcji ma już termin.');
   assert.equal(unscheduledEmptyLabel([{ status: 'editing', deletedAt: null }]), 'Każda rolka w produkcji ma już termin.');
   const css = read('../../screens/PlannerPane.module.css');
   assert.ok(between(css, ".group[data-today='true'] {", '}').includes('box-shadow: inset 3px 0 0 var(--sz-color-action)'));
   assert.equal(read('../../screens/PlannerPane.tsx').includes('Wszystko w produkcji ma termin'), false);
+});
+
+test('IDEAS-PLAN hints use the frozen copy and render only for the specified idea states', () => {
+  const sheet = read('../../screens/ScheduleSheet.tsx');
+  assert.ok(sheet.includes("status === 'idea' && plan.date === null"), 'sheet hint is limited to undated ideas');
+  assert.ok(sheet.includes('{COPY.scheduleIdeaHint}'));
+  const pane = read('../../screens/PlannerPane.tsx');
+  assert.ok(pane.includes('groups.unscheduledIdeas.length > 0'), 'idea divider and sub-label require ideas');
+  assert.ok(pane.includes('{COPY.plannerIdeasHint}'), 'idea hint is shown alongside that group');
+  assert.ok(pane.includes('{COPY.plannerIdeas} <span>· {groups.unscheduledIdeas.length}</span>'));
 });
 
 test('desktop panes stay structurally unchanged; only surfaces and boundary differ', () => {

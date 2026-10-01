@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { PUBLICATION_SLOTS, SLOT_LABELS, planLabel, quickDays, type Plan, type PublicationSlot } from '../data/planner.js';
 import { TextAction } from '../ui/primitives.js';
+import { COPY } from '../ui/screen-contracts.js';
 import sheetStyles from './ReelQuickActions.module.css';
 import styles from './ScheduleSheet.module.css';
 
 export interface ScheduleSheetProps {
   reelTitle: string;
+  status: ReelStatus;
   /** The Reel's current plan; `date: null` means unplanned. */
   plan: Plan;
   today: string;
@@ -22,9 +25,9 @@ export interface ScheduleSheetProps {
  * `Zaplanuj` (CONTENT-PLANNER-01): one small sheet, the same from the planner, the list's
  * Więcej sheet and Reel Detail. Choose a day → optional Rano/Popołudnie/Wieczór → Gotowe. A
  * date alone is a complete plan; the slot is never required and tapping the chosen slot again
- * clears it. Nothing here touches the Reel's status.
+ * clears it. The server applies any first-date idea promotion.
  */
-export function ScheduleSheet({ reelTitle, plan, today, onConfirm, onClear, onDismiss, saving, error }: ScheduleSheetProps) {
+export function ScheduleSheet({ reelTitle, status, plan, today, onConfirm, onClear, onDismiss, saving, error }: ScheduleSheetProps) {
   const [date, setDate] = useState<string | null>(plan.date);
   const [slot, setSlot] = useState<PublicationSlot | null>(plan.slot);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -103,6 +106,8 @@ export function ScheduleSheet({ reelTitle, plan, today, onConfirm, onClear, onDi
             ))}
           </div>
         </div>
+
+        {status === 'idea' && plan.date === null ? <p className={styles.ideaHint}>{COPY.scheduleIdeaHint}</p> : null}
 
         {error ? <p className={sheetStyles.error} role="alert">{error}</p> : null}
 

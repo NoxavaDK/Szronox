@@ -990,21 +990,31 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   /**
    * Set, move or clear one Reel's publication plan (CONTENT-PLANNER-01). Every surface —
    * planner, list quick action, Reel Detail — calls this, and it only ever writes the two
-   * plan fields of that Reel through the ordinary PATCH: no planner record, no status change.
+   * plan fields of that Reel through the ordinary PATCH; the server owns idea promotion.
    *
    * The open Reel goes through `changeReel`, the same debounced, draft-backed save as every
    * other Detail edit, so a plan change cannot race an unsent script edit into a conflict.
    * Any other Reel uses the list's version-checked `patchReelById`.
    */
-  const scheduleReel = useCallback(async (id: string, date: string | null, slot: PublicationSlot | null): Promise<{ ok: boolean; message: string }> => {
+  const scheduleReel = useCallback(async (id: string, date: string | null, slot: PublicationSlot | null): Promise<{ ok: boolean; message: string; promoted?: boolean }> => {
     const changes = planChanges(date, slot);
-    if (currentRef.current?.id === id && route.name === 'detail') { changeReel(changes); return { ok: true, message: '' }; }
+    if (currentRef.current?.id === id && route.name === 'detail') {
+      const before = currentRef.current;
+      changeReel(changes);
+      const flush = flushPending.current.get(id);
+      if (flush) await flush();
+      try {
+        const saved = await api.reel(id);
+        const ok = saved.plannedPublicationDate === date;
+        return { ok, message: ok ? '' : 'Nie udało się zapisać terminu.', promoted: ok && before.status === 'idea' && saved.status === 'to_record' };
+      } catch (error) { return { ok: false, message: polishError(error) }; }
+    }
     let base = planReels.find((item) => item.id === id) ?? reels.find((item) => item.id === id);
     if (!base) {
       try { base = await api.reel(id); } catch (error) { return { ok: false, message: polishError(error) }; }
     }
     const result = await patchReelById(id, base.version, changes);
-    return result.ok ? { ok: true, message: '' } : { ok: false, message: result.message };
+    return result.ok ? { ok: true, message: '', promoted: base.status === 'idea' && result.reel.status === 'to_record' } : { ok: false, message: result.message };
   }, [api, changeReel, patchReelById, planReels, reels, route.name]);
 
   /** `Kopiuj link` (LIST-01): a same-origin, session-authenticated deep link to this Reel. */

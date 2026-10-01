@@ -114,7 +114,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     setScheduleSaving(true); setScheduleError(null);
     const result = await c.scheduleReel(id, date, slot);
     setScheduleSaving(false);
-    if (result.ok) closeSchedule();
+    if (result.ok) {
+      closeSchedule();
+      if (result.promoted) c.setMessage(COPY.scheduleIdeaPromoted);
+    }
     else if (result.message) setScheduleError(result.message);
   };
   /** Desktop drag and drop: a new day keeps the Reel's explicit slot; NIEZAPLANOWANE clears both. */
@@ -122,6 +125,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     const reel = c.planReels.find((item) => item.id === id);
     const result = await c.scheduleReel(id, date, date === null ? null : reel ? planOf(reel).slot : null);
     if (!result.ok && result.message) c.setMessage(result.message);
+    else if (result.promoted) c.setMessage(COPY.scheduleIdeaPromoted);
   };
 
   // ── LIST-01: list-row quick actions (long-press / swipe) ──────────────────
@@ -766,6 +770,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     // keyed by the same Reel id. Equal sibling keys made React leave a stale Detail behind.
     key={`schedule:${scheduleReel.id}`}
     reelTitle={reelLabel(scheduleReel).text}
+    status={scheduleReel.status}
     plan={planOf(scheduleReel)}
     today={today}
     saving={scheduleSaving}

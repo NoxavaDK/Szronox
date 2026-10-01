@@ -119,6 +119,13 @@
   cursor: default;
 }
 
+.ideaHint {
+  margin: var(--sz-space-2) 0 0;
+  color: var(--sz-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .actions {
   display: flex;
   align-items: center;
