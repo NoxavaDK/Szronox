@@ -96,6 +96,13 @@ test('IDEAS-PLAN promotes only an undated idea on its first date assignment', as
       changes: { plannedPublicationDate: '2026-09-29', plannedPublicationSlot: 'evening' },
     });
     assert.equal(moved.status, 'to_record');
+    const unplannedPromoted = await repo.patchReel(NOXAVA, idea.id, {
+      operationId: randomUUID(), expectedVersion: moved.version,
+      changes: { plannedPublicationDate: null },
+    });
+    assert.equal(unplannedPromoted.status, 'to_record', 'unplanning never reverses promotion');
+    assert.equal(unplannedPromoted.plannedPublicationDate, null);
+    assert.equal(unplannedPromoted.plannedPublicationSlot, null);
 
     const another = await newReel(repo);
     const explicitIdea = await repo.patchReel(NOXAVA, another.id, {

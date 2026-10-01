@@ -209,6 +209,16 @@ test('planner empty state is accurate and DZIŚ is marked by more than colour', 
   assert.equal(read('../../screens/PlannerPane.tsx').includes('Wszystko w produkcji ma termin'), false);
 });
 
+test('IDEAS-PLAN hints use the frozen copy and render only for the specified idea states', () => {
+  const sheet = read('../../screens/ScheduleSheet.tsx');
+  assert.ok(sheet.includes("status === 'idea' && plan.date === null"), 'sheet hint is limited to undated ideas');
+  assert.ok(sheet.includes('{COPY.scheduleIdeaHint}'));
+  const pane = read('../../screens/PlannerPane.tsx');
+  assert.ok(pane.includes('groups.unscheduledIdeas.length > 0'), 'idea divider and sub-label require ideas');
+  assert.ok(pane.includes('{COPY.plannerIdeasHint}'), 'idea hint is shown alongside that group');
+  assert.ok(pane.includes('{COPY.plannerIdeas} <span>· {groups.unscheduledIdeas.length}</span>'));
+});
+
 test('desktop panes stay structurally unchanged; only surfaces and boundary differ', () => {
   const css = read('../../app/App.css');
   assert.ok(css.includes(".workspace[data-layout='two'] { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }"));
