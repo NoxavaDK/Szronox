@@ -1137,12 +1137,12 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
 
   const copyPublication = useCallback(async () => {
     if (!current) return; const { publicationDescription: description, publicationHashtags: hashtags } = current;
-    const source = current.publicationSource ?? current.sourceMetadata?.line ?? '';
+    const source = sourceUndo?.reelId === current.id ? sourceUndo.text : current.publicationSource ?? current.sourceMetadata?.line ?? '';
     const value = composePublicationText(description, source, hashtags);
     if (!value) { setMessage('Brak opisu i hashtagów do skopiowania.'); return; }
     try { if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE'); await navigator.clipboard.writeText(value); setMessage('Skopiowano opis.'); }
     catch { setMessage(`Nie udało się skopiować. Zaznacz i skopiuj ręcznie:\n\n${value}`); }
-  }, [current]);
+  }, [current, sourceUndo]);
 
   /**
    * Drop everything this account had on screen.

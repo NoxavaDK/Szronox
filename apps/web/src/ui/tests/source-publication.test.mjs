@@ -32,4 +32,6 @@ test('source polling is scoped to expanded PUBLIKACJA and merges metadata only',
   assert.match(controller, /changeReel\(\{ publicationSource: null \}, true\)/);
   assert.match(controller, /setTimeout\(\(\) => \{ setSourceUndo\(null\)/);
   assert.match(controller, /changeReel\(\{ publicationSource: undo\.text \}\)/);
+  assert.match(app, /c\.sourceUndo\?\.reelId === reel\.id \? c\.sourceUndo\.text : reel\.publicationSource/);
+  assert.match(controller, /sourceUndo\?\.reelId === current\.id \? sourceUndo\.text : current\.publicationSource/);
 });
