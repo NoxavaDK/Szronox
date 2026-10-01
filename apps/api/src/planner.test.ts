@@ -1,8 +1,9 @@
 /**
  * CONTENT-PLANNER-01: the publication plan is two nullable columns on the Reel, written only
  * through the ordinary version-checked PATCH. These tests pin that it is one state per Reel
- * (never a second record), that the time is optional detail of a date, that planning never
- * moves status, and that migration 0011 leaves every existing Reel valid and unplanned.
+ * (never a second record), that the time is optional detail of a date, that first date
+ * assignment promotes an idea unless status is explicit, later moves/unplanning preserve
+ * status, and that migration 0011 leaves every existing Reel valid and unplanned.
  */
 
 import assert from 'node:assert/strict';
