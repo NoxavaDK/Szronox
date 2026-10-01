@@ -690,7 +690,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         onCancelUpload: () => void c.cancelKdriveUpload(reel.id), onRetryUpload: retryOrResumeUpload,
         description: reel.publicationDescription,
         onChangeDescription: (publicationDescription) => c.changeReel({ publicationDescription }),
-        source: c.sourceUndo?.reelId === reel.id ? c.sourceUndo.text : reel.publicationSource ?? reel.sourceMetadata?.line ?? '',
+        source: reel.publicationSource ?? reel.sourceMetadata?.line ?? '',
         sourceManual: reel.publicationSource !== null,
         sourceAutomaticAvailable: reel.sourceMetadata?.line !== null && reel.sourceMetadata !== null,
         sourceMetadataState: reel.sourceMetadata?.state ?? 'never',

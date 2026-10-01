@@ -32,6 +32,8 @@ test('source polling is scoped to expanded PUBLIKACJA and merges metadata only',
   assert.match(controller, /changeReel\(\{ publicationSource: null \}, true\)/);
   assert.match(controller, /setTimeout\(\(\) => \{ setSourceUndo\(null\)/);
   assert.match(controller, /changeReel\(\{ publicationSource: undo\.text \}\)/);
-  assert.match(app, /c\.sourceUndo\?\.reelId === reel\.id \? c\.sourceUndo\.text : reel\.publicationSource/);
-  assert.match(controller, /sourceUndo\?\.reelId === current\.id \? sourceUndo\.text : current\.publicationSource/);
+  // The undo window shows and copies the restored automatic value; the old text is held for Cofnij only.
+  assert.match(app, /source: reel\.publicationSource \?\? reel\.sourceMetadata\?\.line \?\? ''/);
+  assert.match(controller, /const source = current\.publicationSource \?\? current\.sourceMetadata\?\.line \?\? ''/);
+  assert.doesNotMatch(app, /c\.sourceUndo\.text/);
 });

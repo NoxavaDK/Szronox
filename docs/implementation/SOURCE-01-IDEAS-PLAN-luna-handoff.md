@@ -136,7 +136,7 @@ agents.
 - A re-read, `Odśwież`, `Pobierz` or `Ponów` merges **only** `sourceMetadata` into local state.
   It never replaces field values, drafts or unsaved edits of any field. If the user is typing in
   Źródło when automatic data arrives, their text stays (it becomes the manual value on save).
-- `Przywróć automatyczne`: PATCH `null` immediately, keep the previous manual text in view state,
+- `Przywróć automatyczne`: PATCH `null` immediately (the field then shows and copies the automatic value), hold the previous manual text for undo only (never displayed or copied),
   and show `Przywrócono automatyczne źródło.` + `Cofnij` until the next edit of the field, leaving
   the Reel, or 30 s. `Cofnij` saves the previous text back through the normal field save.
 - `composePublicationText(description, source, hashtags)`: the **current editable values,

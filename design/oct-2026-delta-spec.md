@@ -63,7 +63,8 @@ Checking a pending fetch:
 
 Undo for `Przywróć automatyczne`:
 - immediate, no dialog;
-- the previous manual text is kept in the view, and the state line shows
+- the field immediately shows the automatic value, and `Kopiuj opis` copies it; the previous manual
+  text is held only for `Cofnij` (never displayed or copied), and the state line shows
   `Przywrócono automatyczne źródło.` + `Cofnij` until the user edits the field, leaves the Reel,
   or 30 s pass;
 - `Cofnij` writes the previous manual text back (an ordinary field save).

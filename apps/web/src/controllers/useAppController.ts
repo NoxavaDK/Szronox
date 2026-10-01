@@ -1137,12 +1137,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
 
   const copyPublication = useCallback(async () => {
     if (!current) return; const { publicationDescription: description, publicationHashtags: hashtags } = current;
-    const source = sourceUndo?.reelId === current.id ? sourceUndo.text : current.publicationSource ?? current.sourceMetadata?.line ?? '';
+    // During the Cofnij window the restored automatic value is the truth; the old manual
+    // text is only held for undo, never displayed or copied.
+    const source = current.publicationSource ?? current.sourceMetadata?.line ?? '';
     const value = composePublicationText(description, source, hashtags);
     if (!value) { setMessage('Brak opisu i hashtagów do skopiowania.'); return; }
     try { if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE'); await navigator.clipboard.writeText(value); setMessage('Skopiowano opis.'); }
     catch { setMessage(`Nie udało się skopiować. Zaznacz i skopiuj ręcznie:\n\n${value}`); }
-  }, [current, sourceUndo]);
+  }, [current]);
 
   /**
    * Drop everything this account had on screen.
