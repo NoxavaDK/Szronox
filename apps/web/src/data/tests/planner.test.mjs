@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   addDays, groupPlanner, isOverdue, isUnscheduledCandidate, planChanges, planLabel, planOf,
   plannerWeek, quickDays, weekRangeLabel, weekStartOf, PUBLICATION_SLOTS, SLOT_LABELS,
+  unscheduledEmptyLabel,
 } from '../planner.ts';
 
 // Thursday 2026-09-24; its week is Monday 21.09 – Sunday 27.09.
@@ -69,7 +70,7 @@ test('moving a Reel moves it between days; clearing it returns it to NIEZAPLANOW
   assert.deepEqual(groupPlanner([cleared], TODAY, 0).unscheduled.map((item) => item.id), ['x']);
 });
 
-test('NIEZAPLANOWANE holds only active, in-production Reels without a plan', () => {
+test('NIEZAPLANOWANE lists non-ideas first and ideas second, preserving both orders', () => {
   const items = [
     reel({ id: 'rec', status: 'to_record' }),
     reel({ id: 'edit', status: 'editing' }),
@@ -79,7 +80,10 @@ test('NIEZAPLANOWANE holds only active, in-production Reels without a plan', () 
     reel({ id: 'del', status: 'ready', deletedAt: '2026-09-20T10:00:00.000Z' }),
     reel({ id: 'planned', status: 'ready', plannedPublicationDate: '2026-09-24' }),
   ];
-  assert.deepEqual(groupPlanner(items, TODAY, 0).unscheduled.map((item) => item.id), ['rec', 'edit', 'ready']);
+  const groups = groupPlanner(items, TODAY, 0);
+  assert.deepEqual(groups.unscheduled.map((item) => item.id), ['rec', 'edit', 'ready', 'idea']);
+  assert.deepEqual(groups.unscheduledProduction.map((item) => item.id), ['rec', 'edit', 'ready']);
+  assert.deepEqual(groups.unscheduledIdeas.map((item) => item.id), ['idea']);
   assert.equal(isUnscheduledCandidate(items[4]), false);
   assert.equal(isUnscheduledCandidate(items[5]), false);
 });
@@ -91,6 +95,22 @@ test('a Reel cached before the planner existed is valid and unplanned', () => {
   assert.deepEqual(planOf({ plannedPublicationDate: '2026-09-25', plannedPublicationTime: '18:00' }), { date: '2026-09-25', slot: null });
   assert.deepEqual(planOf({ plannedPublicationDate: '2026-09-25', plannedPublicationSlot: '18:00' }), { date: '2026-09-25', slot: null });
   assert.deepEqual(groupPlanner([legacy], TODAY, 0).unscheduled.map((item) => item.id), ['old']);
+});
+
+test('ideas are included in the unscheduled population even when existing non-idea work is absent', () => {
+  const idea = reel({ id: 'idea', status: 'idea' });
+  assert.equal(isUnscheduledCandidate(idea), true);
+  assert.deepEqual(groupPlanner([idea], TODAY, 0).unscheduledIdeas.map((item) => item.id), ['idea']);
+});
+
+test('empty copy considers production Reels and ideas independently', () => {
+  const item = (status) => ({ status, deletedAt: null });
+  const noWork = 'Brak rolek do nagrania, w montażu ani gotowych.';
+  const scheduled = 'Każda rolka w produkcji ma już termin.';
+  assert.equal(unscheduledEmptyLabel([]), noWork);
+  assert.equal(unscheduledEmptyLabel([item('ready')]), scheduled);
+  assert.equal(unscheduledEmptyLabel([item('idea')]), scheduled);
+  assert.equal(unscheduledEmptyLabel([item('ready'), item('idea')]), scheduled);
 });
 
 test('past unpublished plans surface as overdue in the current week only; published ones do not', () => {

@@ -456,7 +456,6 @@ export class CoreRepository {
       // CONTENT-PLANNER-01: the slot (Rano/Popołudnie/Wieczór) is detail of a date. Clearing
       // the date alone clears the slot with it (unscheduling is one action); a slot without
       // any date is refused.
-      // Status is deliberately untouched by any plan change.
       const planEntries: Array<[string, unknown]> = [...entries];
       const clearsDateOnly = Object.hasOwn(changes, 'plannedPublicationDate')
         && changes.plannedPublicationDate === null && !Object.hasOwn(changes, 'plannedPublicationSlot');
@@ -468,6 +467,14 @@ export class CoreRepository {
       if (nextSlot !== null && nextSlot !== undefined && (nextDate === null || nextDate === undefined)) {
         throw validationError('plannedPublicationSlot requires plannedPublicationDate', { field: 'plannedPublicationSlot' });
       }
+      // IDEAS-PLAN: only the first date assignment promotes an idea. Keep this in
+      // the same version-checked UPDATE as the plan fields; an explicit status wins.
+      const promotesIdea = before.status === 'idea'
+        && before.plannedPublicationDate === null
+        && nextDate !== null && nextDate !== undefined
+        && !Object.hasOwn(changes, 'status');
+      const effectiveStatus = promotesIdea ? 'to_record' : nextStatus;
+      if (promotesIdea) planEntries.push(['status', 'to_record']);
 
       const assignments: string[] = [];
       const params: unknown[] = [];
@@ -485,9 +492,9 @@ export class CoreRepository {
 
       // Entering editing from another status stamps a server timestamp; re-saving
       // editing does not reset it, and priority or editor changes never do.
-      if (nextStatus === 'editing' && before.status !== 'editing') {
+      if (effectiveStatus === 'editing' && before.status !== 'editing') {
         assignments.push('editing_started_at = now()');
-      } else if (nextStatus !== 'editing' && before.status === 'editing') {
+      } else if (effectiveStatus !== 'editing' && before.status === 'editing') {
         // Leaving editing ends the period; re-entering later starts a new one.
         assignments.push('editing_started_at = null');
       }

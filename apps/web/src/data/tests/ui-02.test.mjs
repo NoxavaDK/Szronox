@@ -202,7 +202,7 @@ test('the final Delete action is destructive red in Detail and in the list sheet
 
 test('planner empty state is accurate and DZIŚ is marked by more than colour', () => {
   assert.equal(unscheduledEmptyLabel([]), 'Brak rolek do nagrania, w montażu ani gotowych.');
-  assert.equal(unscheduledEmptyLabel([{ status: 'published', deletedAt: null }, { status: 'idea', deletedAt: null }]), 'Brak rolek do nagrania, w montażu ani gotowych.');
+  assert.equal(unscheduledEmptyLabel([{ status: 'published', deletedAt: null }, { status: 'idea', deletedAt: null }]), 'Każda rolka w produkcji ma już termin.');
   assert.equal(unscheduledEmptyLabel([{ status: 'editing', deletedAt: null }]), 'Każda rolka w produkcji ma już termin.');
   const css = read('../../screens/PlannerPane.module.css');
   assert.ok(between(css, ".group[data-today='true'] {", '}').includes('box-shadow: inset 3px 0 0 var(--sz-color-action)'));

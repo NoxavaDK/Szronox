@@ -50,10 +50,13 @@ test('a new Reel is unplanned', async () => {
   } finally { await db.close(); }
 });
 
-test('a date alone is a valid plan; the slot is optional; status and scriptRevision are untouched', async () => {
+test('a date alone is a valid plan for a non-idea; the slot is optional and scriptRevision is untouched', async () => {
   const { db, repo } = await fixture();
   try {
-    const reel = await newReel(repo);
+    const created = await newReel(repo);
+    const reel = created.status === 'to_record' ? created : await repo.patchReel(NOXAVA, created.id, {
+      operationId: randomUUID(), expectedVersion: created.version, changes: { status: 'to_record' },
+    });
     const planned = await repo.patchReel(NOXAVA, reel.id, {
       operationId: randomUUID(), expectedVersion: reel.version, changes: { plannedPublicationDate: '2026-09-28' },
     });
@@ -71,6 +74,62 @@ test('a date alone is a valid plan; the slot is optional; status and scriptRevis
     const reread = await repo.getReel(reel.id);
     assert.equal(reread.plannedPublicationDate, '2026-09-28');
     assert.equal(reread.plannedPublicationSlot, 'evening');
+  } finally { await db.close(); }
+});
+
+test('IDEAS-PLAN promotes only an undated idea on its first date assignment', async () => {
+  const { db, repo } = await fixture();
+  try {
+    const original = await newReel(repo);
+    const idea = original.status === 'idea' ? original : await repo.patchReel(NOXAVA, original.id, {
+      operationId: randomUUID(), expectedVersion: original.version, changes: { status: 'idea' },
+    });
+    const promoted = await repo.patchReel(NOXAVA, idea.id, {
+      operationId: randomUUID(), expectedVersion: idea.version,
+      changes: { plannedPublicationDate: '2026-09-28' },
+    });
+    assert.equal(promoted.status, 'to_record');
+    assert.equal(promoted.version, idea.version + 1);
+    assert.equal(promoted.plannedPublicationDate, '2026-09-28');
+    const moved = await repo.patchReel(NOXAVA, idea.id, {
+      operationId: randomUUID(), expectedVersion: promoted.version,
+      changes: { plannedPublicationDate: '2026-09-29', plannedPublicationSlot: 'evening' },
+    });
+    assert.equal(moved.status, 'to_record');
+
+    const another = await newReel(repo);
+    const explicitIdea = await repo.patchReel(NOXAVA, another.id, {
+      operationId: randomUUID(), expectedVersion: another.version,
+      changes: { status: 'idea', plannedPublicationDate: '2026-09-30' },
+    });
+    assert.equal(explicitIdea.status, 'idea', 'explicit status takes precedence');
+    const reslotted = await repo.patchReel(NOXAVA, another.id, {
+      operationId: randomUUID(), expectedVersion: explicitIdea.version,
+      changes: { plannedPublicationSlot: 'morning' },
+    });
+    assert.equal(reslotted.status, 'idea', 'an already-dated idea remains an idea');
+    const unplanned = await repo.patchReel(NOXAVA, another.id, {
+      operationId: randomUUID(), expectedVersion: reslotted.version,
+      changes: { plannedPublicationDate: null },
+    });
+    assert.equal(unplanned.status, 'idea', 'clearing a plan does not alter status');
+  } finally { await db.close(); }
+});
+
+test('a stale first-date assignment changes neither plan nor status', async () => {
+  const { db, repo } = await fixture();
+  try {
+    const reel = await newReel(repo);
+    const idea = reel.status === 'idea' ? reel : await repo.patchReel(NOXAVA, reel.id, {
+      operationId: randomUUID(), expectedVersion: reel.version, changes: { status: 'idea' },
+    });
+    await repo.patchReel(NOXAVA, reel.id, { operationId: randomUUID(), expectedVersion: idea.version, changes: { title: 'Nowy tytuł' } });
+    await assert.rejects(repo.patchReel(SZRON, reel.id, {
+      operationId: randomUUID(), expectedVersion: idea.version, changes: { plannedPublicationDate: '2026-09-28' },
+    }), (error) => error instanceof CoreError && error.code === 'EDIT_CONFLICT');
+    const unchanged = await repo.getReel(reel.id);
+    assert.equal(unchanged.plannedPublicationDate, null);
+    assert.equal(unchanged.status, 'idea');
   } finally { await db.close(); }
 });
 

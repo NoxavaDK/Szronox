@@ -17,12 +17,10 @@ export const PUBLICATION_SLOTS: readonly PublicationSlot[] = ['morning', 'aftern
 export const SLOT_LABELS: Record<PublicationSlot, string> = { morning: 'Rano', afternoon: 'Popołudnie', evening: 'Wieczór' };
 
 /**
- * Which unplanned Reels belong in NIEZAPLANOWANE: work that is actually heading for
- * publication. `idea` is excluded because raw ideas are not yet content to schedule (they
- * can still be planned explicitly from the list or Detail); `published` is history. Deleted
- * Reels never reach the planner at all.
+ * Which unplanned Reels belong in NIEZAPLANOWANE: production work and ideas that can be
+ * explicitly scheduled. Published Reels are history. Deleted Reels never reach the planner.
  */
-export const UNSCHEDULED_STATUSES: readonly ReelStatus[] = ['to_record', 'editing', 'ready'];
+export const UNSCHEDULED_STATUSES: readonly ReelStatus[] = ['to_record', 'editing', 'ready', 'idea'];
 
 const WEEKDAY_SHORT = ['ND', 'PN', 'WT', 'ŚR', 'CZW', 'PT', 'SOB'];
 const WEEKDAY_LOWER = ['nd', 'pn', 'wt', 'śr', 'czw', 'pt', 'sob'];
@@ -139,6 +137,8 @@ export interface PlannerGroups<T> {
   /** Only in the current week: planned before today and still not published. */
   overdue: T[];
   unscheduled: T[];
+  unscheduledProduction: T[];
+  unscheduledIdeas: T[];
 }
 
 export function groupPlanner<T extends Pick<Reel, 'id' | 'status' | 'deletedAt'> & Partial<PlanFields>>(
@@ -153,16 +153,18 @@ export function groupPlanner<T extends Pick<Reel, 'id' | 'status' | 'deletedAt'>
     days,
     overdue: offset === 0 ? bySlot(active.filter((reel) => isOverdue(reel, today))) : [],
     unscheduled: active.filter(isUnscheduledCandidate),
+    unscheduledProduction: active.filter((reel) => isUnscheduledCandidate(reel) && reel.status !== 'idea'),
+    unscheduledIdeas: active.filter((reel) => isUnscheduledCandidate(reel) && reel.status === 'idea'),
   };
 }
 
 /**
- * UI-02: accurate wording for an empty NIEZAPLANOWANE group. "Everything has a date" is only
- * true when there is production work at all; with none, say so instead of reassuring.
+ * Accurate wording for an empty NIEZAPLANOWANE group. Ideas and production Reels both count
+ * as relevant work when deciding whether everything already has a date.
  */
 export function unscheduledEmptyLabel(reels: ReadonlyArray<Pick<Reel, 'status' | 'deletedAt'>>): string {
-  const inProduction = reels.some((reel) => reel.deletedAt === null && UNSCHEDULED_STATUSES.includes(reel.status));
-  return inProduction ? 'Każda rolka w produkcji ma już termin.' : 'Brak rolek do nagrania, w montażu ani gotowych.';
+  const hasWork = reels.some((reel) => reel.deletedAt === null && UNSCHEDULED_STATUSES.includes(reel.status));
+  return hasWork ? 'Każda rolka w produkcji ma już termin.' : 'Brak rolek do nagrania, w montażu ani gotowych.';
 }
 
 /** Day shortcuts for the Zaplanuj sheet: today plus the next six days. */
