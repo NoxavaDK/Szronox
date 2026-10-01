@@ -1,8 +1,8 @@
 # Luna dispatch — SOURCE-01 and IDEAS-PLAN
 
-Status: **APPROVED — root pin commit in progress.** Astra review done (2026-10-01); its A–B and
-copy-contract corrections are applied. Operator approval for both tasks and model assignments
-received (2026-10-01). Dispatch follows the root pin commit (§0), whose id replaces `<PIN>` below.
+Status: **APPROVED — root pin d0fcf2a; dispatch authorized.** Astra review done (2026-10-01);
+its A–B and copy-contract corrections are applied. Operator approval for both tasks and model
+assignments received (2026-10-01).
 
 Read first: `AGENTS.md`, `docs/implementation/T00-contracts.md` (incl. the pinned SOURCE-01 /
 IDEAS-PLAN amendments), `docs/implementation/OCT-2026-plan.md` §0–2,
@@ -18,7 +18,7 @@ agents.
 | Suitability | bounded API+web feature; security-sensitive outbound fetch reuses an existing guard | small bounded API rule + planner UI |
 | Difficulty | medium | low |
 | Branch / worktree | `codex/source-01` | `codex/ideas-plan` |
-| Base | master at `<PIN>` | master at `<PIN>` |
+| Base | master at `d0fcf2a` | master at `d0fcf2a` |
 
 ---
 
