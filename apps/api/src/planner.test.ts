@@ -173,7 +173,7 @@ test('clearing the date unschedules completely, including the slot', async () =>
     });
     assert.equal(cleared.plannedPublicationDate, null);
     assert.equal(cleared.plannedPublicationSlot, null);
-    assert.equal(cleared.status, reel.status);
+    assert.equal(cleared.status, 'to_record', 'unplanning does not reverse first-date promotion');
   } finally { await db.close(); }
 });
 
@@ -316,7 +316,10 @@ test('migration 0012 converts any recorded time to its slot and clears the time'
         [id, '{}', NOXAVA.id, date, time]);
     }
     const applied = await migrate(db);
-    assert.deepEqual(applied.filter((item) => !item.alreadyApplied).map((item) => item.name), ['0012_publication_slot.sql']);
+    const appliedFrom0012 = applied.filter((item) => item.name >= '0012_publication_slot.sql');
+    assert.deepEqual(appliedFrom0012.map((item) => item.name), all.filter((name) => name >= '0012_publication_slot.sql'));
+    assert.equal(appliedFrom0012[0]?.name, '0012_publication_slot.sql');
+    assert.equal(appliedFrom0012[0]?.alreadyApplied, false);
     const repo = new CoreRepository(db);
     const slots = [];
     for (const [id] of rows) slots.push((await repo.getReel(id)).plannedPublicationSlot);
