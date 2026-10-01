@@ -748,6 +748,18 @@ export interface PublicationSectionProps {
   description: string;
   onChangeDescription: (value: string) => void;
 
+  source: string;
+  sourceManual: boolean;
+  sourceAutomaticAvailable: boolean;
+  sourceMetadataState: 'pending' | 'found' | 'partial' | 'failed' | 'no_url' | 'never' | null;
+  sourceLongWait: boolean;
+  sourceUndoAvailable: boolean;
+  onChangeSource: (value: string) => void;
+  onRefreshSource: () => void;
+  onRestoreAutomaticSource: () => void;
+  onUndoRestoreSource: () => void;
+  onCheckSource: () => void;
+
   hashtags: string;
   onChangeHashtags: (value: string) => void;
 

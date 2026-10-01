@@ -91,6 +91,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const [status, setStatus] = useState<ReelStatus | 'all'>('idea');
   const [reels, setReels] = useState<Reel[]>([]);
   const [current, setCurrent] = useState<Reel | null>(null);
+  const [sourceUndo, setSourceUndo] = useState<{ reelId: string; text: string } | null>(null);
+  const sourceUndoTimer = useRef<number | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'error' | 'offline'>('idle');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'offline' | 'conflict' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -137,6 +139,12 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     setConflictsByReel(next);
   }, []);
   useEffect(() => { currentRef.current = current; }, [current]);
+  useEffect(() => {
+    if (route.name === 'detail' && sourceUndo?.reelId === route.reelId) return;
+    if (sourceUndo) setSourceUndo(null);
+    if (sourceUndoTimer.current !== null) window.clearTimeout(sourceUndoTimer.current);
+    sourceUndoTimer.current = null;
+  }, [route, sourceUndo]);
   useEffect(() => { hookEditsRef.current = hookEdits; }, [hookEdits]);
 
   useEffect(() => {
@@ -603,9 +611,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     } catch (error) { if (isAbandonedRequest(error)) return null; setSaveState('error'); setMessage(polishError(error)); return null; }
   }, [api, attachments, capture, openDetail, queue, refreshPlanner, reportAttachments, store, user]);
 
-  const changeReel = useCallback((changes: ReelPatchRequest['changes']) => {
+  const changeReel = useCallback((changes: ReelPatchRequest['changes'], immediate = false) => {
     const reel = currentRef.current;
     if (!reel || !user) return;
+    if (Object.hasOwn(changes, 'publicationSource')) {
+      setSourceUndo(null);
+      if (sourceUndoTimer.current !== null) window.clearTimeout(sourceUndoTimer.current);
+      sourceUndoTimer.current = null;
+    }
     const pending = pendingPatches.current.get(reel.id) ?? { reelId: reel.id, expectedVersion: reel.version, changes: {} };
     pending.changes = { ...pending.changes, ...changes }; pendingPatches.current.set(reel.id, pending);
     const next = { ...reel, ...changes }; currentRef.current = next; setCurrent(next); setSaveState('saving');
@@ -770,7 +783,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
         }
       };
       flushPending.current.set(reel.id, send);
-      saveTimers.current.set(reel.id, window.setTimeout(() => { void send(); }, 600));
+      saveTimers.current.set(reel.id, window.setTimeout(() => { void send(); }, immediate ? 0 : 600));
     });
   }, [api, setConflictForReel, store, user]);
 
@@ -1086,9 +1099,46 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     } catch (error) { if (isAbandonedRequest(error)) return; setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'error'); setMessage(polishError(error)); }
   }, [api]);
 
+  const mergeSourceMetadata = useCallback((reelId: string, sourceMetadata: Reel['sourceMetadata']) => {
+    if (currentRef.current?.id !== reelId) return;
+    const next = { ...currentRef.current, sourceMetadata };
+    currentRef.current = next; setCurrent(next);
+  }, []);
+  const checkSourceMetadata = useCallback(async (reelId?: string) => {
+    const targetId = reelId ?? currentRef.current?.id;
+    if (!targetId) return;
+    try { const fresh = await api.reel(targetId); mergeSourceMetadata(targetId, fresh.sourceMetadata); }
+    catch { /* polling is best-effort; manual Sprawdź remains available */ }
+  }, [api, mergeSourceMetadata]);
+  const refreshSourceMetadata = useCallback(async () => {
+    const reel = currentRef.current;
+    if (!reel) return;
+    try {
+      const response = await api.refreshSourceMetadata(reel.id, crypto.randomUUID());
+      mergeSourceMetadata(reel.id, response.sourceMetadata);
+    } catch (error) { if (!isAbandonedRequest(error)) setMessage(polishError(error)); }
+  }, [api, mergeSourceMetadata]);
+  const restoreAutomaticSource = useCallback(async () => {
+    const reel = currentRef.current;
+    if (!reel || reel.publicationSource === null) return;
+    const oldText = reel.publicationSource;
+    if (sourceUndoTimer.current !== null) window.clearTimeout(sourceUndoTimer.current);
+    changeReel({ publicationSource: null }, true);
+    setSourceUndo({ reelId: reel.id, text: oldText });
+    sourceUndoTimer.current = window.setTimeout(() => { setSourceUndo(null); sourceUndoTimer.current = null; }, 30_000);
+    setMessage('Przywrócono automatyczne źródło.');
+  }, [changeReel]);
+  const undoRestoreSource = useCallback(() => {
+    const undo = sourceUndo;
+    if (!undo || currentRef.current?.id !== undo.reelId) return;
+    if (sourceUndoTimer.current !== null) window.clearTimeout(sourceUndoTimer.current);
+    sourceUndoTimer.current = null; setSourceUndo(null); changeReel({ publicationSource: undo.text });
+  }, [changeReel, sourceUndo]);
+
   const copyPublication = useCallback(async () => {
     if (!current) return; const { publicationDescription: description, publicationHashtags: hashtags } = current;
-    const value = composePublicationText(description, hashtags);
+    const source = current.publicationSource ?? current.sourceMetadata?.line ?? '';
+    const value = composePublicationText(description, source, hashtags);
     if (!value) { setMessage('Brak opisu i hashtagów do skopiowania.'); return; }
     try { if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE'); await navigator.clipboard.writeText(value); setMessage('Skopiowano opis.'); }
     catch { setMessage(`Nie udało się skopiować. Zaznacz i skopiuj ręcznie:\n\n${value}`); }
@@ -1103,6 +1153,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * key is the account id.
    */
   const clearAccountView = useCallback(() => {
+    if (sourceUndoTimer.current !== null) window.clearTimeout(sourceUndoTimer.current);
+    sourceUndoTimer.current = null; setSourceUndo(null);
     for (const controller of kdriveUploadControllers.current.values()) controller.abort();
     kdriveUploadControllers.current.clear(); setKdriveUploadJobs({});
     for (const timer of saveTimers.current.values()) window.clearTimeout(timer);
@@ -1171,6 +1223,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
     hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
+    sourceUndo: sourceUndo?.reelId === current?.id ? sourceUndo : null, refreshSourceMetadata, checkSourceMetadata, restoreAutomaticSource, undoRestoreSource,
     patchReelById, removeReelById, copyReelLink, hasUnsavedChanges,
     layout, setLayout, planReels, planLoadState, loadPlanner, scheduleReel, kdriveUploadJobs, startKdriveUpload, cancelKdriveUpload, retryKdriveAttach };
 }

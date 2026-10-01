@@ -15,6 +15,8 @@ export function PublicationSection(props: PublicationSectionProps) {
     feedCoverDone, hasFeedCoverAsset, onToggleFeedCoverDone, onAddOrChangeFeedCoverAsset, onOpenFeedCoverAsset,
     kdriveEnabled = true, createFolderForCover = false, uploadJob, onCancelUpload, onRetryUpload,
     description, onChangeDescription,
+    source, sourceManual, sourceAutomaticAvailable, sourceMetadataState, sourceLongWait, sourceUndoAvailable,
+    onChangeSource, onRefreshSource, onRestoreAutomaticSource, onUndoRestoreSource, onCheckSource,
     hashtags, onChangeHashtags,
     onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished, isReady,
     publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
@@ -80,6 +82,21 @@ export function PublicationSection(props: PublicationSectionProps) {
           value={description}
           onChange={(event) => onChangeDescription(event.target.value)}
         />
+      </div>
+
+      <div className={styles.block}>
+        <span className={styles.label}>Źródło</span>
+        <textarea className={styles.textField} aria-label="Źródło" value={source} onChange={(event) => onChangeSource(event.target.value)} />
+        <div className={styles.sourceMeta}>
+          <span>{sourceUndoAvailable ? 'Przywrócono automatyczne źródło.' : sourceManual ? 'Wpisane ręcznie' : sourceMetadataState === 'pending' ? sourceLongWait ? 'Pobieranie trwa dłużej niż zwykle.' : 'Pobieranie danych źródła…' : sourceMetadataState === 'found' ? 'Automatycznie z linku' : sourceMetadataState === 'partial' ? 'Automatycznie z adresu strony' : sourceMetadataState === 'failed' ? 'Nie udało się pobrać danych źródła.' : sourceMetadataState === 'no_url' ? 'Brak linku w materiale.' : 'Pobierz dane źródła z linku.'}</span>
+          {sourceUndoAvailable ? <TextAction onClick={onUndoRestoreSource}>Cofnij</TextAction>
+            : sourceManual ? sourceAutomaticAvailable ? <TextAction onClick={onRestoreAutomaticSource}>Przywróć automatyczne</TextAction> : null
+              : sourceMetadataState === 'pending' ? sourceLongWait ? <TextAction onClick={onCheckSource}>Sprawdź</TextAction> : null
+                : sourceMetadataState === 'no_url' ? null
+                  : sourceMetadataState === 'failed' ? <TextAction onClick={onRefreshSource}>Ponów</TextAction>
+                    : sourceMetadataState === 'never' || sourceMetadataState === null ? <TextAction onClick={onRefreshSource}>Pobierz</TextAction>
+                      : <TextAction onClick={onRefreshSource}>Odśwież</TextAction>}
+        </div>
       </div>
 
       <div className={styles.block}>

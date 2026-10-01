@@ -1,4 +1,3 @@
-export function composePublicationText(description: string, hashtags: string): string {
-  if (description && hashtags) return `${description}\n\n${hashtags}`;
-  return description || hashtags;
+export function composePublicationText(description: string, source: string, hashtags: string): string {
+  return [description, source, hashtags].filter((part) => part !== '').join('\n\n');
 }

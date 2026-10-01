@@ -12,6 +12,7 @@ import type {
   ExportReference,
   Reel,
   ReelHook,
+  SourceMetadata,
   VerificationRecord,
   VerificationState,
 } from '@szronox/contracts';
@@ -41,6 +42,8 @@ export interface ReelRow {
   publication_urls: string[];
   publication_description: string;
   publication_hashtags: string;
+  publication_source: string | null;
+  source_metadata: SourceMetadata | null;
   feed_cover_done: boolean;
   feed_cover_asset: Reel['feedCoverAsset'];
   /** Selected as text (`YYYY-MM-DD`), so no driver date parsing shifts the day. */
@@ -159,6 +162,8 @@ export function toReel(
     publicationUrls: row.publication_urls,
     publicationDescription: row.publication_description,
     publicationHashtags: row.publication_hashtags,
+    publicationSource: row.publication_source ?? null,
+    sourceMetadata: row.source_metadata ?? null,
     feedCoverDone: row.feed_cover_done,
     feedCoverAsset: row.feed_cover_asset ?? null,
     plannedPublicationDate: row.planned_publication_date ?? null,

@@ -21,6 +21,22 @@
   color: var(--sz-color-text-secondary);
 }
 
+.sourceMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  color: #636360;
+  font-size: 12px;
+  line-height: 18px;
+}
+.sourceMeta > :first-child { min-width: 0; }
+.sourceMeta :global(button) { flex: 0 0 auto; min-height: 44px; margin: -13px 0; }
+@media (max-width: 360px) {
+  .sourceMeta { display: block; }
+  .sourceMeta :global(button) { display: block; margin: 0; }
+}
+
 .coverRow {
   display: flex;
   align-items: center;

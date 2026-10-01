@@ -3,6 +3,7 @@ import type {
   AiAction, AiRun, ApplyAiRequest, AttachMemeRequest, CreateMemeRequest, Meme, StartAiRunRequest,
   ErrorResponse, InitiateAttachmentRequest, InitiateAttachmentResponse, Reel, ReelListQuery,
   ReelPatchRequest, RemoveHookRequest, RenewAttachmentUploadResponse, ReplaceExportRequest,
+  SourceMetadata,
   SelectHookRequest, SelectHookResponse, KdriveFolderRequest, KdriveFolderResponse, KdriveFolderState,
   UploadTransport, User, VerifyExportRequest, KdriveUploadStartRequest, KdriveUploadStartResponse,
   KdriveUploadState, AttachKdriveUploadRequest,
@@ -122,6 +123,7 @@ export class CoreApiClient {
     this.request<Reel>(`/reels/${encodeURIComponent(id)}${options.includeDeleted ? '?includeDeleted=true' : ''}`);
   create = (body: CreateReelRequest) => this.request<Reel>('/reels', { method: 'POST', body: JSON.stringify(body) });
   patch = (id: string, body: ReelPatchRequest) => this.request<Reel>(`/reels/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) });
+  refreshSourceMetadata = (id: string, operationId: string) => this.request<{ sourceMetadata: SourceMetadata }>(`/reels/${encodeURIComponent(id)}/source-metadata/refresh`, { method: 'POST', body: JSON.stringify({ operationId }) });
   addHook = (id: string, body: AddHookRequest) => this.request<Reel>(`/reels/${id}/hooks`, { method: 'POST', body: JSON.stringify(body) });
   editHook = (id: string, hookId: string, body: EditHookRequest) => this.request<Reel>(`/reels/${id}/hooks/${hookId}`, { method: 'PATCH', body: JSON.stringify(body) });
   removeHook = (id: string, hookId: string, body: RemoveHookRequest) => this.request<Reel>(`/reels/${id}/hooks/${hookId}`, { method: 'DELETE', body: JSON.stringify(body) });

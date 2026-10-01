@@ -27,6 +27,7 @@ import type {
 
 import type { Database, Queryable } from '../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../db/client.js';
+import { initialSourceMetadata } from '../source/metadata.js';
 import {
   CoreError,
   editConflict,
@@ -60,6 +61,7 @@ const PG_FOREIGN_KEY_VIOLATION = '23503';
 
 const REEL_COLUMNS = `
   id, version, title, status, priority, input_note, original_input, script, editing_notes,
+  publication_source, source_metadata,
   script_revision, editor_id, selected_hook_id, current_export, verification, programme_state, programme_attachment,
   programme_input_hash, programme_document_version_id, kdrive_folder, editing_started_at,
   published_at, publication_urls, publication_description, publication_hashtags,
@@ -72,7 +74,7 @@ const REEL_COLUMNS = `
 export const PATCHABLE_FIELDS = [
   'title', 'status', 'priority', 'inputNote', 'script', 'editingNotes',
   'editorId', 'publishedAt', 'publicationUrls', 'publicationDescription',
-  'publicationHashtags', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationSlot',
+  'publicationHashtags', 'publicationSource', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationSlot',
 ] as const;
 
 const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
@@ -87,6 +89,7 @@ const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
   publicationUrls: 'publication_urls',
   publicationDescription: 'publication_description',
   publicationHashtags: 'publication_hashtags',
+  publicationSource: 'publication_source',
   feedCoverDone: 'feed_cover_done',
   plannedPublicationDate: 'planned_publication_date',
   plannedPublicationSlot: 'planned_publication_slot',
@@ -380,8 +383,8 @@ export class CoreRepository {
 
     return this.idempotent(actor, request.operationId, 'POST /reels', request, async (tx) => {
       await tx.query(
-        `insert into app.reels (id, original_input, input_note, script, script_revision, priority, created_by)
-         values ($1, $2, $3, $4, 0, coalesce($5, 'normal'), $6)`,
+        `insert into app.reels (id, original_input, input_note, script, script_revision, priority, created_by, source_metadata)
+         values ($1, $2, $3, $4, 0, coalesce($5, 'normal'), $6, $7)`,
         [
           request.reelId,
           JSON.stringify(request.input),
@@ -389,6 +392,7 @@ export class CoreRepository {
           request.initialScript ?? '',
           request.priority ?? null,
           actor.id,
+          JSON.stringify(initialSourceMetadata(request.input)),
         ],
       );
 
@@ -535,6 +539,11 @@ export class CoreRepository {
       case 'publicationUrls':
         if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
           throw validationError('publicationUrls must be an array of strings');
+        }
+        return value;
+      case 'publicationSource':
+        if (value !== null && (typeof value !== 'string' || value.length > 1000)) {
+          throw validationError('publicationSource must be a string of at most 1000 characters or null', { field });
         }
         return value;
       case 'editorId':

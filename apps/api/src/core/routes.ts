@@ -28,6 +28,7 @@ import type { StorageAdapter } from './storage.js';
 import type { Database } from '../db/client.js';
 import { registerAttachmentRoutes } from '../storage/routes.js';
 import type { KdriveConfig } from '../kdrive/config.js';
+import { SourceMetadataService } from '../source/metadata.js';
 
 export interface CoreDependencies {
   db: Database;
@@ -45,6 +46,7 @@ export interface CoreDependencies {
   programmeArchiveRoot?: string;
   /** KDRIVE-01: parsed kDrive configuration, or null/absent when kDrive is not configured. */
   kdrive?: KdriveConfig | null;
+  sourceMetadata?: SourceMetadataService;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -69,6 +71,7 @@ function requireMutationContext(body: unknown): { operationId: string; expectedV
 export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDependencies): void {
   const repository = new CoreRepository(dependencies.db);
   const limits = dependencies.attachmentLimits ?? DEFAULT_ATTACHMENT_LIMITS;
+  const sourceMetadata = dependencies.sourceMetadata;
 
   /**
    * Resolve the actor from the session, or throw. The seam already collapses every
@@ -160,7 +163,21 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
       initialHook: typeof body.initialHook === 'string' ? body.initialHook : undefined,
       priority: body.priority as never,
     });
+    if (sourceMetadata && reel.sourceMetadata?.state === 'pending') {
+      void sourceMetadata.enqueue(reel.id, reel.sourceMetadata.requestId).catch(() => undefined);
+    }
     return reply.code(201).send(reel);
+  }));
+
+  app.post('/api/v1/reels/:id/source-metadata/refresh', handle(async (request, reply) => {
+    const actor = await actorOf(request);
+    if (!sourceMetadata) throw internalError();
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const operationId = requireUuid(body.operationId, 'operationId');
+    const result = await sourceMetadata.refresh(actor.id, requireUuid(id, 'id'), operationId);
+    if (result.enqueue) void sourceMetadata.enqueue(id, result.metadata.requestId).catch(() => undefined);
+    return reply.code(202).send({ sourceMetadata: result.metadata });
   }));
 
   // ── Scalar patch ───────────────────────────────────────────────────────────

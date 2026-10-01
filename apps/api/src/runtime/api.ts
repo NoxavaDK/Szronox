@@ -32,6 +32,7 @@ import { openDatabase, type DatabaseEnv, type OpenDatabase, describeDatabase } f
 import { assertRolePrivileges, type RoleFacts } from './privileges.js';
 import type { ProxyEnv } from './proxy.js';
 import { runtimeReadiness, storageRootProbe, type ReadinessTracker } from './readiness.js';
+import { SourceMetadataService } from '../source/metadata.js';
 
 export interface ApiRuntimeEnv extends CoreEnv, DatabaseEnv, ProxyEnv {
   /**
@@ -88,6 +89,7 @@ export async function composeApiRuntime(env: ApiRuntimeEnv): Promise<ApiRuntime>
     }
 
     const core = buildCoreDependencies(database.db, env);
+    core.sourceMetadata = new SourceMetadataService(database.db);
     // Awaited before listening, per the runtime contract: ownership, modes, the
     // same-filesystem requirement and an fsync probe all run here, not on the first
     // upload where the failure would surface as a user-visible error.
@@ -133,6 +135,7 @@ export async function composeApiRuntime(env: ApiRuntimeEnv): Promise<ApiRuntime>
         if (closed) return;
         closed = true;
         readiness.markStopping();
+        core.sourceMetadata?.stop();
         await database.close();
       },
     };

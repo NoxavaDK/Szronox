@@ -48,6 +48,23 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [aiCapability, setAiCapability] = useState({ enabled: false, programmeIndexed: false });
+  const [sourceLongWait, setSourceLongWait] = useState(false);
+  const [sourceCheckEpoch, setSourceCheckEpoch] = useState(0);
+  const currentDetailId = c.route.name === 'detail' ? c.route.reelId : null;
+  const publicationIsExpanded = currentDetailId
+    ? sectionOverrides[currentDetailId]?.publication ?? sectionDefaults.current[currentDetailId]?.publication ?? false
+    : false;
+  useEffect(() => {
+    const metadata = c.current?.id === currentDetailId ? c.current.sourceMetadata : null;
+    if (!currentDetailId || !publicationIsExpanded || metadata?.state !== 'pending') { setSourceLongWait(false); return; }
+    setSourceLongWait(false);
+    const started = Date.now();
+    const poll = window.setInterval(() => {
+      if (Date.now() - started >= 4 * 60_000) { window.clearInterval(poll); setSourceLongWait(true); return; }
+      void c.checkSourceMetadata(currentDetailId);
+    }, 5_000);
+    return () => window.clearInterval(poll);
+  }, [currentDetailId, publicationIsExpanded, c.current?.sourceMetadata?.requestId, c.current?.sourceMetadata?.state, sourceCheckEpoch]);
 
   // ── CONTENT-PLANNER-01 ────────────────────────────────────────────────────
   const workspaceLayout = useWorkspaceLayout(c.user?.id);
@@ -673,6 +690,17 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         onCancelUpload: () => void c.cancelKdriveUpload(reel.id), onRetryUpload: retryOrResumeUpload,
         description: reel.publicationDescription,
         onChangeDescription: (publicationDescription) => c.changeReel({ publicationDescription }),
+        source: reel.publicationSource ?? reel.sourceMetadata?.line ?? '',
+        sourceManual: reel.publicationSource !== null,
+        sourceAutomaticAvailable: reel.sourceMetadata?.line !== null && reel.sourceMetadata !== null,
+        sourceMetadataState: reel.sourceMetadata?.state ?? 'never',
+        sourceLongWait,
+        sourceUndoAvailable: c.sourceUndo?.reelId === reel.id,
+        onChangeSource: (publicationSource) => c.changeReel({ publicationSource }),
+        onRefreshSource: () => void c.refreshSourceMetadata(),
+        onRestoreAutomaticSource: () => void c.restoreAutomaticSource(),
+        onUndoRestoreSource: () => c.undoRestoreSource(),
+        onCheckSource: () => { setSourceCheckEpoch((value) => value + 1); void c.checkSourceMetadata(reel.id); },
         hashtags: reel.publicationHashtags,
         onChangeHashtags: (publicationHashtags) => c.changeReel({ publicationHashtags }),
         onCopyDescription: () => void c.copyPublication(),
