@@ -2,6 +2,8 @@
 
 The [Reel Detail + Language Check batch](frozen-reel-detail-language-spec.md) supersedes pending/undefined statements below for its eight named surfaces. The original consolidated specification is preserved below. No new renderer or agent dispatch is required.
 
+The approved [October visual delta](oct-2026-delta-spec.md) §A–B is authoritative for SOURCE-01 and IDEAS-PLAN only. Other sections remain gated or in preparation as stated in that delta.
+
 # FROZEN VISUAL SPECIFICATION — CONSOLIDATED IMPLEMENTATION AUTHORITY
 
 This document replaces any previous instruction that depends on an unavailable renderer PNG or screenshot.

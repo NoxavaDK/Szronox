@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@szronox/source-fetch": "0.1.0",
     "linkedom": "^0.18.13",
     "pg": "8.23.0"
   }

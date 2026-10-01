@@ -56,20 +56,19 @@ Future implementation acceptance: false default/backfill and list/detail seriali
 
 `Opis do publikacji` and `Hashtagi` are separate editable fields in the data model and UI. Canonical JSON fields are `publicationDescription: string` and `publicationHashtags: string`; SQL fields are `publication_description` and `publication_hashtags`, each NOT NULL DEFAULT ''. Hashtags remain an editable text block, not an automatically reformatted list. Both fields use the existing version-checked scalar PATCH. Creation defaults both to empty strings.
 
-The existing `PUBLIKACJA` section provides one primary copy action, `Kopiuj opis`. Copy the current editable field values, including unsaved edits, without saving or modifying either stored field. Formatting is exact:
+The existing `PUBLIKACJA` section provides one primary copy action, `Kopiuj opis`. Copy the current editable field values, including unsaved edits, without saving or modifying any stored field. For SOURCE-01, the parts are Opis, effective Źródło (`publicationSource ?? sourceMetadata.line ?? ''`), and Hashtagi, in that order. Formatting is exact:
 
-| Description | Hashtags | Clipboard text |
-| --- | --- | --- |
-| Nonempty | Nonempty | `description + "\n\n" + hashtags` |
-| Nonempty | Empty | `description` |
-| Empty | Nonempty | `hashtags` |
-| Empty | Empty | No text to copy; communicate this without reporting success |
+| Nonempty parts | Clipboard text |
+| --- | --- |
+| Description, source and hashtags | Each non-empty part joined by exactly `"\n\n"` |
+| Any one or two non-empty parts | Non-empty parts in their defined order joined by exactly `"\n\n"` |
+| All empty | No text to copy; communicate this without reporting success |
 
-The separator is exactly two newline characters: two Enter presses, one empty line. Do not add trailing blank lines or automatically trim/rewrite the editable content; newline insertion is only the separator in the both-present case.
+The separator is exactly two newline characters: two Enter presses, one empty line. A part is empty only when it is exactly `''`; do not trim or rewrite any editable content. Do not add leading or trailing blank lines; newline insertion is only the separator between non-empty parts.
 
 Use the browser clipboard capability from the explicit user action. Report success only after the write succeeds. If clipboard access is unavailable or fails, provide a Polish error state and a selectable copy-ready text fallback for manual copying, without overwriting the form or claiming the clipboard was updated. No automatic copying, new API endpoint or persistence side effect.
 
-Future implementation acceptance: the four cases above; exact separator and no added trailing blank lines; current unsaved values used without mutating either field; distinct editable fields retained; clipboard success/failure/unavailable states truthful; manual fallback matches the same composed text; cover pictogram uses neutral/check states and an accessible name without a permanent dense-metadata abbreviation. No other product change or implementation dispatch is authorized.
+Future implementation acceptance: all eight empty/non-empty combinations; exact separator and no added leading/trailing blank lines; whitespace and embedded edge newlines preserved; current unsaved values used without mutating stored fields; distinct editable fields retained; clipboard success/failure/unavailable states truthful; manual fallback matches the same composed text; cover pictogram uses neutral/check states and an accessible name without a permanent dense-metadata abbreviation.
 
 ## PUBLICATION-01 amendment — publication copy is generated separately from Opracuj
 
@@ -331,11 +330,29 @@ Acceptance: confirmed/cancelled/failed deletion, active-list exclusion, deleted-
 
 The user explicitly authorized a deliberately simple Content Planner. It supersedes the earlier "no calendar" exclusion only for this bounded scope; autopublishing, analytics and new workflow states remain out.
 
-A plan is scheduling metadata on the existing Reel, never a separate planner/event record: SQL `planned_publication_date date null` and `planned_publication_time time(0) null` (check: time requires date), JSON `plannedPublicationDate: 'YYYY-MM-DD' | null` and `plannedPublicationTime: 'HH:MM' | null`. Exactly one current plan per Reel. Both are ordinary version-checked PATCH fields; clearing the date alone also clears the time; a time without a date is refused. A plan change never changes `status`, `scriptRevision` or any other field. Existing Reels are unplanned (null).
+A plan is scheduling metadata on the existing Reel, never a separate planner/event record: SQL `planned_publication_date date null` and `planned_publication_time time(0) null` (check: time requires date), JSON `plannedPublicationDate: 'YYYY-MM-DD' | null` and `plannedPublicationTime: 'HH:MM' | null`. Exactly one current plan per Reel. Both are ordinary version-checked PATCH fields; clearing the date alone also clears the time; a time without a date is refused. A plan change never changes `scriptRevision` or any other field. Status also stays unchanged except for IDEAS-PLAN: assigning a date for the first time to an `idea`, without an explicit `status` in that PATCH, promotes it to `to_record` in the same version-checked write and runs the ordinary `idea` → `to_record` side effects. Existing Reels are unplanned (null).
 
-The PLAN view, the list `Zaplanuj` quick action and Reel Detail `Zaplanuj publikację` all write the same two fields. NIEZAPLANOWANE = not deleted, no planned date, status in `to_record | editing | ready` (ideas and published history excluded; ideas may still be planned explicitly). Past-dated unpublished plans show as `Po terminie` in the current week. Wide browser layouts show PLAN | CURRENT REEL | REELS (≥1280px) or PLAN | centre (≥960px); mobile keeps one full-width view at a time.
+The PLAN view, the list `Zaplanuj` quick action and Reel Detail `Zaplanuj publikację` all write the same two fields. NIEZAPLANOWANE = not deleted, no planned date, status in `idea | to_record | editing | ready` (published history excluded). Non-ideas appear first in today's order, followed by ideas in the same order. Past-dated unpublished plans show as `Po terminie` in the current week. Wide browser layouts show PLAN | CURRENT REEL | REELS (≥1280px) or PLAN | centre (≥960px); mobile keeps one full-width view at a time.
 
 **Publication slot correction (operator, 2026-09-26).** Reels are published at exactly one of three times of day, never a free clock time: `PublicationSlot = 'morning' | 'afternoon' | 'evening'` (UI `Rano` / `Popołudnie` / `Wieczór`). Migration 0012 adds SQL `planned_publication_slot text null` (checks: one of the three values; slot requires date) and converts any 0011 time (before 12:00 morning, before 17:00 afternoon, else evening). JSON `plannedPublicationTime` is retired, no longer on the wire and refused by PATCH; it is replaced by `plannedPublicationSlot: PublicationSlot | null`. The SQL time column remains only for rollback compatibility, always null. The date remains the plan; the slot is optional; clearing the date clears the slot; a slot without a date is refused. Within a day: Rano, Popołudnie, Wieczór, then Reels with no slot. Where UX-PUBLICATION-02 says "date/time fields/validation", read "date/slot".
+
+## SOURCE-01 — editable source attribution (operator-authorized 2026-10-01)
+
+Each Reel has `publicationSource: string | null` (version-checked PATCH, maximum 1000 characters) and read-only derived `sourceMetadata: SourceMetadata | null`. `null` means use automatic attribution; `''` means explicitly empty. The effective source is `publicationSource ?? sourceMetadata?.line ?? ''`. A source URL is derived from `originalInput.url`, otherwise the first HTTP(S) URL in captured `text`, then `additionalText`. Capture remains successful if fetching fails. No URL yields `no_url`; a URL starts `pending` with a server-formatted host fallback line and a new request ID. Existing Reels are not backfilled automatically.
+
+The API fetch queue uses the shared `@szronox/source-fetch` package and the worker's existing per-hop DNS pinning, redirect, body-size and timeout guards. It stores only extracted metadata. A background result updates `source_metadata` only, guarded by its owning `requestId`; it never writes `publication_source` or changes Reel `version` / `updated_at`. A five-minute sweep recovers old pending jobs; retries are bounded. Soft-deleted Reels are skipped. Refresh is session/CSRF protected, idempotent by `operationId`, rate-limited, re-derives the capture URL, and does not enqueue again when pending work is less than 30 seconds old. Metadata states are `pending | found | partial | failed | no_url`.
+
+The `Źródło` field is between Opis and Hashtagi. Editing automatic text makes it manual; clearing saves `''`. `Przywróć automatyczne` PATCHes `null`. The UI follows delta §A for state text, single actions, pending checks, local-edit preservation and undo. `Kopiuj opis` uses current editable Opis, effective Źródło and Hashtagi exactly as specified in the Frozen Publication amendment above. The provisional `Wygeneruj opis` prompt adds one sentence forbidding a source/attribution line in the description; final editorial prompt wording remains unfrozen.
+
+Acceptance includes: exact metadata extraction fixtures; reused network guard checks; version-independent background updates and stale-request protection; refresh idempotency; no-URL/failure behavior; version-checked `publicationSource` including the 1000-character bound; worker source tests; exact copy composition for all three fields; and the §A UI states and interactions. Live source-site quality and DEV remain separate gates.
+
+## IDEAS-PLAN — schedule ideas from the planner (operator-authorized 2026-10-01)
+
+On the first assignment of a date (`planned_publication_date` was null and becomes non-null), an `idea` is promoted to `to_record` in the same version-checked PATCH only when that PATCH does not explicitly contain `status`. An explicit status wins. An idea with a date already set stays `idea` when the date or slot changes; clearing a date or slot never changes status. The promotion follows the same side effects as the existing explicit transition.
+
+In NIEZAPLANOWANE, non-ideas precede ideas; each group keeps its existing order. Show `POMYSŁY · n` and the hint `Zaplanowanie zmieni status na „Do nagrania”.` when ideas exist. Scheduling an unplanned idea shows `Po zaplanowaniu pomysł trafi do „Do nagrania”.` in the sheet. After a successful promotion, show `Przeniesiono do „Do nagrania”` based on the server response. The exact layout and visibility rules are in delta §B.
+
+Acceptance includes the first-assignment promotion, existing-date and explicit-status exceptions, unplan and slot behavior, stale-version atomicity, parity with the explicit transition side effects, ordering/empty labels, server-response notice, sheet hint and desktop drag behavior.
 
 ## UX-PUBLICATION-02 — operator-approved correction (2026-09-26)
 

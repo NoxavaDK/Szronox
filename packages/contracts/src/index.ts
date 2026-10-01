@@ -27,6 +27,24 @@ export interface ReelHook {
   position: number;
   createdAt: IsoDateTime;
 }
+export type SourceMetadataState = 'pending' | 'found' | 'partial' | 'failed' | 'no_url';
+export interface SourceMetadata {
+  state: SourceMetadataState;
+  /** Canonical public URL that was, or will be, fetched. */
+  url: string | null;
+  author: string | null;
+  /** Extracted site name, or the URL host when metadata is incomplete. */
+  siteName: string | null;
+  /** Article publication date rendered as YYYY-MM-DD in Europe/Warsaw. */
+  publishedDate: string | null;
+  /** Server-formatted Polish attribution line; null only for no_url. */
+  line: string | null;
+  /** operationId of the fetch request that owns this value. */
+  requestId: Id;
+  requestedAt: IsoDateTime;
+  fetchedAt: IsoDateTime | null;
+  attempts: number;
+}
 export interface Meme {
   id: Id;
   name: string;
@@ -157,6 +175,10 @@ export interface Reel {
   /** Separate editable publication fields; SQL defaults each to ''. */
   publicationDescription: string;
   publicationHashtags: string;
+  /** null uses sourceMetadata.line; '' explicitly suppresses automatic attribution. */
+  publicationSource: string | null;
+  /** Read-only derived attribution metadata, null until SOURCE-01 has fetched it. */
+  sourceMetadata: SourceMetadata | null;
   /** Required production deliverable; SQL feed_cover_done NOT NULL DEFAULT false. */
   feedCoverDone: boolean;
   /** Optional kDrive file reference; uploading it also marks feedCoverDone in the same write. */
@@ -210,8 +232,9 @@ export interface ReelPatchRequest extends MutationContext {
   changes: Partial<Pick<Reel,
     'title' | 'status' | 'priority' | 'inputNote' | 'script' | 'editingNotes' |
     'editorId' | 'publishedAt' | 'publicationUrls' | 'publicationDescription' |
-    'publicationHashtags' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationSlot'>>;
+    'publicationHashtags' | 'publicationSource' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationSlot'>>;
 }
+export interface SourceMetadataRefreshRequest { operationId: Id }
 export interface AddHookRequest extends MutationContext { text: string; position?: number }
 export interface EditHookRequest extends MutationContext { text: string }
 export type RemoveHookRequest = MutationContext;
