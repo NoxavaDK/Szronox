@@ -25,6 +25,7 @@ export interface ReelRow {
   priority: Reel['priority'];
   input_note: string;
   original_input: CaptureInput;
+  source_link: string | null;
   script: string;
   script_revision: number;
   editing_notes: string;
@@ -141,6 +142,7 @@ export function toReel(
     priority: row.priority,
     inputNote: row.input_note,
     originalInput: row.original_input,
+    sourceLink: row.source_link ?? null,
     script: row.script,
     scriptRevision: row.script_revision,
     editingNotes: row.editing_notes,

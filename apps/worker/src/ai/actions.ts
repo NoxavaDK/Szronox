@@ -8,6 +8,7 @@ interface Snapshot {
   /** Absent in legacy publication runs, which retain their script-only prompt. */
   publicationContextVersion?: 2 | 3;
   title: string; originalInput: { text?: string; additionalText?: string; url?: string; originalShare?: { fields: Array<{ name: string; value: string }> } };
+  sourceLink?: string | null;
   inputNote: string; script: string; hooks: Array<{ id: string; text: string; source: string; position: number }>;
   /** Absent in runs snapshotted before HOOKS-SELECT-EDIT, which therefore have no selection. */
   selectedHookId?: string | null;
@@ -109,9 +110,10 @@ export async function executeAction(run: WorkRun, options: ActionOptions): Promi
   const input = run.input_snapshot;
   const warnings: string[] = [];
   let retrieved: RetrievedSource | null = null;
-  if (input.originalInput.url && ['develop', 'generate_hooks'].includes(run.action)) {
+  const sourceUrl = input.originalInput.url ?? input.sourceLink ?? undefined;
+  if (sourceUrl && ['develop', 'generate_hooks'].includes(run.action)) {
     // A URL is source content, not a hint for the model to hallucinate from.
-    retrieved = await retrievePublicSource(input.originalInput.url);
+    retrieved = await (options.retrieve ?? retrievePublicSource)(sourceUrl);
   }
   const { parts: imageParts, provenance: imageProvenance } = ['develop', 'generate_hooks'].includes(run.action)
     ? await readInputImages(options.storageRoot, input.imageObjects)
@@ -320,8 +322,9 @@ async function generatePublicationV3(run: WorkRun, options: ActionOptions, baseP
 
   let linked: RetrievedSource | null = null;
   let linkedFailure: string | null = null;
-  if (input.originalInput.url) {
-    try { linked = await retrieve(input.originalInput.url); }
+  const sourceUrl = input.originalInput.url ?? input.sourceLink;
+  if (sourceUrl) {
+    try { linked = await retrieve(sourceUrl); }
     catch (error) { linkedFailure = error instanceof SourceError ? error.code : 'SOURCE_UNAVAILABLE'; }
   }
   let imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];

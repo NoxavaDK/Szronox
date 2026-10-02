@@ -22,9 +22,9 @@ export function deriveSourceUrl(input: unknown): string | null {
   const text = [capture.text, capture.additionalText].filter((value): value is string => typeof value === 'string').join('\n');
   return text.match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.;!?]+$/, '') ?? null;
 }
-export function initialSourceMetadata(input: unknown, now = new Date(), rawRequestId: string = randomUUID()): SourceMetadata {
+export function initialSourceMetadata(input: unknown, now = new Date(), rawRequestId: string = randomUUID(), sourceLink: string | null = null): SourceMetadata {
   const requestId = rawRequestId as SourceMetadata['requestId'];
-  const url = deriveSourceUrl(input); const requestedAt = iso(now);
+  const url = deriveSourceUrl(input) ?? sourceLink; const requestedAt = iso(now);
   if (!url) return { state: 'no_url', url: null, author: null, siteName: null, publishedDate: null, line: null, requestId, requestedAt, fetchedAt: null, attempts: 0 };
   const siteName = hostOf(url);
   return { state: 'pending', url, author: null, siteName, publishedDate: null, line: `Źródło: ${siteName}`, requestId, requestedAt, fetchedAt: null, attempts: 0 };
@@ -64,14 +64,14 @@ export class SourceMetadataService {
       const existing = await tx.query<{ payload_hash: string; result: { metadata: SourceMetadata; enqueue: boolean } }>('select payload_hash,result from app.operations where operation_id=$1', [operationId]);
       if (existing.rows[0]) { if (existing.rows[0].payload_hash !== hash) throw idempotencyConflict(); return existing.rows[0].result; }
       if (!this.allowRefresh(actorId)) throw new CoreError({ status: 429, code: 'RATE_LIMITED', message: 'Too many source refresh requests', retryable: true });
-      const selected = await tx.query<{ original_input: unknown; source_metadata: SourceMetadata | null; deleted_at: unknown }>('select original_input,source_metadata,deleted_at from app.reels where id=$1', [reelId]);
+      const selected = await tx.query<{ original_input: unknown; source_link: string | null; source_metadata: SourceMetadata | null; deleted_at: unknown }>('select original_input,source_link,source_metadata,deleted_at from app.reels where id=$1', [reelId]);
       const reel = selected.rows[0]; if (!reel || reel.deleted_at) throw notFound('Reel not found');
       const current = reel.source_metadata;
       if (current?.state === 'pending' && Date.now() - Date.parse(current.requestedAt) < 30_000) {
         const result = { metadata: current, enqueue: false };
         await tx.query('insert into app.operations(operation_id,actor_id,route,payload_hash,result) values($1,$2,$3,$4,$5)', [operationId, actorId, `POST /reels/${reelId}/source-metadata/refresh`, hash, JSON.stringify(result)]); return result;
       }
-      const metadata = initialSourceMetadata(reel.original_input, new Date(), operationId);
+      const metadata = initialSourceMetadata(reel.original_input, new Date(), operationId, reel.source_link);
       await tx.query('update app.reels set source_metadata=$1 where id=$2 and deleted_at is null', [JSON.stringify(metadata), reelId]);
       const result = { metadata, enqueue: metadata.state === 'pending' };
       await tx.query('insert into app.operations(operation_id,actor_id,route,payload_hash,result) values($1,$2,$3,$4,$5)', [operationId, actorId, `POST /reels/${reelId}/source-metadata/refresh`, hash, JSON.stringify(result)]); return result;

@@ -27,7 +27,7 @@ import type {
 
 import type { Database, Queryable } from '../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../db/client.js';
-import { initialSourceMetadata } from '../source/metadata.js';
+import { deriveSourceUrl, initialSourceMetadata } from '../source/metadata.js';
 import {
   CoreError,
   editConflict,
@@ -60,7 +60,7 @@ import {
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 
 const REEL_COLUMNS = `
-  id, version, title, status, priority, input_note, original_input, script, editing_notes,
+  id, version, title, status, priority, input_note, original_input, source_link, script, editing_notes,
   publication_source, source_metadata,
   script_revision, editor_id, selected_hook_id, current_export, verification, programme_state, programme_attachment,
   programme_input_hash, programme_document_version_id, kdrive_folder, editing_started_at,
@@ -74,7 +74,7 @@ const REEL_COLUMNS = `
 export const PATCHABLE_FIELDS = [
   'title', 'status', 'priority', 'inputNote', 'script', 'editingNotes',
   'editorId', 'publishedAt', 'publicationUrls', 'publicationDescription',
-  'publicationHashtags', 'publicationSource', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationSlot',
+  'publicationHashtags', 'publicationSource', 'sourceLink', 'feedCoverDone', 'plannedPublicationDate', 'plannedPublicationSlot',
 ] as const;
 
 const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
@@ -90,6 +90,7 @@ const PATCH_COLUMNS: Record<(typeof PATCHABLE_FIELDS)[number], string> = {
   publicationDescription: 'publication_description',
   publicationHashtags: 'publication_hashtags',
   publicationSource: 'publication_source',
+  sourceLink: 'source_link',
   feedCoverDone: 'feed_cover_done',
   plannedPublicationDate: 'planned_publication_date',
   plannedPublicationSlot: 'planned_publication_slot',
@@ -449,6 +450,10 @@ export class CoreRepository {
 
       const changes = request.changes as Partial<Record<(typeof PATCHABLE_FIELDS)[number], unknown>>;
 
+      if (Object.hasOwn(changes, 'sourceLink') && deriveSourceUrl(before.originalInput) !== null) {
+        throw validationError('A captured link already exists', { reason: 'capture_has_link' });
+      }
+
       // The publish gate is evaluated on the EFFECTIVE updated Reel, so a single
       // patch may mark the cover done and publish at once.
       const nextStatus = (changes.status as ReelStatus | undefined) ?? before.status;
@@ -485,6 +490,13 @@ export class CoreRepository {
       for (const [field, value] of planEntries) {
         params.push(this.patchValue(field as (typeof PATCHABLE_FIELDS)[number], value));
         assignments.push(`${PATCH_COLUMNS[field as (typeof PATCHABLE_FIELDS)[number]]} = $${params.length}`);
+      }
+
+      const normalizedSourceLink = Object.hasOwn(changes, 'sourceLink')
+        ? this.patchValue('sourceLink', changes.sourceLink) as string | null : before.sourceLink;
+      if (Object.hasOwn(changes, 'sourceLink') && normalizedSourceLink !== before.sourceLink) {
+        params.push(JSON.stringify(initialSourceMetadata(before.originalInput, new Date(), randomUUID(), normalizedSourceLink)));
+        assignments.push(`source_metadata = $${params.length}`);
       }
 
       // Only a script change advances scriptRevision. An unrelated metadata edit
@@ -546,6 +558,16 @@ export class CoreRepository {
           throw validationError('publicationSource must be a string of at most 1000 characters or null', { field });
         }
         return value;
+      case 'sourceLink': {
+        if (value === null) return null;
+        if (typeof value !== 'string') throw validationError('sourceLink must be a URL or null');
+        const trimmed = value.trim();
+        if (trimmed === '') return null;
+        if (trimmed.length > 2048 || !/^https?:\/\//i.test(trimmed)) throw validationError('sourceLink must be a valid HTTP(S) URL of at most 2048 characters');
+        try { const parsed = new URL(trimmed); if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported protocol'); }
+        catch { throw validationError('sourceLink must be a valid HTTP(S) URL of at most 2048 characters'); }
+        return trimmed;
+      }
       case 'editorId':
         if (value !== null && typeof value !== 'string') throw validationError('editorId must be a string or null');
         return value;

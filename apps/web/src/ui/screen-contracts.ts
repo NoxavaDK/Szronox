@@ -271,6 +271,9 @@ export interface SourcesSectionProps {
   /** Original captured URL, if the Reel came from a link. Never rewritten. */
   originalUrl: string | null;
   onOpenSource: () => void;
+  sourceLink: string | null;
+  onChangeSourceLink: (value: string | null) => void;
+  focusArticleLink?: number;
   /** Original captured text, if any. */
   originalText: string | null;
   /** Additional text typed during Quick Add alongside a URL/image, kept separate. */
@@ -759,6 +762,7 @@ export interface PublicationSectionProps {
   sourceAutomaticAvailable: boolean;
   /** `blocked` / `unsupported`: a final `failed` whose retry can't help (SOURCE-01a). */
   sourceMetadataState: 'pending' | 'found' | 'partial' | 'failed' | 'blocked' | 'unsupported' | 'no_url' | 'never' | null;
+  onAddArticleLink: () => void;
   sourceLongWait: boolean;
   sourceUndoAvailable: boolean;
   onChangeSource: (value: string) => void;
