@@ -201,6 +201,7 @@ function DetailPreview() {
   const [selectedHookId, setSelectedHookId] = useState<string | null>(null);
   const [hookEdits, setHookEdits] = useState<Record<string, { text: string; saving: boolean; error: string | null }>>({});
   const dropHookEdit = (id: string) => setHookEdits(({ [id]: _dropped, ...rest }) => rest);
+  const [previewNewHook, setPreviewNewHook] = useState<{ text: string; saving: boolean; error: string | null } | null>(null);
 
   // Sections.
   const [sourcesExpanded, setSourcesExpanded] = useState(true);
@@ -274,6 +275,12 @@ function DetailPreview() {
         dropHookEdit(id);
       }}
       onCancelHookEdit={dropHookEdit}
+      // HOOK-ADD-01: preview-local draft only; nothing is sent.
+      newHook={previewNewHook}
+      onStartNewHook={() => setPreviewNewHook({ text: '', saving: false, error: null })}
+      onChangeNewHook={(text) => setPreviewNewHook((old) => old ? { ...old, text } : old)}
+      onSaveNewHook={() => setPreviewNewHook(null)}
+      onCancelNewHook={() => setPreviewNewHook(null)}
       script={script}
       onChangeScript={setScript}
       aiRowEnabled={false}

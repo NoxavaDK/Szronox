@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import '../ui/tokens.css';
 import { STATUS_LABELS, type HookEditView, type ReelDetailScreenProps } from '../ui/screen-contracts.js';
-import { ActionButton, CoverIndicator, SectionRow } from '../ui/primitives.js';
+import { ActionButton, CoverIndicator, SectionRow, TextAction } from '../ui/primitives.js';
 import { BackArrowIcon, CheckIcon, CloseIcon, WarningIcon } from '../ui/icons.js';
 import {
   ConflictNotice,
@@ -28,6 +28,7 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
     metadata, plan, contextAction, readOnly, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook, selectedHookId, onSelectHook, hookSelectionPending,
     hookEdits, onStartHookEdit, onChangeHookEdit, onSaveHookEdit, onCancelHookEdit,
+    newHook, onStartNewHook, onChangeNewHook, onSaveNewHook, onCancelNewHook,
     script, onChangeScript, scriptConflict,
     sources, editingNotes, materials,
     publicationExpanded, onTogglePublication, publication,
@@ -176,7 +177,14 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
                 <HookEditor edit={edit} onChange={(text) => onChangeHookEdit(id, text)} onCancel={() => onCancelHookEdit(id)} />
               </li>
             ))}
+          {/* HOOK-ADD-01: a manual hook is appended as `własny` and is never selected automatically. */}
+          {!readOnly && newHook ? (
+            <li className={styles.hookRow}>
+              <HookEditor edit={newHook} onChange={onChangeNewHook} onSave={onSaveNewHook} onCancel={onCancelNewHook} />
+            </li>
+          ) : null}
         </ul>
+        {!readOnly && !newHook ? <TextAction onClick={onStartNewHook}>+ Dodaj hook</TextAction> : null}
       </section>
 
       <section className={styles.contentBlock}>

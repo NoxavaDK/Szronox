@@ -603,6 +603,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onChangeHookEdit={c.changeHookEdit}
       onSaveHookEdit={(id) => void c.saveHookEdit(id)}
       onCancelHookEdit={c.cancelHookEdit}
+      newHook={c.newHook}
+      onStartNewHook={c.startNewHook}
+      onChangeNewHook={c.changeNewHook}
+      onSaveNewHook={() => void c.saveNewHook()}
+      onCancelNewHook={c.cancelNewHook}
       script={reel.script}
       onChangeScript={(script) => c.changeReel({ script })}
       scriptConflict={c.conflict?.field === 'script' ? conflictView() : undefined}

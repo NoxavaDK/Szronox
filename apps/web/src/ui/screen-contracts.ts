@@ -696,6 +696,12 @@ export interface ReelDetailScreenProps {
   onChangeHookEdit: (id: Id, text: string) => void;
   onSaveHookEdit: (id: Id) => void;
   onCancelHookEdit: (id: Id) => void;
+  /** HOOK-ADD-01: the new-hook draft, or null when `+ Dodaj hook` is closed. */
+  newHook: HookEditView | null;
+  onStartNewHook: () => void;
+  onChangeNewHook: (text: string) => void;
+  onSaveNewHook: () => void;
+  onCancelNewHook: () => void;
 
   script: string;
   onChangeScript: (value: string) => void;

@@ -248,6 +248,21 @@ D9. Deleting and restoring (operator-approved 2026-10-01)
   only `Usuń odwołanie`. Restoring that Reel brings the row back to normal.
 
 ==================================================
+F. REEL DETAIL — + DODAJ HOOK (HOOK-ADD-01, operator-approved 2026-10-02)
+==================================================
+
+- Compact text action `+ Dodaj hook` directly under the HOOKI list (cobalt text action, 44 px
+  target). It's always available while the Reel is editable, including when a hook is already
+  selected and the others sit under `Pozostałe hooki (n)`, and when there are no hooks yet.
+- It opens the existing inline hook editor, empty and focused, as the last row, with
+  `Anuluj` / `Gotowe`. Enter saves; Escape cancels. The action is hidden while the editor is open.
+- `Gotowe` appends a `własny` hook at the end of the list through the existing add-hook mutation.
+  It is **never selected automatically** (selection stays an explicit tap).
+- Failure keeps the text in the editor with the truthful error line (same style as editing a hook).
+  A non-empty draft counts as unsaved work.
+- Hidden when the Detail is read-only (deleted Reel), exactly like `Edytuj` / `×`.
+
+==================================================
 E. NOT IN THIS DELTA
 ==================================================
 
