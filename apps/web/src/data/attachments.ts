@@ -115,13 +115,15 @@ export class AttachmentUploader {
       ?? (typeof location === 'undefined' ? 'http://localhost' : location.origin);
   }
 
-  initiate(reelId: string, descriptor: CaptureImageDescriptor, operationId: string) {
+  initiate(reelId: string, descriptor: CaptureImageDescriptor, operationId: string, options: { purpose?: AttachmentReference['purpose']; kind?: 'image' | 'video' } = {}) {
     return this.api.initiateAttachment(reelId, {
       operationId,
       attachmentId: descriptor.attachmentId,
       fileName: descriptor.fileName,
       mimeType: descriptor.mimeType,
       byteSize: descriptor.byteSize,
+      ...(options.purpose ? { purpose: options.purpose } : {}),
+      ...(options.kind ? { kind: options.kind } : {}),
     });
   }
 
@@ -156,10 +158,13 @@ export class AttachmentUploader {
     descriptor: CaptureImageDescriptor;
     blob: Blob;
     operations: AttachmentOperationIds;
+    purpose?: AttachmentReference['purpose'];
+    kind?: 'image' | 'video';
   }): Promise<UploadOutcome> {
     const steps: UploadOutcome['steps'] = [];
     const initiated: InitiateAttachmentResponse = await this.initiate(
       input.reelId, input.descriptor, input.operations.initiate,
+      { ...(input.purpose ? { purpose: input.purpose } : {}), ...(input.kind ? { kind: input.kind } : {}) },
     );
     steps.push('initiate');
 

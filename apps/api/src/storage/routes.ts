@@ -93,7 +93,7 @@ export function registerAttachmentRoutes(
   // Return the raw request stream to the PUT handler. It is bounded while being
   // consumed by the storage adapter rather than buffered in memory.
   app.addContentTypeParser(
-    /^(?:image\/(?:jpeg|png|webp)|application\/octet-stream)$/,
+    /^(?:image\/(?:jpeg|png|webp|gif)|video\/[a-z0-9.+-]+|application\/octet-stream)$/i,
     (request, payload, done) => { void request; done(null, payload); },
   );
 
@@ -139,6 +139,7 @@ export function registerAttachmentRoutes(
     if (typeof body.fileName !== 'string' || body.fileName === '') throw validationError('fileName is required');
     if (typeof body.mimeType !== 'string') throw validationError('mimeType is required');
     if (typeof body.byteSize !== 'number') throw validationError('byteSize must be a number');
+    if (body.kind !== undefined && body.kind !== 'image' && body.kind !== 'video') throw validationError('Unsupported attachment kind');
     const result = await repository.initiateAttachment(actor, requireUuid(id, 'id'), {
       operationId,
       attachmentId,
@@ -146,17 +147,18 @@ export function registerAttachmentRoutes(
       mimeType: body.mimeType,
       byteSize: body.byteSize,
       purpose: body.purpose as never,
+      kind: body.kind === 'video' ? 'video' : 'image',
     }, limits, dependencies.storage);
     return reply.code(201).send(result);
   }));
 
   app.put('/api/v1/reels/:id/attachments/:attachmentId/content', {
-    bodyLimit: limits.maxByteSize + 1,
+    bodyLimit: 25 * 1024 * 1024 + 1,
     // Reject the JSON parser path before Fastify consumes binary bytes as UTF-8. A
     // content-length mismatch in that parser otherwise masks the real client error.
     preParsing: async (request, reply, payload) => {
       const contentType = request.headers['content-type'];
-      if (typeof contentType !== 'string' || !/^(?:image\/(?:jpeg|png|webp)|application\/octet-stream)$/i.test(contentType)) {
+      if (typeof contentType !== 'string' || !/^(?:image\/(?:jpeg|png|webp|gif)|video\/[a-z0-9.+-]+|application\/octet-stream)$/i.test(contentType)) {
         const error = validationError('Upload Content-Type does not match an attachment MIME type', { reason: 'content_type_mismatch' });
         return reply.code(error.status).send(error.toEnvelope()) as never;
       }
@@ -187,8 +189,9 @@ export function registerAttachmentRoutes(
       request.body as NodeJS.ReadableStream as never,
       {
         mimeType: plan.mimeType,
+        kind: plan.kind,
         byteSize: plan.byteSize,
-        maxByteSize: limits.maxByteSize,
+        maxByteSize: plan.kind === 'video' ? 25 * 1024 * 1024 : limits.maxByteSize,
         maxPixelCount: limits.maxPixelCount,
         maxDimension: limits.maxDimension,
       },

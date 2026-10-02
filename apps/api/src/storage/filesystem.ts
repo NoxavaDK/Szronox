@@ -32,7 +32,23 @@ const SUPPORTED_FORMATS: Record<string, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
+  gif: 'image/gif',
 };
+const VIDEO_MAX_BYTES = 25 * 1024 * 1024;
+
+function videoContainerMime(header: Buffer): string | null {
+  if (header.length >= 8 && header.toString('ascii', 4, 8) === 'ftyp') return 'video/mp4';
+  if (header.length >= 4 && header.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return 'video/webm';
+  if (header.length >= 12 && header.toString('ascii', 0, 4) === 'RIFF' && header.toString('ascii', 8, 12) === 'AVI ') return 'video/x-msvideo';
+  if (header.length >= 4 && header.toString('ascii', 0, 4) === 'OggS') return 'video/ogg';
+  if (header.length >= 3 && header.toString('ascii', 0, 3) === 'FLV') return 'video/x-flv';
+  if (header.length >= 377 && header[0] === 0x47 && header[188] === 0x47) return 'video/mp2t';
+  if (header.length >= 4 && header.subarray(0, 4).equals(Buffer.from([0, 0, 1, 0xba]))) return 'video/mpeg';
+  if (header.length >= 16 && header.subarray(0, 16).equals(Buffer.from([
+    0x30,0x26,0xb2,0x75,0x8e,0x66,0xcf,0x11,0xa6,0xd9,0x00,0xaa,0x00,0x62,0xce,0x6c,
+  ]))) return 'video/x-ms-asf';
+  return null;
+}
 
 export interface FilesystemStorageConfig {
   root: string;
@@ -88,7 +104,7 @@ async function validateImage(
   contentHash?: string,
 ): Promise<ValidatedStoredObject> {
   try {
-    const input = sharp(filePath, { failOn: 'error', limitInputPixels: maxPixelCount });
+    const input = sharp(filePath, { failOn: 'error', limitInputPixels: maxPixelCount, pages: 1 });
     const metadata = await input.metadata();
     const mimeType = metadata.format ? SUPPORTED_FORMATS[metadata.format] : undefined;
     const width = metadata.width;
@@ -107,7 +123,7 @@ async function validateImage(
     }
     // metadata() parses the container; stats() forces a full pixel decode so a
     // truncated or corrupt body never reaches immutable object storage.
-    await sharp(filePath, { failOn: 'error', limitInputPixels: maxPixelCount }).stats();
+    await sharp(filePath, { failOn: 'error', limitInputPixels: maxPixelCount, pages: 1 }).stats();
     return {
       exists: true,
       byteSize,
@@ -121,6 +137,27 @@ async function validateImage(
     if (error instanceof StorageInputError) throw error;
     throw new StorageInputError('The uploaded file could not be decoded as an image', 'invalid_image');
   }
+}
+
+async function validateVideo(filePath: string, byteSize: number, declaredMimeType: string): Promise<ValidatedStoredObject> {
+  if (byteSize > VIDEO_MAX_BYTES) throw new StorageInputError('Video exceeds the 25 MiB limit', 'too_large');
+  const handle = await open(filePath, fsConstants.O_RDONLY);
+  let header: Buffer;
+  try {
+    header = Buffer.alloc(512);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    header = header.subarray(0, bytesRead);
+  } finally { await handle.close(); }
+  const detectedMime = videoContainerMime(header);
+  if (!detectedMime || (declaredMimeType.startsWith('image/'))) {
+    throw new StorageInputError('Uploaded content is not a recognized video container', 'content_mismatch');
+  }
+  return {
+    exists: true,
+    byteSize,
+    mimeType: declaredMimeType.startsWith('video/') ? declaredMimeType : detectedMime,
+    contentHash: await sha256File(filePath),
+  };
 }
 
 async function requireOwnedDirectory(directory: string, uid: number, gid: number): Promise<Awaited<ReturnType<typeof lstat>>> {
@@ -199,6 +236,10 @@ export function filesystemStorageAdapter(config: FilesystemStorageConfig): Stora
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw error;
     }
+    let header = Buffer.alloc(512);
+    const handle = await open(target, fsConstants.O_RDONLY);
+    try { const read = await handle.read(header, 0, header.length, 0); header = header.subarray(0, read.bytesRead); } finally { await handle.close(); }
+    if (videoContainerMime(header)) return validateVideo(target, info.size, 'application/octet-stream');
     return validateImage(target, info.size, undefined, configuredMaxPixels, configuredMaxDimension);
   }
 
@@ -226,7 +267,8 @@ export function filesystemStorageAdapter(config: FilesystemStorageConfig): Stora
     async writeObject(storageKey, source, options): Promise<ValidatedStoredObject> {
       await initializeOnce();
       const name = objectName(storageKey);
-      if (!Number.isInteger(options.byteSize) || options.byteSize < 1 || options.byteSize > options.maxByteSize) {
+      const maxByteSize = options.kind === 'video' ? Math.min(options.maxByteSize, VIDEO_MAX_BYTES) : options.maxByteSize;
+      if (!Number.isInteger(options.byteSize) || options.byteSize < 1 || options.byteSize > maxByteSize) {
         throw new StorageInputError('Declared byte size is outside the configured bound', 'byte_size_exceeded');
       }
       const temporary = path.join(staging, `${name}.${randomUUID()}.part`);
@@ -240,7 +282,7 @@ export function filesystemStorageAdapter(config: FilesystemStorageConfig): Stora
           for await (const value of source) {
             const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
             byteSize += chunk.byteLength;
-            if (byteSize > options.byteSize || byteSize > options.maxByteSize) {
+            if (byteSize > options.byteSize || byteSize > maxByteSize) {
               throw new StorageInputError('Upload body exceeds its declared or configured byte bound', 'byte_size_exceeded');
             }
             hash.update(chunk);
@@ -259,14 +301,16 @@ export function filesystemStorageAdapter(config: FilesystemStorageConfig): Stora
           await handle.close();
         }
         await chmod(temporary, FILE_MODE);
-        const validated = await validateImage(
-          temporary,
-          byteSize,
-          options.mimeType,
-          Math.min(options.maxPixelCount, configuredMaxPixels),
-          Math.min(options.maxDimension, configuredMaxDimension),
-          hash.digest('hex'),
-        );
+        const validated = options.kind === 'video'
+          ? await validateVideo(temporary, byteSize, options.mimeType)
+          : await validateImage(
+            temporary,
+            byteSize,
+            options.mimeType,
+            Math.min(options.maxPixelCount, configuredMaxPixels),
+            Math.min(options.maxDimension, configuredMaxDimension),
+            hash.digest('hex'),
+          );
         const target = path.join(objects, name);
         try {
           // Hard-link publication is atomic and refuses replacement (EEXIST).

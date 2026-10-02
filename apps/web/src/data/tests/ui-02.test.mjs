@@ -239,7 +239,10 @@ test('mobile Detail keeps 44px targets while tightening the space before the wor
 
 test('the Polish meme file control replaces the browser-default English presentation', () => {
   const picker = read('../../screens/MemePicker.tsx');
-  assert.ok(picker.includes("{file ? 'Zmień zdjęcie' : 'Wybierz zdjęcie'}") && picker.includes("'Nie wybrano pliku'"));
+  assert.ok(picker.includes("{file ? 'Zmień plik' : 'Wybierz plik'}") && picker.includes("'Nie wybrano pliku'"));
+  assert.ok(picker.includes('image/gif,video/*') && picker.includes('Wideo przekracza limit 25 MB.'));
+  assert.ok(picker.includes('muted loop playsInline autoPlay') && picker.includes('purpose: \'meme\''));
+  assert.ok(read('../../data/video-poster.ts').includes('Math.min(0.1, video.duration / 2)'));
   assert.ok(read('../../screens/MemePicker.module.css').includes('.fileInput{position:absolute;width:1px;height:1px;opacity:0'));
   assert.equal(/#2e633d/.test(read('../../screens/MemePicker.module.css') + read('../../screens/AiWorkspace.module.css')), false, 'no completion-green action colour');
 });

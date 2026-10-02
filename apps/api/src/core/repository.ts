@@ -904,37 +904,45 @@ export class CoreRepository {
     actor: Actor, reelId: string,
     request: {
       operationId: string; attachmentId: string; fileName: string;
-      mimeType: string; byteSize: number; purpose?: AttachmentReference['purpose'];
+      mimeType: string; byteSize: number; purpose?: 'input' | 'source' | 'material' | 'meme'; kind?: 'image' | 'video';
     },
     limits: AttachmentLimits,
     storage: StorageAdapter,
   ): Promise<{ attachment: AttachmentReference; storageKey: string; upload: SignedUpload }> {
-    if (!limits.allowedMimeTypes.includes(request.mimeType)) {
+    const kind = request.kind ?? 'image';
+    const purpose: 'input' | 'source' | 'material' | 'meme' = request.purpose ?? 'input';
+    const validMime = kind === 'video'
+      ? (purpose === 'meme' && (/^video\/[a-z0-9.+-]+$/i.test(request.mimeType) || request.mimeType === 'application/octet-stream'))
+      : (limits.allowedMimeTypes.includes(request.mimeType) || request.mimeType === 'image/gif');
+    if (!validMime) {
       throw validationError(`Unsupported attachment type: ${request.mimeType}`, { mimeType: request.mimeType });
     }
-    if (!Number.isSafeInteger(request.byteSize) || request.byteSize <= 0 || request.byteSize > limits.maxByteSize) {
+    const maxByteSize = kind === 'video' ? 25 * 1024 * 1024 : limits.maxByteSize;
+    if (!Number.isSafeInteger(request.byteSize) || request.byteSize <= 0 || request.byteSize > maxByteSize) {
       throw validationError('Attachment byteSize is outside the configured bound', {
-        maxByteSize: limits.maxByteSize,
+        ...(kind === 'video' && request.byteSize > maxByteSize ? { reason: 'too_large' } : {}),
+        maxByteSize,
       });
     }
     if (request.fileName.length > 255 || request.fileName.includes('\0')) {
       throw validationError('Attachment fileName is outside the configured bound');
     }
 
-    if (request.purpose !== undefined && !['input', 'source', 'material'].includes(request.purpose)) {
+    if (!['input', 'source', 'material', 'meme'].includes(purpose)
+        || (kind === 'video' && purpose !== 'meme')) {
       throw validationError('Unsupported attachment purpose', { purpose: request.purpose });
     }
 
     const route = `POST /reels/${reelId}/attachments/initiate`;
-    return this.idempotent(actor, request.operationId, route, request, async (tx) => {
+    return this.idempotent(actor, request.operationId, route, { ...request, kind }, async (tx) => {
       await this.loadReel(tx, reelId);
       const storageKey = `reels/${reelId}/${request.attachmentId}`;
       await tx.query(
         `insert into app.attachments (id, reel_id, purpose, kind, label, state, file_name, mime_type, byte_size)
-         values ($1, $2, $3, 'image', $4, 'pending', $4, $5, $6)
+         values ($1, $2, $3, $4, $5, 'pending', $5, $6, $7)
          on conflict (id) do nothing`,
         [
-          request.attachmentId, reelId, request.purpose ?? 'input',
+          request.attachmentId, reelId, purpose, kind,
           request.fileName, request.mimeType, request.byteSize,
         ],
       );
@@ -955,8 +963,7 @@ export class CoreRepository {
         // mint another ticket; transport renewal has its own endpoint.
         throw validationError('Attachment upload was already initiated');
       }
-      const purpose = request.purpose ?? row.purpose;
-      if (row.kind !== 'image' || row.file_name !== request.fileName || row.mime_type !== request.mimeType
+      if (row.kind !== kind || row.file_name !== request.fileName || row.mime_type !== request.mimeType
           || Number(row.byte_size) !== request.byteSize || row.purpose !== purpose) {
         throw validationError('Initiation metadata does not match the pending attachment');
       }
@@ -1071,6 +1078,7 @@ export class CoreRepository {
       attachmentId,
       storageKey: row.storage_key,
       mimeType: row.mime_type,
+      kind: row.kind as 'image' | 'video',
       byteSize: Number(row.byte_size),
       expiresAt: new Date(expiresAt),
     };
@@ -1093,12 +1101,15 @@ export class CoreRepository {
           || row.upload_actor_id !== plan.actorId) {
         throw uploadIncomplete('Attachment changed while the upload was in progress');
       }
-      if (row.mime_type !== object.mimeType || Number(row.byte_size) !== object.byteSize) {
+      const derivedVideoMime = (row.kind as string) === 'video' && row.mime_type === 'application/octet-stream'
+        && object.mimeType.startsWith('video/');
+      if ((!derivedVideoMime && row.mime_type !== object.mimeType) || Number(row.byte_size) !== object.byteSize) {
         throw uploadIncomplete('Validated object does not match declared attachment metadata');
       }
       if (row.validated_mime_type !== null
-          && (row.validated_mime_type !== object.mimeType || Number(row.validated_width) !== object.width
-            || Number(row.validated_height) !== object.height || Number(row.validated_pixel_count) !== object.pixelCount)) {
+          && (row.validated_mime_type !== object.mimeType || (row.kind === 'image'
+            && (Number(row.validated_width) !== object.width || Number(row.validated_height) !== object.height
+              || Number(row.validated_pixel_count) !== object.pixelCount)))) {
         throw uploadIncomplete('A different validated object is already associated with this attachment');
       }
       await tx.query(
@@ -1144,7 +1155,7 @@ export class CoreRepository {
         if (storage.writeObject && storage.openObject) {
           throw uploadIncomplete('Uploaded object has not completed image validation');
         }
-      } else if (observed.mimeType !== undefined && observed.mimeType !== row.validated_mime_type) {
+      } else if (row.kind === 'image' && observed.mimeType !== undefined && observed.mimeType !== row.validated_mime_type) {
         throw uploadIncomplete('Stored object type changed after validation');
       }
 
@@ -1205,6 +1216,7 @@ export interface AttachmentUploadPlan {
   attachmentId: string;
   storageKey: string;
   mimeType: string;
+  kind: 'image' | 'video';
   byteSize: number;
   expiresAt: Date;
 }
@@ -1234,7 +1246,7 @@ export interface StorageProbe {
 export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
   // Lightweight input images only; large production media belongs to kDrive.
   maxByteSize: 8 * 1024 * 1024,
-  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
   maxPixelCount: 40_000_000,
   maxDimension: 20_000,
 };

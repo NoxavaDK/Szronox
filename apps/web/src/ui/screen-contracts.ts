@@ -712,7 +712,7 @@ export interface ReelDetailScreenProps {
   onAiAction?: (action: 'fact_check' | 'language_check' | 'develop') => void;
   onOpenMeme?: () => void;
   onDetachMeme?: (memeId: Id) => void;
-  attachedMemes?: Array<{ id: Id; name: string }>;
+  attachedMemes?: Array<{ id: Id; name: string; mediaKind?: 'image' | 'video' }>;
   onOpenProgramme?: () => void;
 
   /** Expanded inline sections, in the frozen order. */
