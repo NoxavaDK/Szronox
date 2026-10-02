@@ -56,6 +56,10 @@ export interface SourceMetadata {
 export interface Meme {
   id: Id;
   name: string;
+  /** Existing library items are images; new memes may also be videos. */
+  mediaKind: 'image' | 'video';
+  /** Server-validated media type; null on legacy library rows. */
+  mimeType: string | null;
   thumbnailRef: string | null;
   assetRef: string;
   kdriveCopy: MemeKdriveCopy;
@@ -87,8 +91,8 @@ export type VerificationState = 'not_verified' | 'verified' | 'outdated';
 export interface AttachmentReference {
   id: Id;
   reelId: Id;
-  purpose: 'input' | 'source' | 'material';
-  kind: 'url' | 'image';
+  purpose: 'input' | 'source' | 'material' | 'meme';
+  kind: 'url' | 'image' | 'video';
   label: string;
   url?: string;
   storageKey?: string;
@@ -109,6 +113,8 @@ export interface InitiateAttachmentRequest {
   mimeType: string;
   byteSize: number;
   purpose?: AttachmentReference['purpose'];
+  /** Omitted for existing clients; defaults to `image`. */
+  kind?: 'image' | 'video';
 }
 export interface InitiateAttachmentResponse {
   attachment: AttachmentReference;
@@ -187,6 +193,8 @@ export interface Reel {
   publicationSource: string | null;
   /** Read-only derived attribution metadata, null until SOURCE-01 has fetched it. */
   sourceMetadata: SourceMetadata | null;
+  /** SOURCE-02: added article link, only when originalInput contains no link. */
+  sourceLink: string | null;
   /** Required production deliverable; SQL feed_cover_done NOT NULL DEFAULT false. */
   feedCoverDone: boolean;
   /** Optional kDrive file reference; uploading it also marks feedCoverDone in the same write. */
@@ -240,7 +248,7 @@ export interface ReelPatchRequest extends MutationContext {
   changes: Partial<Pick<Reel,
     'title' | 'status' | 'priority' | 'inputNote' | 'script' | 'editingNotes' |
     'editorId' | 'publishedAt' | 'publicationUrls' | 'publicationDescription' |
-    'publicationHashtags' | 'publicationSource' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationSlot'>>;
+    'publicationHashtags' | 'publicationSource' | 'sourceLink' | 'feedCoverDone' | 'plannedPublicationDate' | 'plannedPublicationSlot'>>;
 }
 export interface SourceMetadataRefreshRequest { operationId: Id }
 export interface AddHookRequest extends MutationContext { text: string; position?: number }
@@ -252,13 +260,15 @@ export interface SelectHookRequest extends MutationContext { hookId: Id | null }
 export type SelectHookResponse = Reel;
 export interface AttachMemeRequest extends MutationContext { memeId: Id }
 export type DetachMemeRequest = MutationContext;
-/** Validated private image asset; picker creation and attachment commit atomically. */
-export interface CreateMemeRequest {
+/** Validated private media; picker creation and attachment commit atomically. */
+export type CreateMemeRequest = {
   operationId: Id;
   name: string;
-  imageAssetId: Id;
   attachToReel?: { reelId: Id; expectedVersion: number };
-}
+} & (
+  | { imageAssetId: Id; videoAssetId?: never; posterAssetId?: never }
+  | { imageAssetId?: never; videoAssetId: Id; posterAssetId?: Id }
+);
 /**
  * KDRIVE-01: explicit kDrive folder command (T00 `POST /reels/:id/kdrive-folder`).
  * `create` makes (or, after an ambiguous earlier attempt, finds) this Reel's folder under the
@@ -330,6 +340,8 @@ export interface AiInputSnapshot {
   reelVersion: number;
   title: string;
   originalInput: CaptureInput;
+  /** SOURCE-02: article URL added after capture; absent in older snapshots. */
+  sourceLink?: string | null;
   script: string;
   scriptRevision: number;
   /**

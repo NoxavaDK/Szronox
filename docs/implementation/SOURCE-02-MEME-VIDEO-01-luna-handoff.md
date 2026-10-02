@@ -1,7 +1,7 @@
 # Luna dispatch — SOURCE-02 and MEME-VIDEO-01
 
-Status: **DRAFT — not dispatched.** Requires (1) operator approval of `design/oct-2026-delta-spec.md`
-§G–H, these tasks and models; (2) the root pin commit (§0), whose id replaces `<PIN>`.
+Status: **OPERATOR-APPROVED — dispatch after the root pin commit.** The approved task/model matrix is
+below. The pin commit id replaces `<PIN>` after it is created.
 
 Operator decisions (2026-10-02):
 - SOURCE-02: an article link can be added later to a Reel captured without one (image/text only),
@@ -36,6 +36,9 @@ sites or kDrive, send messages or spawn agents.
       check (source_link is null or (char_length(source_link) <= 2048 and source_link ~* '^https?://'));
   alter table app.attachments drop constraint attachments_kind_check;
   alter table app.attachments add constraint attachments_kind_check check (kind in ('url', 'image', 'video'));
+  alter table app.attachments drop constraint attachments_purpose_check;
+  alter table app.attachments add constraint attachments_purpose_check check (purpose in ('input', 'source', 'material', 'meme'));
+  alter table app.attachments add constraint attachments_video_meme_only check (kind <> 'video' or purpose = 'meme');
   -- Validated metadata: images keep dimensions (now incl. GIF); videos carry only a video/* MIME type.
   alter table app.attachments drop constraint attachments_validated_metadata_complete;
   alter table app.attachments add constraint attachments_validated_metadata_complete check (
@@ -66,7 +69,8 @@ sites or kDrive, send messages or spawn agents.
   // CreateMemeRequest: exactly one of
   imageAssetId?: Id;
   videoAssetId?: Id;  posterAssetId?: Id; // poster is an ordinary validated image attachment, optional
-  // Attachment initiation gains kind: 'image' | 'video' (default 'image')
+  // Attachment initiation gains purpose: 'meme' and kind: 'image' | 'video' (default 'image').
+  // New Meme media and poster uploads use purpose='meme', outside captured input/material.
   ```
 
 ---

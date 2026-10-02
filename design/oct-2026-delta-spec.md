@@ -1,7 +1,6 @@
 # OCT-2026 VISUAL DELTA — Źródło, ideas in the planner, kDrive layout, streams
 
-Status: **DRAFT, revised after Astra review (2026-10-01).** §A–C ready for operator approval; §D in design preparation (D9 approved 2026-10-01). Not implementation authority until the operator approves
-it and the root links it from the authority addendum in `frozen-visual-spec.md`. Behaviour is in
+Status: **DRAFT, revised after Astra review (2026-10-01).** §A–C ready for operator approval; §D in design preparation (D9 approved 2026-10-01). Sections §G SOURCE-02 and §H MEME-VIDEO-01 were operator-approved for implementation on 2026-10-02 and are linked from the authority addendum in `frozen-visual-spec.md`. Other sections retain their existing approval status. Behaviour is in
 `docs/implementation/OCT-2026-plan.md`.
 
 Everything in `frozen-visual-spec.md` §1 applies unchanged: Polish UI, 360 px reference and clean

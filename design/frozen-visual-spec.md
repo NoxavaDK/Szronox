@@ -680,3 +680,16 @@ Use this consolidated written specification instead.
 If this specification conflicts with an older screenshot-reference sentence, THIS SPECIFICATION WINS.
 
 Do not dispatch additional UI implementation merely because this specification is now frozen. Normal explicit task/model approval rules still apply.
+
+==================================================
+12. APPROVED DELTA ADDITIONS — 2026-10-02
+==================================================
+
+The operator approved these two bounded additions for implementation. Their visual behavior is
+authoritative only for their named surfaces and is governed by the delta sections below:
+
+- [SOURCE-02: Link do artykułu](oct-2026-delta-spec.md)
+- [MEME-VIDEO-01: video memes](oct-2026-delta-spec.md)
+
+T00 defines the corresponding API, persistence, validation and freshness contracts. This addendum
+does not approve the other sections of the October delta.
