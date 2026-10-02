@@ -18,7 +18,9 @@ test('kDrive uploader slices only bounded chunks and reports acknowledged progre
   const calls = [];
   const api = {
     async startKdriveUpload(_reelId, body) {
-      assert.equal(body.expectedVersion, reel.version);
+      // The local copy is version 4; the start must use the server's current version (5),
+      // so a folder link or save that the page has not seen yet cannot cause a false conflict.
+      assert.equal(body.expectedVersion, 5);
       return { uploadId: 'upload-1', reelId: reel.id, purpose: 'video', fileName: file.name, mimeType: file.type,
         byteSize: file.size, chunkSize: 2, totalChunks: 3, receivedChunks: [], state: 'open' };
     },

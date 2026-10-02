@@ -4,7 +4,7 @@ import type { CoreApiClient } from './api.js';
 export interface KdriveUploadProgress { uploadId: string; completedBytes: number; totalBytes: number; phase: 'uploading' | 'finishing' | 'attaching' }
 export interface KdriveUploadOptions {
   api: CoreApiClient; reel: Reel; purpose: 'video' | 'cover'; file: File; createFolder: boolean;
-  existing?: KdriveUploadState; signal: AbortSignal; onProgress(progress: KdriveUploadProgress): void;
+  existing?: KdriveUploadState; signal: AbortSignal; onProgress(progress: KdriveUploadProgress): void; onStarted?: () => void;
 }
 
 export class KdriveSameFileRequiredError extends Error {
@@ -19,9 +19,13 @@ export async function uploadKdriveFile(options: KdriveUploadOptions): Promise<Re
     throw new KdriveSameFileRequiredError();
   }
   if (!upload) {
-    const body: KdriveUploadStartRequest = { operationId: crypto.randomUUID(), expectedVersion: reel.version,
+    // Like attach below: the start writes no user field (at most it links the folder), so
+    // check it against the server's current version rather than a possibly stale local copy.
+    const latest = await api.reel(reel.id);
+    const body: KdriveUploadStartRequest = { operationId: crypto.randomUUID(), expectedVersion: latest.version,
       purpose, fileName: file.name, byteSize: file.size, mimeType: file.type, ...(options.createFolder ? { createFolder: true } : {}) };
     upload = await api.startKdriveUpload(reel.id, body);
+    options.onStarted?.();
   }
   const state = upload;
   const totalChunks = Math.ceil(file.size / state.chunkSize);

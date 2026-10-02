@@ -126,8 +126,9 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
         // reservation in the same transaction prevents two starts from observing the
         // same free capacity. The reservation's state/error pair counts until kDrive
         // confirms that the session has started or the request is known to have failed.
-        const userLock = await tx.query('select id from app.users where id=$1 for update', [actor.id]);
-        if (!userLock.rows[0]) throw notFound('User not found');
+        // A transaction-scoped advisory lock, not `select … for update` on app.users:
+        // row locks need UPDATE privilege, which szronox_api deliberately lacks there.
+        await tx.query(`select pg_advisory_xact_lock(hashtextextended('kdrive-upload-user:' || $1, 0))`, [actor.id]);
         const reelLock = await tx.query<{ version: number }>(
           'select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
         if (!reelLock.rows[0]) throw notFound('Reel not found');

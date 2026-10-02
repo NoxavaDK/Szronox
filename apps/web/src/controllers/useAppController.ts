@@ -103,6 +103,9 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const [conflictsByReel, setConflictsByReel] = useState<Record<string, ConflictState>>({});
   const conflict = current ? conflictsByReel[current.id] ?? null : null;
   const [hookEdits, setHookEdits] = useState<Record<string, HookEdit>>({});
+  /** HOOK-ADD-01: one new-hook draft (per open Reel). The operation id survives retries of the
+   * same text, so a retry after a lost response cannot add the hook twice. */
+  const [newHook, setNewHook] = useState<{ reelId: string; text: string; saving: boolean; error: string | null; operationId: string } | null>(null);
   const [hookSelecting, setHookSelecting] = useState(false);
   const [layout, setLayout] = useState<WorkspaceLayout>('single');
   const layoutRef = useRef<WorkspaceLayout>('single');
@@ -174,9 +177,30 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     return () => window.removeEventListener('beforeunload', warn);
   }, [kdriveUploadJobs]);
 
+  /**
+   * Show the server Reel after this client's own upload write (folder link at start, cover/export
+   * attach). Those touch no scalar field, so a pending scalar patch made against the version just
+   * before is rebased, exactly as acceptServerReel does for own hook mutations. Only exactly one
+   * version later: anything more is a genuine concurrent change and still surfaces as a conflict.
+   */
+  const syncAfterUploadWrite = useCallback((server: Reel) => {
+    const pending = pendingPatches.current.get(server.id) ?? null;
+    if (pending && server.version === pending.expectedVersion + 1) pending.expectedVersion = server.version;
+    setReels((old) => old.map((item) => item.id === server.id ? server : item));
+    setPlanReels((old) => old.map((item) => item.id === server.id ? server : item));
+    if (currentRef.current?.id !== server.id) return;
+    const next = pending ? { ...server, ...pending.changes } : server;
+    currentRef.current = next; setCurrent(next);
+  }, []);
+
   const startKdriveUpload = useCallback(async (reelId: string, purpose: KdriveUploadPurpose, file: File, createFolder: boolean) => {
     const reel = currentRef.current?.id === reelId ? currentRef.current : reels.find((item) => item.id === reelId);
     if (!reel || kdriveUploadControllers.current.has(reelId)) return;
+    // Same rule as the explicit folder action: the combined create links the folder with a
+    // version-checked write, so wait for unsaved edits first.
+    if (createFolder && (pendingPatches.current.has(reelId) || inFlightSaves.current.has(reelId))) {
+      setMessage('Poczekaj, aż zmiany w rolce zostaną zapisane, i spróbuj ponownie.'); return;
+    }
     const supported = purpose === 'video' ? ['video/mp4', 'video/quicktime'] : ['image/jpeg', 'image/png', 'image/webp'];
     const maxBytes = purpose === 'video' ? 4 * 1024 * 1024 * 1024 : 25 * 1024 * 1024;
     if (!file.size || !supported.includes(file.type)) { setMessage(purpose === 'video' ? 'Wybierz plik MP4 lub QuickTime.' : 'Wybierz zdjęcie JPG, PNG lub WebP.'); return; }
@@ -192,11 +216,11 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       const matching = open.find((item) => item.purpose === purpose && item.fileName === file.name && item.byteSize === file.size && item.mimeType === file.type);
       if (open.some((item) => item.purpose === purpose) && !matching) throw new Error('Wysyłanie przerwane — wybierz ten sam plik, aby wznowić albo anuluj wysyłanie.');
       const saved = await uploadKdriveFile({ api, reel, purpose, file, createFolder, existing: matching, signal: controller.signal,
+        // The combined start linked the folder (one new version): pick it up before the upload runs.
+        onStarted: createFolder ? () => { void api.reel(reelId).then(syncAfterUploadWrite).catch(() => undefined); } : undefined,
         onProgress(progress) { setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], uploadId: progress.uploadId, completedBytes: progress.completedBytes, totalBytes: progress.totalBytes, phase: progress.phase, percent: uploadPercent(progress), error: null, finished: old[reelId]?.finished === true || progress.phase === 'attaching' } })); },
       });
-      setReels((old) => old.map((item) => item.id === saved.id ? saved : item));
-      setPlanReels((old) => old.map((item) => item.id === saved.id ? saved : item));
-      if (currentRef.current?.id === saved.id) { currentRef.current = saved; setCurrent(saved); }
+      syncAfterUploadWrite(saved);
       setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'done', percent: 100, completedBytes: file.size, error: null } }));
       setMessage(purpose === 'cover' ? 'Okładka wgrana i oznaczona jako gotowa.' : 'Eksport wgrany. Sprawdź ponownie.');
     } catch (error) {
@@ -207,8 +231,11 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
           : reason === 'folder_missing' || reason === 'folder_unavailable' ? 'Połącz ponownie folder kDrive przed wysłaniem pliku.'
             : error instanceof ClientApiError ? polishError(error) : error instanceof Error ? error.message : polishError(error);
       setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'error', error: text || 'Nie udało się wgrać pliku. Spróbuj ponownie.' } }));
+      // A failed combined start may already have linked the folder (a new Reel version).
+      // Pick that up so later saves and Ponów are not checked against a stale version.
+      if (createFolder) { try { syncAfterUploadWrite(await api.reel(reelId)); } catch { /* next load refreshes */ } }
     } finally { kdriveUploadControllers.current.delete(reelId); await wakeLock?.release().catch(() => undefined); }
-  }, [api, reels]);
+  }, [api, reels, syncAfterUploadWrite]);
 
   const cancelKdriveUpload = useCallback(async (reelId: string) => {
     const job = kdriveUploadJobs[reelId];
@@ -231,16 +258,16 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     if (!job?.uploadId || !reel) return;
     setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'attaching', error: null, finished: true } }));
     try {
-      const saved = await api.attachKdriveUpload(job.uploadId, { operationId: crypto.randomUUID(), expectedVersion: reel.version });
-      setReels((old) => old.map((item) => item.id === saved.id ? saved : item)); setPlanReels((old) => old.map((item) => item.id === saved.id ? saved : item));
-      if (currentRef.current?.id === saved.id) { currentRef.current = saved; setCurrent(saved); }
+      const latest = await api.reel(reelId);
+      const saved = await api.attachKdriveUpload(job.uploadId, { operationId: crypto.randomUUID(), expectedVersion: latest.version });
+      syncAfterUploadWrite(saved);
       setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'done', percent: 100, error: null } }));
       setMessage(job.purpose === 'cover' ? 'Okładka wgrana i oznaczona jako gotowa.' : 'Eksport wgrany. Sprawdź ponownie.');
     } catch (error) {
       const message = error instanceof ClientApiError ? polishError(error) : polishError(error);
       setKdriveUploadJobs((old) => ({ ...old, [reelId]: { ...old[reelId], phase: 'error', error: message } }));
     }
-  }, [api, kdriveUploadJobs, reels]);
+  }, [api, kdriveUploadJobs, reels, syncAfterUploadWrite]);
 
   /**
    * Report attachment progress.
@@ -879,6 +906,39 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
    * Gotowe: save through the existing hook-edit endpoint. The draft is removed only after the
    * server confirms; any refusal or network failure keeps it in the field with a reason.
    */
+  const startNewHook = useCallback(() => {
+    const reel = currentRef.current; if (!reel) return;
+    setNewHook((old) => old?.reelId === reel.id ? old : { reelId: reel.id, text: '', saving: false, error: null, operationId: crypto.randomUUID() });
+  }, []);
+  const changeNewHook = useCallback((text: string) => {
+    setNewHook((old) => old && !old.saving ? { ...old, text, error: null, operationId: text === old.text ? old.operationId : crypto.randomUUID() } : old);
+  }, []);
+  const cancelNewHook = useCallback(() => { setNewHook((old) => old?.saving ? old : null); }, []);
+  const saveNewHook = useCallback(async () => {
+    const reel = currentRef.current; const draft = newHook;
+    if (!reel || !user || !draft || draft.reelId !== reel.id || draft.saving) return;
+    if (draft.text.trim() === '') { setNewHook({ ...draft, error: 'Hook nie może być pusty.' }); return; }
+    setNewHook({ ...draft, saving: true, error: null });
+    try {
+      const saved = await api.addHook(reel.id, { operationId: draft.operationId, expectedVersion: reel.version, text: draft.text });
+      acceptServerReel(reel, saved, true);
+      setNewHook(null);
+    } catch (error) {
+      if (isAbandonedRequest(error)) return;
+      let message = error instanceof ClientApiError
+        ? `Hook nie został dodany. ${polishError(error)}`
+        : 'Brak połączenia. Hook nie został dodany — tekst pozostaje w polu.';
+      let operationId = draft.operationId;
+      if (error instanceof ClientApiError && error.status === 409) {
+        // Adding is additive: after picking up the current Reel, Gotowe can simply retry.
+        await refreshAfterRefusal(reel);
+        message = 'Rolka zmieniła się w międzyczasie. Twój hook jest zachowany — naciśnij Gotowe, aby dodać go ponownie.';
+        operationId = crypto.randomUUID();
+      }
+      setNewHook({ ...draft, saving: false, error: message, operationId });
+    }
+  }, [acceptServerReel, api, newHook, refreshAfterRefusal, user]);
+
   const saveHookEdit = useCallback(async (hookId: string) => {
     const reel = currentRef.current;
     const edit = hookEditsRef.current[hookId];
@@ -1218,12 +1278,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     const activeReelId = currentRef.current?.id;
     const hasScalarDraft = activeReelId !== undefined && (pendingPatches.current.has(activeReelId) || inFlightSaves.current.has(activeReelId));
     return hasScalarDraft || hasUnfinishedHookEditForReel(hookEdits, activeReelId) ||
+      (newHook !== null && newHook.reelId === activeReelId && newHook.text !== '') ||
       ['saving', 'conflict', 'offline', 'error'].includes(saveState) || conflict !== null;
-  }, [conflict, hookEdits, saveState]);
+  }, [conflict, hookEdits, newHook, saveState]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
   return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
-    hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent, restore, copyPublication,
+    hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent,
+    newHook: newHook && newHook.reelId === current?.id ? newHook : null, startNewHook, changeNewHook, cancelNewHook, saveNewHook, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
     sourceUndo: sourceUndo?.reelId === current?.id ? sourceUndo : null, refreshSourceMetadata, checkSourceMetadata, restoreAutomaticSource, undoRestoreSource,
     patchReelById, removeReelById, copyReelLink, hasUnsavedChanges,
