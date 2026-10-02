@@ -1,7 +1,7 @@
 # Luna dispatch — SOURCE-02 and MEME-VIDEO-01
 
-Status: **OPERATOR-APPROVED — dispatch after the root pin commit.** The approved task/model matrix is
-below. The pin commit id replaces `<PIN>` after it is created.
+Status: **OPERATOR-APPROVED — dispatched from root pin `b0ff4a6`.** The approved task/model matrix
+below is authoritative for these two implementations.
 
 Operator decisions (2026-10-02):
 - SOURCE-02: an article link can be added later to a Reel captured without one (image/text only),
@@ -21,7 +21,7 @@ sites or kDrive, send messages or spawn agents.
 | Suitability | bounded field + existing source pipeline + one AI input field | upload validation of untrusted media, streaming route, UI |
 | Difficulty | low–medium | medium |
 | Branch | `codex/source-02` | `codex/meme-video-01` |
-| Base | master at `<PIN>` | master at `<PIN>` |
+| Base | `b0ff4a6` | `b0ff4a6` |
 
 ---
 
