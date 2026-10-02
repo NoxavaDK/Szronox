@@ -6,6 +6,7 @@ import { CoreRepository } from './core/repository.js';
 import { pgliteDatabase, type Database } from './db/client.js';
 import { migrate, seedUsers } from './db/migrate.js';
 import { SourceMetadataService } from './source/metadata.js';
+import { SourceError } from '@szronox/source-fetch';
 
 const NOXAVA = { id: '11111111-1111-4111-8111-111111111111', name: 'NOXAVA' as const };
 const SZRON = { id: '22222222-2222-4222-8222-222222222222', name: 'SZRON' as const };
@@ -125,5 +126,28 @@ test('manual refresh with no URL writes no_url and the per-user limit is ten per
     assert.equal(result.enqueue, false); assert.equal(result.metadata.state, 'no_url');
     for (let i = 1; i < 10; i += 1) await service.refresh(NOXAVA.id, reel.id, randomUUID());
     await assert.rejects(service.refresh(NOXAVA.id, reel.id, randomUUID()), (error: unknown) => (error as { code?: string }).code === 'RATE_LIMITED');
+  } finally { await db.close(); }
+});
+
+test('SOURCE-01a: a site refusal fails at the first attempt; 429 and network errors still retry', async () => {
+  const { db, repo } = await fixture();
+  try {
+    for (const [error, expectedState, expectedFailure] of [
+      [new SourceError('SOURCE_ACCESS_DENIED', 403), 'failed', 'blocked'],
+      [new SourceError('SOURCE_UNSUPPORTED'), 'failed', 'unsupported'],
+      [new SourceError('SOURCE_ACCESS_DENIED', 429), 'pending', null],
+      [new SourceError('SOURCE_UNAVAILABLE'), 'pending', null],
+    ] as const) {
+      const reel = await repo.createReel(NOXAVA, { operationId: randomUUID(), reelId: randomUUID(), input: { url: 'https://www.politico.com/news/x', images: [] } });
+      let calls = 0;
+      const service = new SourceMetadataService(db, async () => { calls += 1; throw error; }, false);
+      await service.enqueue(reel.id, reel.sourceMetadata!.requestId);
+      service.stop();
+      const after = await repo.getReel(reel.id);
+      assert.equal(calls, 1);
+      assert.equal(after.sourceMetadata?.state, expectedState); assert.equal(after.sourceMetadata?.attempts, 1);
+      assert.equal(after.sourceMetadata?.failure ?? null, expectedFailure);
+      assert.equal(after.sourceMetadata?.line, 'Źródło: politico.com'); assert.equal(after.version, 1);
+    }
   } finally { await db.close(); }
 });

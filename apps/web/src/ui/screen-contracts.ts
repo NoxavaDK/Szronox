@@ -757,7 +757,8 @@ export interface PublicationSectionProps {
   source: string;
   sourceManual: boolean;
   sourceAutomaticAvailable: boolean;
-  sourceMetadataState: 'pending' | 'found' | 'partial' | 'failed' | 'no_url' | 'never' | null;
+  /** `blocked` / `unsupported`: a final `failed` whose retry can't help (SOURCE-01a). */
+  sourceMetadataState: 'pending' | 'found' | 'partial' | 'failed' | 'blocked' | 'unsupported' | 'no_url' | 'never' | null;
   sourceLongWait: boolean;
   sourceUndoAvailable: boolean;
   onChangeSource: (value: string) => void;

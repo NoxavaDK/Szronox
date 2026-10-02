@@ -1,11 +1,19 @@
 import { randomUUID, createHash } from 'node:crypto';
 import type { SourceMetadata } from '@szronox/contracts';
-import { fetchPublicHtml, extractSourceMetadata } from '@szronox/source-fetch';
+import { fetchPublicHtml, extractSourceMetadata, SourceError } from '@szronox/source-fetch';
+import type { SourceFetchFailure } from '@szronox/contracts';
 import type { Database } from '../db/client.js';
 import { CoreError, idempotencyConflict, notFound } from '../core/errors.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../db/client.js';
 const RETRY_MS = [30_000, 120_000];
 const iso = (date = new Date()) => date.toISOString();
+/** SOURCE-01a: a refusal or an unreadable link won't change on retry; only transient failures retry. */
+export function sourceFailure(error: unknown): SourceFetchFailure {
+  if (!(error instanceof SourceError)) return 'unavailable';
+  if (error.code === 'SOURCE_ACCESS_DENIED') return error.status === 429 ? 'unavailable' : 'blocked';
+  if (error.code === 'SOURCE_UNAVAILABLE') return 'unavailable';
+  return 'unsupported';
+}
 function hostOf(raw: string): string { try { return new URL(raw).hostname.replace(/^www\./i, '').toLowerCase(); } catch { return 'źródło'; } }
 export function deriveSourceUrl(input: unknown): string | null {
   if (!input || typeof input !== 'object') return null;
@@ -88,10 +96,12 @@ export class SourceMetadataService {
       const fetched = await this.fetchHtml(current.url); const parsed = extractSourceMetadata(fetched.bytes, fetched.finalUrl);
       const metadata: SourceMetadata = { ...current, ...parsed, url: fetched.finalUrl, state: parsed.state, attempts: attempt, fetchedAt: iso() };
       await this.db.query("update app.reels set source_metadata=$1 where id=$2 and deleted_at is null and source_metadata->>'requestId'=$3", [JSON.stringify(metadata), reelId, requestId]);
-    } catch {
-      const metadata: SourceMetadata = { ...current, attempts: attempt, fetchedAt: attempt >= 3 ? iso() : null, state: attempt >= 3 ? 'failed' : 'pending' };
+    } catch (error) {
+      const failure = sourceFailure(error);
+      const final = failure !== 'unavailable' || attempt >= 3;
+      const metadata: SourceMetadata = { ...current, attempts: attempt, fetchedAt: final ? iso() : null, state: final ? 'failed' : 'pending', failure: final ? failure : null };
       await this.db.query("update app.reels set source_metadata=$1 where id=$2 and deleted_at is null and source_metadata->>'requestId'=$3", [JSON.stringify(metadata), reelId, requestId]);
-      if (attempt < 3) {
+      if (!final) {
         const timer = setTimeout(() => { this.retryTimers.delete(timer); void this.enqueue(reelId, requestId).catch(() => undefined); }, RETRY_MS[attempt - 1]);
         this.retryTimers.add(timer); timer.unref();
       }

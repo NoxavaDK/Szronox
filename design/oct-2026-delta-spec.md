@@ -41,6 +41,8 @@ one compact text action:
 | automatic, pending (domain shown meanwhile) | `Pobieranie danych źródła…` | — |
 | automatic, pending past the client's check window (see below) | `Pobieranie trwa dłużej niż zwykle.` | `Sprawdź` |
 | automatic, fetch failed (domain shown) | `Nie udało się pobrać danych źródła.` | `Ponów` |
+| automatic, site refuses (SOURCE-01a; domain shown) | `Strona blokuje automatyczne pobieranie. Wpisz autora ręcznie.` | — |
+| automatic, link not readable (SOURCE-01a; domain shown) | `Tego linku nie da się odczytać automatycznie. Wpisz źródło ręcznie.` | — |
 | no link in the capture (field empty) | `Brak linku w materiale.` | — |
 | no data yet (Reel created before SOURCE-01, field empty) | `Pobierz dane źródła z linku.` | `Pobierz` |
 | edited by user | `Wpisane ręcznie` | `Przywróć automatyczne` (only when an automatic value exists) |

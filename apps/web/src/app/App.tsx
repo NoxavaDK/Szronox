@@ -698,7 +698,8 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         source: reel.publicationSource ?? reel.sourceMetadata?.line ?? '',
         sourceManual: reel.publicationSource !== null,
         sourceAutomaticAvailable: reel.sourceMetadata?.line !== null && reel.sourceMetadata !== null,
-        sourceMetadataState: reel.sourceMetadata?.state ?? 'never',
+        sourceMetadataState: reel.sourceMetadata?.state === 'failed' && (reel.sourceMetadata.failure === 'blocked' || reel.sourceMetadata.failure === 'unsupported')
+          ? reel.sourceMetadata.failure : reel.sourceMetadata?.state ?? 'never',
         sourceLongWait,
         sourceUndoAvailable: c.sourceUndo?.reelId === reel.id,
         onChangeSource: (publicationSource) => c.changeReel({ publicationSource }),

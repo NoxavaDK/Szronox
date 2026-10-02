@@ -28,6 +28,12 @@ export interface ReelHook {
   createdAt: IsoDateTime;
 }
 export type SourceMetadataState = 'pending' | 'found' | 'partial' | 'failed' | 'no_url';
+/**
+ * Why a fetch ended `failed`. `blocked` (the site refused: 401/403) and `unsupported` (the link
+ * can't be read as a page) are final at the first attempt; only `unavailable` is retried.
+ * Absent on rows written before SOURCE-01a.
+ */
+export type SourceFetchFailure = 'blocked' | 'unsupported' | 'unavailable';
 export interface SourceMetadata {
   state: SourceMetadataState;
   /** Canonical public URL that was, or will be, fetched. */
@@ -44,6 +50,8 @@ export interface SourceMetadata {
   requestedAt: IsoDateTime;
   fetchedAt: IsoDateTime | null;
   attempts: number;
+  /** Set only when `state` is `failed`. */
+  failure?: SourceFetchFailure | null;
 }
 export interface Meme {
   id: Id;

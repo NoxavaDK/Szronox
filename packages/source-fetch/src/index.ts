@@ -42,7 +42,8 @@ export function canonicalPublicUrl(raw: string): URL {
 }
 
 export class SourceError extends Error {
-  constructor(readonly code: 'SOURCE_UNSUPPORTED' | 'SOURCE_UNAVAILABLE' | 'SOURCE_ACCESS_DENIED' | 'SOURCE_TOO_LARGE' | 'SOURCE_TEXT_TOO_LONG' | 'SOURCE_TEXT_UNAVAILABLE') {
+  /** `status`: the HTTP status behind an access/availability refusal, when there was one. */
+  constructor(readonly code: 'SOURCE_UNSUPPORTED' | 'SOURCE_UNAVAILABLE' | 'SOURCE_ACCESS_DENIED' | 'SOURCE_TOO_LARGE' | 'SOURCE_TEXT_TOO_LONG' | 'SOURCE_TEXT_UNAVAILABLE', readonly status?: number) {
     super(code);
     this.name = 'SourceError';
   }
@@ -87,7 +88,7 @@ async function oneFetch(url: URL): Promise<{ status: number; location?: string; 
         return;
       }
       if (status !== 200) {
-        response.destroy(); reject(new SourceError(status === 401 || status === 403 || status === 429 ? 'SOURCE_ACCESS_DENIED' : 'SOURCE_UNAVAILABLE')); return;
+        response.destroy(); reject(new SourceError(status === 401 || status === 403 || status === 429 ? 'SOURCE_ACCESS_DENIED' : 'SOURCE_UNAVAILABLE', status)); return;
       }
       if (contentEncoding !== 'identity' || !['text/html', 'text/plain'].includes(contentType)) {
         response.destroy(); reject(new SourceError('SOURCE_UNSUPPORTED')); return;
