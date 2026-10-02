@@ -7,7 +7,13 @@ import type { KdriveConfig } from './config.js';
 const FOLDER_NAME = 'SzroNox Memy';
 const MAX_BYTES = 25 * 1024 * 1024;
 const NAME_BAD = /[\\/:*?"<>|\u0000-\u001f\u007f]/g;
-const extension = (mime: string) => ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' } as Record<string, string>)[mime] ?? null;
+const extension = (mime: string) => ({
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+  'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/x-m4v': '.m4v', 'video/3gpp': '.3gp',
+  'video/webm': '.webm', 'video/x-matroska': '.mkv', 'video/x-msvideo': '.avi', 'video/avi': '.avi',
+  'video/ogg': '.ogv', 'video/x-flv': '.flv', 'video/mp2t': '.ts', 'video/mpeg': '.mpg',
+  'video/x-ms-asf': '.wmv', 'video/x-ms-wmv': '.wmv',
+} as Record<string, string>)[mime] ?? '.bin';
 
 export interface MemeCopyOptions {
   db: Database; storage: StorageAdapter; config: KdriveConfig | null; folders?: KdriveClient | null; uploads?: KdriveUploadClient | null;
@@ -123,14 +129,14 @@ export class MemeCopyService {
 
   private async copyOne(id: string, force = false): Promise<void> {
     const db = this.options.db;
-    const rowResult = await db.query<{ id: string; name: string; asset_ref: string; kdrive_copy_state: string; kdrive_copy_attempts: number }>(
-      `select id,name,asset_ref,kdrive_copy_state,kdrive_copy_attempts from app.memes where id=$1`, [id]);
+    const rowResult = await db.query<{ id: string; name: string; asset_ref: string; mime_type: string | null; kdrive_copy_state: string; kdrive_copy_attempts: number }>(
+      `select id,name,asset_ref,mime_type,kdrive_copy_state,kdrive_copy_attempts from app.memes where id=$1`, [id]);
     const row = rowResult.rows[0]; if (!row || row.kdrive_copy_state === 'copied' || row.kdrive_copy_state === 'not_configured' || (!force && row.kdrive_copy_attempts >= 3)) return;
     await db.query(`update app.memes set kdrive_copy_attempts=kdrive_copy_attempts+1,kdrive_copy_state='pending' where id=$1`, [id]);
     try {
       if (!this.options.storage.openObject) throw new Error('storage_unavailable');
       const opened = await this.options.storage.openObject(row.asset_ref);
-      const ext = extension(opened.object.mimeType); if (!ext || opened.object.byteSize > MAX_BYTES) { opened.stream.destroy(); throw new Error('unsupported_image'); }
+      const ext = extension(row.mime_type ?? opened.object.mimeType); if (opened.object.byteSize > MAX_BYTES) { opened.stream.destroy(); throw new Error('media_too_large'); }
       const chunks: Buffer[] = []; let total = 0;
       for await (const item of opened.stream) { const chunk = Buffer.from(item); total += chunk.length; if (total > MAX_BYTES) throw new Error('image_too_large'); chunks.push(chunk); }
       if (total !== opened.object.byteSize) throw new Error('stored_size_mismatch');

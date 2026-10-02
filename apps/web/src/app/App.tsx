@@ -226,7 +226,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
    */
   const [aiView, setAiView] = useState<{ reelId: string; view: 'develop' | 'generate_hooks' | 'fact_check' | 'language_check' | 'find_programme' | 'generate_publication' | 'attached_programme'; autoStart: boolean } | null>(null);
   const [memeReelId, setMemeReelId] = useState<string | null>(null);
-  const [memeNames, setMemeNames] = useState<Array<{ id: string; name: string }>>([]);
+  const [memeNames, setMemeNames] = useState<Array<{ id: string; name: string; mediaKind?: 'image' | 'video' }>>([]);
 
   useEffect(() => {
     if (!c.user) { setAiView(null); setMemeReelId(null); setAiCapability({ enabled: false, programmeIndexed: false }); return; }
@@ -237,7 +237,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   useEffect(() => {
     if (!c.current) { setMemeNames([]); return; }
     let live = true;
-    void api.memes().then(({ items }) => { if (live) setMemeNames(items.filter((item) => c.current?.memeIds.includes(item.id)).map(({ id, name }) => ({ id, name }))); }).catch(() => undefined);
+    void api.memes().then(({ items }) => { if (live) setMemeNames(items.filter((item) => c.current?.memeIds.includes(item.id)).map(({ id, name, mediaKind }) => ({ id, name, mediaKind }))); }).catch(() => undefined);
     return () => { live = false; };
   }, [api, c.current?.id, c.current?.memeIds.join(',')]);
 

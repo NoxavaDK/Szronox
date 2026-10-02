@@ -14,3 +14,12 @@
 .copyState{margin:0 0 8px 56px;color:#636360;font-size:12px;line-height:16px}
 .screen .copyRetry{min-height:0;padding:0;color:inherit;font:inherit;text-decoration:underline;text-align:left}
 .screen .copyRetry:disabled{cursor:wait;opacity:.65}
+.row{position:relative;display:flex;align-items:center;min-height:64px;border-bottom:1px solid #d9ded6}
+.rows .thumbButton{position:relative;flex:0 0 44px;width:44px;height:44px;min-height:44px;padding:0;border:0}
+.rows .thumbButton img,.rows .thumbButton video,.videoPlaceholder{display:block;width:44px;height:44px;object-fit:cover;border-radius:3px;background:#e8ebe5}
+.videoPlaceholder{display:grid;place-items:center;color:#636360;font-size:20px}
+.rows .thumbButton .playMark{position:absolute;right:2px;bottom:2px;padding:1px 3px;background:#202820;color:#fff;border-radius:2px;font-size:10px}
+.rows .nameButton{flex:1;min-width:0;padding:10px 0;color:#202820}
+.previewVideo{position:relative;width:80px;height:80px;background:#e8ebe5;border-radius:3px;overflow:hidden}
+.previewVideo img,.previewVideo .videoPlaceholder{width:80px;height:80px;object-fit:cover}
+.previewVideo>span:last-child{position:absolute;right:4px;bottom:4px;padding:2px 4px;background:#202820;color:#fff;border-radius:2px;font-size:11px}

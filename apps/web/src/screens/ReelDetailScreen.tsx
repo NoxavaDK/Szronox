@@ -144,7 +144,7 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
               {metadata.programmeState === 'matched' ? <><CheckIcon size={13} aria-hidden="true" /> Program: powiązane</> : 'Program: brak dopasowania'}
             </button>
           ) : null}
-          {attachedMemes?.map((meme) => <span key={meme.id} className={styles.metadataItem}>Mem: {meme.name} <button type="button" className={styles.memeDetach} onClick={() => onDetachMeme?.(meme.id)} aria-label={`Odłącz mem ${meme.name}`}>×</button></span>)}
+          {attachedMemes?.map((meme) => <span key={meme.id} className={styles.metadataItem}>Mem: {meme.name}{meme.mediaKind === 'video' ? <span aria-label="wideo" title="wideo"> ▶</span> : null} <button type="button" className={styles.memeDetach} onClick={() => onDetachMeme?.(meme.id)} aria-label={`Odłącz mem ${meme.name}`}>×</button></span>)}
           <button type="button" className={styles.metadataInlineAction} onClick={onOpenMeme}>{attachedMemes?.length ? '+ kolejny mem' : '+ Mem'}</button>
         </div> : null}
       </div>

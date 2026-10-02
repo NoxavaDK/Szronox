@@ -15,11 +15,12 @@ import type { KdriveClient, KdriveFolder } from './kdrive/client.js';
 import type { KdriveUploadClient } from './kdrive/upload-client.js';
 import { MemeCopyService } from './kdrive/meme-copy.js';
 
-function fixture(options: { uploadFails?: boolean; existingFolder?: boolean; gateUpload?: boolean } = {}) {
-  const meme = { id: 'meme-1', name: 'Próba', asset_ref: 'asset-1', kdrive_copy_state: 'pending', kdrive_copy_attempts: 0 };
+function fixture(options: { uploadFails?: boolean; existingFolder?: boolean; gateUpload?: boolean; mimeType?: string } = {}) {
+  const meme = { id: 'meme-1', name: 'Próba', asset_ref: 'asset-1', mime_type: options.mimeType ?? 'image/png', kdrive_copy_state: 'pending', kdrive_copy_attempts: 0 };
   let folderCreates = 0;
   let uploads = 0;
   let lookups = 0;
+  let uploadedFileName = '';
   let signalUploadStarted!: () => void;
   let releaseUpload!: () => void;
   const uploadStarted = new Promise<void>((resolve) => { signalUploadStarted = resolve; });
@@ -54,11 +55,20 @@ function fixture(options: { uploadFails?: boolean; existingFolder?: boolean; gat
   const uploadClient: KdriveUploadClient = {
     async start() { throw new Error('not used'); }, async putChunk() { throw new Error('not used'); },
     async finish() { throw new Error('not used'); }, async getFile() { throw new Error('not used'); }, async cancel() { throw new Error('not used'); },
-    async uploadSmall() { uploads += 1; signalUploadStarted(); if (options.gateUpload) await uploadGate; if (options.uploadFails) throw new Error('provider failed'); return { id: 'file-1', name: 'MEM - Próba.png', size: 4, status: 'ok' }; },
+    async uploadSmall(_folder, fileName) { uploads += 1; uploadedFileName = fileName; signalUploadStarted(); if (options.gateUpload) await uploadGate; if (options.uploadFails) throw new Error('provider failed'); return { id: 'file-1', name: fileName, size: 4, status: 'ok' }; },
   };
   const service = new MemeCopyService({ db, storage, config: { driveId: '1', rootFolderId: '10', token: 'secret', memeFolderId: null }, folders: folderClient, uploads: uploadClient });
-  return { service, meme, uploadStarted, releaseUpload, counts: () => ({ folderCreates, uploads, lookups }) };
+  return { service, meme, uploadStarted, releaseUpload, uploadedFileName: () => uploadedFileName, counts: () => ({ folderCreates, uploads, lookups }) };
 }
+
+test('video meme copies use the stored MIME extension and .bin for an unknown supported video type', async () => {
+  for (const [mimeType, expected] of [['video/mp4', 'MEM - Próba.mp4'], ['video/webm', 'MEM - Próba.webm'], ['video/x-custom', 'MEM - Próba.bin']]) {
+    const ctx = fixture({ mimeType });
+    await ctx.service.enqueue('meme-1');
+    assert.equal(ctx.meme.kdrive_copy_state, 'copied');
+    assert.equal(ctx.uploadedFileName(), expected);
+  }
+});
 
 test('meme copy is best effort, retries are bounded, and an existing folder is reused', async () => {
   const ctx = fixture({ uploadFails: true, existingFolder: true });
@@ -121,7 +131,7 @@ test('meme-create replay does not enqueue again; failed-copy retry is operation-
     await new CoreRepository(db).createReel(actor, { operationId: randomUUID(), reelId, input: { text: 'test', images: [] } });
     const imageAssetId = randomUUID();
     await db.query(`insert into app.attachments(id,reel_id,purpose,kind,label,storage_key,state,validated_mime_type,validated_width,validated_height,validated_pixel_count,validated_at)
-      values($1,$2,'source','image','meme.png','asset-key','ready','image/png',1,1,1,now())`, [imageAssetId, reelId]);
+      values($1,$2,'meme','image','meme.png','asset-key','ready','image/png',1,1,1,now())`, [imageAssetId, reelId]);
     const createBody = { operationId: randomUUID(), name: 'Test meme', imageAssetId, attachToReel: { reelId, expectedVersion: 1 } };
     const created = await app.inject({ method: 'POST', url: '/api/v1/memes', payload: createBody });
     const memeId = created.json().meme.id as string;

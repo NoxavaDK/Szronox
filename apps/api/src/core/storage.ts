@@ -15,9 +15,9 @@ export interface StoredObject {
 export interface ValidatedStoredObject extends StoredObject {
   exists: true;
   mimeType: string;
-  width: number;
-  height: number;
-  pixelCount: number;
+  width?: number;
+  height?: number;
+  pixelCount?: number;
   contentHash: string;
 }
 
@@ -36,6 +36,7 @@ export interface SignedUpload {
 
 export interface StorageWriteOptions {
   mimeType: string;
+  kind?: 'image' | 'video';
   byteSize: number;
   maxByteSize: number;
   maxPixelCount: number;
