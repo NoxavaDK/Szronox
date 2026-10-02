@@ -120,6 +120,7 @@ function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | nu
           .filter((field) => field.name.toLowerCase() === 'text').map(({ name, value }) => ({ name, value })),
         inputNote: snapshot.inputNote,
       },
+      sourceLink: snapshot.sourceLink ?? null,
     };
   }
   if (action === 'language_check') return { script: snapshot.script, scriptRevision: snapshot.scriptRevision };
@@ -131,9 +132,9 @@ function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | nu
       programmeReleaseId: snapshot.programmeReleaseId ?? null,
     };
   }
-  if (action === 'generate_hooks') return { originalInput: snapshot.originalInput, inputNote: snapshot.inputNote, script: snapshot.script, hooks };
+  if (action === 'generate_hooks') return { originalInput: snapshot.originalInput, sourceLink: snapshot.sourceLink ?? null, inputNote: snapshot.inputNote, script: snapshot.script, hooks };
   return {
-    title: snapshot.title, originalInput: snapshot.originalInput, inputNote: snapshot.inputNote,
+    title: snapshot.title, originalInput: snapshot.originalInput, sourceLink: snapshot.sourceLink ?? null, inputNote: snapshot.inputNote,
     script: snapshot.script, hooks, priority: snapshot.priority,
     attachedMemeIds: snapshot.attachedMemeIds,
     attachments: snapshot.attachments.map(({ id, state }) => ({ id, state })),
@@ -143,7 +144,7 @@ function relevant(snapshot: AiInputSnapshot & { programmeReleaseId?: string | nu
 function runResponse(row: RunRow, live: Reel): AiRun {
   const snapshot = row.input_snapshot;
   const current: AiInputSnapshot = {
-    ...snapshot, title: live.title, originalInput: live.originalInput, inputNote: live.inputNote,
+    ...snapshot, title: live.title, originalInput: live.originalInput, sourceLink: live.sourceLink, inputNote: live.inputNote,
     script: live.script, scriptRevision: live.scriptRevision, priority: live.priority,
     selectedHookId: live.selectedHookId,
     publicationDescription: live.publicationDescription, publicationHashtags: live.publicationHashtags,
@@ -253,7 +254,7 @@ export class AiService {
           searchTerms([reel.script, ...reel.hooks.map((hook) => hook.text)]), MAX_EVIDENCE_CANDIDATES)
         : [];
       const snapshot: InternalSnapshot = {
-        reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput,
+        reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput, sourceLink: reel.sourceLink,
         script: reel.script, scriptRevision: reel.scriptRevision,
         ...(publication ? { publicationContextVersion: 3 as const } : {}),
         hooks: reel.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
@@ -309,9 +310,9 @@ export class AiService {
       const runs = await tx.query<RunRow>('select * from app.ai_runs where id=$1 for update', [runId]);
       const run = runs.rows[0];
       if (!run || run.state !== 'succeeded' || !run.result) throw notFound('Completed AI run not found');
-      const rows = await tx.query<{ version: number; script: string; script_revision: number; title: string; priority: string; publication_description: string; publication_hashtags: string; original_input: Reel['originalInput']; input_note: string; selected_hook_id: string | null; selected_hook_text: string | null }>(
+      const rows = await tx.query<{ version: number; script: string; script_revision: number; title: string; priority: string; publication_description: string; publication_hashtags: string; original_input: Reel['originalInput']; source_link: string | null; input_note: string; selected_hook_id: string | null; selected_hook_text: string | null }>(
         `select r.version,r.script,r.script_revision,r.title,r.priority,r.publication_description,r.publication_hashtags,
-                r.original_input,r.input_note,r.selected_hook_id,h.text as selected_hook_text
+                r.original_input,r.source_link,r.input_note,r.selected_hook_id,h.text as selected_hook_text
            from app.reels r left join app.reel_hooks h on h.id=r.selected_hook_id
           where r.id=$1 and r.deleted_at is null for update of r`, [run.reel_id]);
       const live = rows.rows[0];
@@ -338,7 +339,7 @@ export class AiService {
         // Text and revision: an edit-and-revert of the script also invalidates the proposal.
         const publicationLive: AiInputSnapshot = {
           ...input, script: live.script, scriptRevision: live.script_revision,
-          originalInput: live.original_input, inputNote: live.input_note, selectedHookId: live.selected_hook_id,
+          originalInput: live.original_input, sourceLink: live.source_link, inputNote: live.input_note, selectedHookId: live.selected_hook_id,
           hooks: live.selected_hook_id === null ? input.hooks.filter((hook) => hook.id !== input.selectedHookId)
             : input.hooks.map((hook) => hook.id === live.selected_hook_id ? { ...hook, text: live.selected_hook_text ?? '' } : hook),
         };

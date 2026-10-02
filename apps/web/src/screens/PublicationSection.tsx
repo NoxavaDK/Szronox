@@ -16,6 +16,7 @@ export function PublicationSection(props: PublicationSectionProps) {
     kdriveEnabled = true, createFolderForCover = false, uploadJob, onCancelUpload, onRetryUpload,
     description, onChangeDescription,
     source, sourceManual, sourceAutomaticAvailable, sourceMetadataState, sourceLongWait, sourceUndoAvailable,
+    onAddArticleLink,
     onChangeSource, onRefreshSource, onRestoreAutomaticSource, onUndoRestoreSource, onCheckSource,
     hashtags, onChangeHashtags,
     onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished, isReady,
@@ -92,7 +93,8 @@ export function PublicationSection(props: PublicationSectionProps) {
           {sourceUndoAvailable ? <TextAction onClick={onUndoRestoreSource}>Cofnij</TextAction>
             : sourceManual ? sourceAutomaticAvailable ? <TextAction onClick={onRestoreAutomaticSource}>Przywróć automatyczne</TextAction> : null
               : sourceMetadataState === 'pending' ? sourceLongWait ? <TextAction onClick={onCheckSource}>Sprawdź</TextAction> : null
-                : sourceMetadataState === 'no_url' || sourceMetadataState === 'blocked' || sourceMetadataState === 'unsupported' ? null
+                : sourceMetadataState === 'no_url' ? <TextAction onClick={onAddArticleLink}>Dodaj link</TextAction>
+                  : sourceMetadataState === 'blocked' || sourceMetadataState === 'unsupported' ? null
                   : sourceMetadataState === 'failed' ? <TextAction onClick={onRefreshSource}>Ponów</TextAction>
                     : sourceMetadataState === 'never' || sourceMetadataState === null ? <TextAction onClick={onRefreshSource}>Pobierz</TextAction>
                       : <TextAction onClick={onRefreshSource}>Odśwież</TextAction>}

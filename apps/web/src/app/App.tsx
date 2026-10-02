@@ -42,6 +42,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
   const c = useAppController(auth, api, store, queue, attachments);
   type DetailSection = 'sources' | 'materials' | 'notes' | 'publication';
   const [sectionOverrides, setSectionOverrides] = useState<Record<string, Partial<Record<DetailSection, boolean>>>>({});
+  const [articleLinkFocus, setArticleLinkFocus] = useState(0);
   const sectionDefaults = useRef<Record<string, Record<DetailSection, boolean>>>({});
   const [openSelector, setOpenSelector] = useState<MetadataSelector | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -629,6 +630,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         // The immutable original capture, shown as itself rather than summarised.
         originalUrl: reel.originalInput.url ?? null,
         onOpenSource: () => { if (reel.originalInput.url) window.open(reel.originalInput.url, '_blank', 'noopener,noreferrer'); },
+        sourceLink: reel.sourceLink,
+        onChangeSourceLink: (sourceLink) => c.changeReel({ sourceLink }, true),
+        focusArticleLink: articleLinkFocus,
         originalText: reel.originalInput.text ?? null,
         // `additionalText` is a first-class capture field written by Quick Add, not a shared
         // scalar: `share/receive.ts` states it is "deliberately absent" from `originalShare`,
@@ -700,6 +704,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         sourceAutomaticAvailable: reel.sourceMetadata?.line !== null && reel.sourceMetadata !== null,
         sourceMetadataState: reel.sourceMetadata?.state === 'failed' && (reel.sourceMetadata.failure === 'blocked' || reel.sourceMetadata.failure === 'unsupported')
           ? reel.sourceMetadata.failure : reel.sourceMetadata?.state ?? 'never',
+        onAddArticleLink: () => {
+          setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], sources: true } }));
+          setArticleLinkFocus((value) => value + 1);
+        },
         sourceLongWait,
         sourceUndoAvailable: c.sourceUndo?.reelId === reel.id,
         onChangeSource: (publicationSource) => c.changeReel({ publicationSource }),

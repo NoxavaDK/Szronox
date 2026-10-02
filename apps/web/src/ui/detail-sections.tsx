@@ -10,6 +10,7 @@
  * no large CTA buttons, no chat/comment affordances.
  */
 import './tokens.css';
+import { useEffect, useRef, useState } from 'react';
 import type { Priority, Id } from '@szronox/contracts';
 import {
   COPY,
@@ -224,8 +225,21 @@ export function SourcesSection(props: SourcesSectionProps) {
   const {
     expanded, onToggle, summary, originalUrl, originalText, additionalText,
     attachments, onOpenAttachment, inputNote, onChangeInputNote,
-    inputNoteSaveState, inputNoteConflict, onOpenSource, readOnly,
+    inputNoteSaveState, inputNoteConflict, onOpenSource, readOnly, sourceLink, onChangeSourceLink, focusArticleLink,
   } = props;
+  const [editingLink, setEditingLink] = useState(false);
+  const [linkDraft, setLinkDraft] = useState(sourceLink ?? '');
+  const [undoLink, setUndoLink] = useState<string | null>(null);
+  const linkInput = useRef<HTMLInputElement>(null);
+  const undoTimer = useRef<number | null>(null);
+  const capturedHasLink = Boolean(originalUrl || [originalText, additionalText].some((text) => text && /https?:\/\/[^\s<>"']+/i.test(text)));
+  useEffect(() => setLinkDraft(sourceLink ?? ''), [sourceLink]);
+  useEffect(() => { if (focusArticleLink) { setEditingLink(true); requestAnimationFrame(() => linkInput.current?.focus()); } }, [focusArticleLink]);
+  useEffect(() => () => { if (undoTimer.current !== null) window.clearTimeout(undoTimer.current); }, []);
+  const validLink = linkDraft.trim().length <= 2048 && /^https?:\/\//i.test(linkDraft.trim()) && (() => { try { const url = new URL(linkDraft.trim()); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; } })();
+  const displayArticleLink = (() => { try { const url = new URL(sourceLink ?? ''); return `${url.host}${url.pathname}`; } catch { return sourceLink ?? ''; } })();
+  const cancelUndo = () => { if (undoTimer.current !== null) window.clearTimeout(undoTimer.current); undoTimer.current = null; setUndoLink(null); };
+  const deleteLink = () => { if (!sourceLink) return; cancelUndo(); setUndoLink(sourceLink); onChangeSourceLink(null); undoTimer.current = window.setTimeout(cancelUndo, 30_000); };
 
   return (
     <section className={styles.section}>
@@ -260,6 +274,25 @@ export function SourcesSection(props: SourcesSectionProps) {
             </div>
           ) : null}
 
+          {!capturedHasLink ? <div className={styles.subsection}>
+            <h3 className={styles.subheading}>Link do artykułu</h3>
+            {editingLink ? <div className={styles.articleLinkEditor}>
+              <input ref={linkInput} className={styles.noteField} aria-label="Link do artykułu" placeholder="https://…" value={linkDraft}
+                onChange={(event) => setLinkDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Escape') { setEditingLink(false); setLinkDraft(sourceLink ?? ''); } if (event.key === 'Enter' && validLink) { cancelUndo(); onChangeSourceLink(linkDraft.trim()); setEditingLink(false); } }} />
+              {linkDraft.trim() && !validLink ? <span className={styles.unsupported}>Wklej pełny link (https://…).</span> : null}
+              <div><TextAction onClick={() => { setEditingLink(false); setLinkDraft(sourceLink ?? ''); }}>Anuluj</TextAction>
+                <TextAction disabled={!validLink || readOnly} onClick={() => { cancelUndo(); onChangeSourceLink(linkDraft.trim()); setEditingLink(false); }}>Zapisz</TextAction></div>
+            </div> : sourceLink ? <div className={styles.sourceRow}>
+              <span className={`${styles.sourceValue} ${styles.articleLink}`} title={sourceLink} aria-label={sourceLink}>{displayArticleLink}</span>
+              <TextAction onClick={() => window.open(sourceLink, '_blank', 'noopener,noreferrer')}>Otwórz</TextAction>
+              {!readOnly ? <><TextAction onClick={() => { cancelUndo(); setLinkDraft(sourceLink); setEditingLink(true); }}>Zmień</TextAction><TextAction onClick={deleteLink}>Usuń</TextAction></> : null}
+            </div> : <div className={styles.sourceRow}>
+              <TextAction disabled={readOnly} onClick={() => { setLinkDraft(''); setEditingLink(true); }}>+ Dodaj link do artykułu</TextAction>
+            </div>}
+            {undoLink ? <div className={styles.sourceRow}><span>Usunięto link.</span><TextAction onClick={() => { const old = undoLink; cancelUndo(); onChangeSourceLink(old); }}>Cofnij</TextAction></div> : null}
+          </div> : null}
+
           {attachments.length > 0 ? (
             <div className={styles.subsection}>
               <h3 className={styles.subheading}>{COPY.attachmentsHeading}</h3>
@@ -288,7 +321,7 @@ export function SourcesSection(props: SourcesSectionProps) {
               value={inputNote}
               rows={3}
               readOnly={readOnly}
-              onChange={(event) => onChangeInputNote(event.target.value)}
+              onChange={(event) => { cancelUndo(); onChangeInputNote(event.target.value); }}
             />
             <SaveHint state={inputNoteSaveState} />
             {inputNoteConflict ? <ConflictNotice conflict={inputNoteConflict} /> : null}

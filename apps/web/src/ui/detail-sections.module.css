@@ -19,6 +19,7 @@
 .quiet { margin: 0; color: var(--sz-color-text-secondary); font-size: .875rem; }
 .sourceRow { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .sourceValue { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: .9rem; color: var(--sz-color-text-reference); }
+.articleLink { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sourceText { margin: 0; white-space: pre-wrap; font-size: .9rem; line-height: 1.45; color: var(--sz-color-text-reference); }
 
 /* Metadata selectors */

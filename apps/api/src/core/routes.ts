@@ -190,10 +190,14 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     if (body.changes === null || typeof body.changes !== 'object') {
       throw validationError('changes is required');
     }
-    return repository.patchReel(actor, requireUuid(id, 'id'), {
+    const reel = await repository.patchReel(actor, requireUuid(id, 'id'), {
       ...context,
       changes: body.changes as Record<string, unknown>,
     });
+    if (Object.hasOwn(body.changes as object, 'sourceLink') && sourceMetadata && reel.sourceMetadata?.state === 'pending') {
+      void sourceMetadata.enqueue(reel.id, reel.sourceMetadata.requestId).catch(() => undefined);
+    }
+    return reel;
   }));
 
   // ── Soft delete and restore ────────────────────────────────────────────────
