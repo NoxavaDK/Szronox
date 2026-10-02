@@ -265,6 +265,63 @@ F. REEL DETAIL — + DODAJ HOOK (HOOK-ADD-01, operator-approved 2026-10-02)
 - Hidden when the Detail is read-only (deleted Reel), exactly like `Edytuj` / `×`.
 
 ==================================================
+G. ŹRÓDŁA / WEJŚCIE — LINK DO ARTYKUŁU (SOURCE-02, operator-requested 2026-10-02)
+==================================================
+
+Only for a Reel whose capture has **no link** (only an image and/or text without a URL). The
+original capture stays exactly as captured and is never edited.
+
+Inside the expanded `ŹRÓDŁA / WEJŚCIE` section, after the original capture and before the
+editing note:
+- label `Link do artykułu` (same label style as the section's other labels);
+- empty: compact text action `+ Dodaj link do artykułu`;
+- adding/changing: an inline single-line URL field (placeholder `https://…`), then
+  `Anuluj` / `Zapisz`. `Zapisz` is disabled until the text is a full `http(s)://` link; an invalid
+  value shows `Wklej pełny link (https://…).` under the field. Enter saves; Escape cancels;
+- saved: the link as one truncated line (host + path, ellipsis, full URL in the accessible name),
+  then compact text actions `Otwórz` (new tab), `Zmień`, `Usuń`;
+- `Usuń`: immediate, no dialog; transient `Usunięto link.` with `Cofnij` (30 s or the next edit),
+  the same pattern as §A undo;
+- a failed save keeps the typed link with the existing truthful error style.
+
+Effects:
+- PUBLIKACJA `Źródło` treats the added link exactly like a captured one (§A states, automatic
+  fetch). In §A the `Brak linku w materiale.` row gains the compact action `Dodaj link`, which opens
+  `ŹRÓDŁA / WEJŚCIE` with the URL field focused.
+- AI actions that read the captured link today read the added link the same way.
+- A Reel whose capture already has a link shows no `Link do artykułu` row.
+
+==================================================
+H. MEMES — VIDEO MEMES (MEME-VIDEO-01, operator-requested 2026-10-02)
+==================================================
+
+Meme form (`MemePicker`, `+ NOWY MEM`):
+- the file chooser accepts images (JPG, PNG, WebP, GIF) and **any video format**;
+- size limit 25 MB for videos (8 MB for images, unchanged). Over the limit:
+  `Wideo przekracza limit 25 MB.` before anything is uploaded;
+- a chosen video shows its first frame as the 80×80 preview (the same slot as an image preview),
+  with a small ▶ pictogram in its corner. If the browser can't decode that format, the preview is
+  a neutral video pictogram plus the file name. Saving is allowed either way;
+- progress and error states are unchanged (`Wysyłanie…`, truthful Polish errors, the form keeps
+  name and file on failure).
+
+Picker rows (search results and attached list):
+- a video meme shows its poster thumbnail (or the neutral video pictogram) with the ▶ pictogram.
+  The accessible name includes `wideo`;
+- tapping the **thumbnail** plays the clip inline in the thumbnail slot: **muted, looped,
+  playsinline**, no controls, no sound toggle. Tapping it again stops it. Tapping the row text keeps
+  today's behaviour (select/attach);
+- only one clip plays at a time; leaving the picker stops it.
+
+Reel Detail metadata: `Mem: <name>` gains a small ▶ pictogram for a video meme. Nothing else changes.
+
+AI: `Opracuj` may suggest a video meme exactly like an image meme (name/description). The AI
+workspace's `MEM` row shows the poster (or pictogram) with ▶.
+
+Multiple memes per Reel are unchanged: the existing `+ kolejny mem` attaches more, and the first is
+the primary.
+
+==================================================
 E. NOT IN THIS DELTA
 ==================================================
 
