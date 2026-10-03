@@ -12,3 +12,9 @@ Fix: replays recorded under the pre-`kind` shape are accepted (a different paylo
 Archive SHA-256 `53e8a9a24d5c7c4e133d007248b46242000c2cf7b0f5275da793390736fbf4c2`. Backup `backups/pre-21516dc/`. Migrate: 0 applied. api/worker 0 restarts, HTTPS ready, neighbours unchanged.
 
 Rollback: restore `app.pre-21516dc` and `backups/pre-21516dc/runtime.env`, then `config/dc-gemini.sh up -d --no-deps api worker`.
+
+## Follow-up `443d78d` (same day)
+
+After `21516dc`, the 2026-10-03 capture (`67945.jpg`, really a WebP) recovered automatically and is `ready` as `image/webp`. The 2026-10-01 capture's replay passed initiation but its content PUT got 403. Its ticket had been renewed on 2026-10-02, and the replayed initiation returns the original, now superseded, ticket. The client renewed only on expiry, so it stopped. The server now tags this refusal `upload_authorization_superseded` (after the owner check), and the client renews once for it. Web transport tests 11/11 (new case included), API 55/55. Deployed as `szronox-dev:443d78d`: archive `73fff481…`, backup `backups/pre-443d78d/`, 0 migrations, 0 restarts, neighbours unchanged.
+
+Not fixed (product gap, reported to the operator): Reel Detail shows a pending or failed capture image with no state and no `Ponów`, and `Otwórz` on an attachment still shows the stale placeholder "Podgląd załącznika będzie dostępny po wdrożeniu transportu plików."
