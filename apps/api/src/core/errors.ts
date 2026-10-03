@@ -43,8 +43,8 @@ export class CoreError extends Error {
 export const unauthenticated = (message = 'Authentication required') =>
   new CoreError({ status: 401, code: 'UNAUTHENTICATED', message });
 
-export const forbidden = (message: string) =>
-  new CoreError({ status: 403, code: 'FORBIDDEN', message });
+export const forbidden = (message: string, details?: Record<string, unknown>) =>
+  new CoreError({ status: 403, code: 'FORBIDDEN', message, ...(details ? { details } : {}) });
 
 export const notFound = (message = 'Resource not found') =>
   new CoreError({ status: 404, code: 'NOT_FOUND', message });

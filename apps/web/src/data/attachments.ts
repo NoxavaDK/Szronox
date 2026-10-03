@@ -77,9 +77,12 @@ export function ticketHeaders(upload: UploadTransport): Record<string, string> {
 }
 
 export function isExpiredTicket(error: unknown): boolean {
+  const reason = error instanceof ClientApiError ? (error.api.details as { reason?: string } | undefined)?.reason : undefined;
+  // An expired ticket, or one superseded by an earlier renewal (a replayed initiation returns
+  // its original ticket): both are fixed by exactly one renewal.
   return error instanceof ClientApiError
-    && error.api.code === 'UPLOAD_INCOMPLETE'
-    && (error.api.details as { reason?: string } | undefined)?.reason === 'upload_authorization_expired';
+    && ((error.api.code === 'UPLOAD_INCOMPLETE' && reason === 'upload_authorization_expired')
+      || (error.api.code === 'FORBIDDEN' && reason === 'upload_authorization_superseded'));
 }
 
 /** Operation ids for one attachment, held in the capture draft so retries reuse them. */

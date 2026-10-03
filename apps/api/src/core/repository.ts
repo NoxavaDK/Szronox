@@ -1089,7 +1089,9 @@ export class CoreRepository {
     const supplied = Buffer.from(digestUploadToken(token), 'hex');
     const expected = Buffer.from(row.upload_token_digest, 'hex');
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
-      throw forbidden('Upload authorization is invalid');
+      // The uploader's own ticket was superseded (renewed since, e.g. a replayed initiation
+      // returns its original ticket). The owner may renew; others are refused above.
+      throw forbidden('Upload authorization is invalid', { reason: 'upload_authorization_superseded' });
     }
     const expiresAt = row.upload_token_expires_at === null
       ? Number.NaN : new Date(row.upload_token_expires_at).getTime();

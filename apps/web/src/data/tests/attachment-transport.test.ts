@@ -533,3 +533,34 @@ test('no attachment request is dispatched before the server confirms the identit
 
 /** Keeps the unused-import checker honest about what this file exercises. */
 void (null as AuthSessionResponse | null);
+
+test('a ticket superseded by an earlier renewal is renewed once; a plain 403 is not', async () => {
+  const forbidden = (reason?: string) => json({
+    error: { code: 'FORBIDDEN', message: 'Upload authorization is invalid', retryable: false, ...(reason ? { details: { reason } } : {}) },
+  }, 403);
+  for (const [reason, recovers] of [['upload_authorization_superseded', true], [undefined, false]] as const) {
+    const api = new CoreApiClient(sessionSource());
+    const uploader = new AttachmentUploader({ api, pageOrigin: ORIGIN });
+    const reelId = 'reel-1'; const attachmentId = 'att-1';
+    let puts = 0;
+    const fake = recorder((call) => {
+      if (call.url.endsWith('/attachments/initiate')) {
+        // A replayed initiation returns its original ticket, superseded since by a renewal.
+        return json({ attachment: { ...reference(attachmentId, reelId), state: 'pending' }, storageKey: 'k', upload: ticket(reelId, attachmentId, 'original-token') });
+      }
+      if (call.url.endsWith('/upload-authorization')) return json({ upload: ticket(reelId, attachmentId, 'fresh-token') });
+      if (call.url.endsWith('/content')) { puts += 1; return puts === 1 ? forbidden(reason) : new Response(null, { status: 204 }); }
+      return json(reference(attachmentId, reelId));
+    });
+    try {
+      const run = uploader.uploadOne({ reelId, descriptor: descriptor(attachmentId), blob: new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' }), operations: await attachmentOperations('capture-op', attachmentId) });
+      if (recovers) {
+        assert.deepEqual((await run).steps, ['initiate', 'renew', 'upload', 'complete']);
+        assert.equal(fake.calls.filter((call) => call.url.endsWith('/content'))[1].headers['x-upload-token'], 'fresh-token');
+      } else {
+        await assert.rejects(run, (error: unknown) => error instanceof ClientApiError && error.status === 403);
+        assert.equal(fake.calls.some((call) => call.url.endsWith('/upload-authorization')), false);
+      }
+    } finally { fake.restore(); }
+  }
+});
