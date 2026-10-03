@@ -101,7 +101,7 @@ test('the committed migration applies to a bare database and is idempotent', asy
     // CORPUS-01 adds its own and restores the assertion. CORPUS-02 adds the enrichment
     // revision log (migration 0007).
     assert.deepEqual(tables.rows.map((r) => r.table_name), [
-      'ai_runs', 'attachments', 'auth_sessions', 'memes', 'operations',
+      'ai_runs', 'attachments', 'auth_sessions', 'kdrive_uploads', 'memes', 'operations',
       'programme_chunks', 'programme_documents', 'programme_proposal_enrichment_revisions',
       'programme_proposals', 'programme_release_versions', 'programme_releases',
       'programme_sections', 'programme_versions', 'programme_vocabulary_entries',

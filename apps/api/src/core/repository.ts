@@ -298,7 +298,7 @@ export class CoreRepository {
    * null when this operation has not been seen.
    */
   private async replay<T>(
-    tx: Queryable, operationId: string, route: string, hash: string,
+    tx: Queryable, operationId: string, route: string, hash: string, acceptedHashes: readonly string[] = [],
   ): Promise<T | null> {
     const existing = await tx.query<{ payload_hash: string; result: T }>(
       'select payload_hash, result from app.operations where operation_id = $1',
@@ -306,7 +306,7 @@ export class CoreRepository {
     );
     const row = existing.rows[0];
     if (!row) return null;
-    if (row.payload_hash !== hash) throw idempotencyConflict();
+    if (row.payload_hash !== hash && !acceptedHashes.includes(row.payload_hash)) throw idempotencyConflict();
     // Deliberately the recorded result, not a fresh read: T00 requires the original
     // result "including after subsequent edits".
     void route;
@@ -328,14 +328,20 @@ export class CoreRepository {
    * ledger's primary key is converted into a replay rather than an error, so a
    * retry storm cannot produce two domain writes.
    */
+  /**
+   * `legacyPayloads`: earlier canonical shapes of the same request. A replay recorded under one
+   * of them is the same operation (e.g. a capture queued offline before a contract gained a
+   * defaulted field), so it returns the original result instead of a false conflict.
+   */
   private async idempotent<T>(
     actor: Actor, operationId: string, route: string, payload: unknown,
-    body: (tx: Queryable) => Promise<T>,
+    body: (tx: Queryable) => Promise<T>, legacyPayloads: readonly unknown[] = [],
   ): Promise<T> {
     const hash = payloadHash(payload);
+    const accepted = legacyPayloads.map(payloadHash);
     try {
       return await this.db.transaction(async (tx) => {
-        const replayed = await this.replay<T>(tx, operationId, route, hash);
+        const replayed = await this.replay<T>(tx, operationId, route, hash, accepted);
         if (replayed !== null) return replayed;
         const result = await body(tx);
         await this.record(tx, operationId, actor.id, route, hash, result);
@@ -343,7 +349,7 @@ export class CoreRepository {
       });
     } catch (error) {
       if (pgErrorCode(error) === PG_UNIQUE_VIOLATION) {
-        const replayed = await this.replay<T>(this.db, operationId, route, hash);
+        const replayed = await this.replay<T>(this.db, operationId, route, hash, accepted);
         if (replayed !== null) return replayed;
       }
       throw error;
@@ -1007,7 +1013,8 @@ export class CoreRepository {
         [storageKey, actor.id, digestUploadToken(token), upload.expiresAt, request.attachmentId, reelId],
       );
       return { attachment: toAttachment({ ...row, storage_key: storageKey }), storageKey, upload };
-    });
+    // Before MEME-VIDEO-01 an image initiation was hashed without `kind`.
+    }, kind === 'image' ? [(({ kind: _kind, ...legacy }) => legacy)(request)] : []);
   }
 
   async renewAttachmentUpload(
@@ -1125,7 +1132,10 @@ export class CoreRepository {
       }
       const derivedVideoMime = (row.kind as string) === 'video' && row.mime_type === 'application/octet-stream'
         && object.mimeType.startsWith('video/');
-      if ((!derivedVideoMime && row.mime_type !== object.mimeType) || Number(row.byte_size) !== object.byteSize) {
+      // The declared image type is the browser's guess from the file name (Android shares a
+      // WebP saved as `.jpg` as image/jpeg). The decoded, supported type is the truth.
+      const decodedImageMime = row.kind === 'image' && object.mimeType.startsWith('image/');
+      if ((!derivedVideoMime && !decodedImageMime && row.mime_type !== object.mimeType) || Number(row.byte_size) !== object.byteSize) {
         throw uploadIncomplete('Validated object does not match declared attachment metadata');
       }
       if (row.validated_mime_type !== null

@@ -306,7 +306,8 @@ export function filesystemStorageAdapter(config: FilesystemStorageConfig): Stora
           : await validateImage(
             temporary,
             byteSize,
-            options.mimeType,
+            // Record the decoded format, not the declared guess (a WebP named .jpg is still a WebP).
+            undefined,
             Math.min(options.maxPixelCount, configuredMaxPixels),
             Math.min(options.maxDimension, configuredMaxDimension),
             hash.digest('hex'),

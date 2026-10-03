@@ -195,7 +195,13 @@ export function registerAttachmentRoutes(
         maxPixelCount: limits.maxPixelCount,
         maxDimension: limits.maxDimension,
       },
-    );
+    ).catch((error: unknown) => {
+      // Refusals were invisible in the logs; record the reason (never the content).
+      if (error instanceof StorageInputError) {
+        request.log.warn({ attachmentId: plan.attachmentId, kind: plan.kind, declaredMimeType: plan.mimeType, reason: error.reason }, 'attachment content refused');
+      }
+      throw error;
+    });
     if (now().getTime() >= plan.expiresAt.getTime()) throw uploadExpired();
     await repository.recordValidatedAttachmentUpload(plan, object);
     return reply.code(204).send();
