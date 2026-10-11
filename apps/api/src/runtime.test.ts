@@ -656,6 +656,8 @@ test('the API and worker privilege rules refuse an over-privileged role', () => 
       'app.user_credentials': { select: true, insert: false, update: false, delete: false },
       'app.auth_sessions': { select: true, insert: true, update: true, delete: true },
       'app.reels': { select: true, insert: true, update: true, delete: true },
+      'app.live_messages': { select: true, insert: true, update: true, delete: false },
+      'app.access_keys': { select: true, insert: false, update: false, delete: false },
     },
     ...over,
   });
@@ -687,6 +689,8 @@ test('the API and worker privilege rules refuse an over-privileged role', () => 
       'app.user_credentials': { select: false, insert: false, update: false, delete: false },
       'app.auth_sessions': { select: false, insert: false, update: false, delete: false },
       'app.reels': { select: true, insert: false, update: false, delete: false },
+      'app.live_messages': { select: false, insert: false, update: false, delete: false },
+      'app.access_keys': { select: false, insert: false, update: false, delete: false },
     },
   });
   assert.deepEqual(workerPrivilegeViolations(workerFacts), []);

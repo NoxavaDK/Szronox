@@ -39,6 +39,9 @@ const WATCHED_TABLES = [
   'app.user_credentials',
   'app.auth_sessions',
   'app.reels',
+  // STREAM-LIVE-01
+  'app.live_messages',
+  'app.access_keys',
 ] as const;
 
 interface FactsRow {
@@ -118,6 +121,15 @@ export function apiPrivilegeViolations(facts: RoleFacts): string[] {
   if (!sessions.select || !sessions.insert || !sessions.update) {
     violations.push('it cannot issue or revoke sessions in app.auth_sessions');
   }
+  // STREAM-LIVE-01. Keys are minted and revoked by the operator only: an API that could insert
+  // one could grant itself device access, and one that could update the row could un-revoke a
+  // key. Its only write is the column grant on last_used_at, which has_table_privilege does not
+  // report as table-level UPDATE.
+  const live = facts.privileges['app.live_messages'];
+  if (!live.select || !live.insert || !live.update) violations.push('it cannot use app.live_messages');
+  const keys = facts.privileges['app.access_keys'];
+  if (!keys.select) violations.push('it cannot SELECT app.access_keys, so no device can authenticate');
+  if (keys.insert || keys.update || keys.delete) violations.push('it may mint, alter or delete app.access_keys');
   return violations;
 }
 
@@ -128,7 +140,7 @@ export function apiPrivilegeViolations(facts: RoleFacts): string[] {
  */
 export function workerPrivilegeViolations(facts: RoleFacts): string[] {
   const violations = baseViolations(facts);
-  for (const table of ['app.user_credentials', 'app.auth_sessions'] as const) {
+  for (const table of ['app.user_credentials', 'app.auth_sessions', 'app.live_messages', 'app.access_keys'] as const) {
     const grant = facts.privileges[table];
     if (grant.select || grant.insert || grant.update || grant.delete) {
       violations.push(`it may access ${table}`);

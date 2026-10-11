@@ -52,7 +52,7 @@ const repositoryRoot = path.resolve(here, '../../..');
 const deployDirectory = path.join(repositoryRoot, 'deploy', 'vps', 'postgres');
 
 const RUNTIME_ROLES = ['szronox_api', 'szronox_worker'] as const;
-const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels'] as const;
+const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys'] as const;
 
 /**
  * Pull the SQL out of the initdb script's heredoc.
@@ -424,6 +424,38 @@ test('indexed programme content cannot be edited in place, even by the owner', a
         'insert into app.programme_release_versions (release_id, document_version_id, position) values ($1,$2,0)',
         [release, version]),
       /validated corpus provenance/);
+  } finally {
+    await context.close();
+  }
+});
+
+// ══════════════════════ STREAM-LIVE-01 grants, exercised as the role ══════════════════════
+
+test('STREAM-LIVE-01: the API role can write live messages and stamp keys, but cannot mint or un-revoke a key', async () => {
+  const context = await provisionDatabase();
+  try {
+    const user = '22222222-2222-4222-8222-222222222222';
+    await context.raw.exec(`insert into app.users (id, name) values ('${user}', 'SZRON') on conflict do nothing`);
+    await context.raw.exec(`insert into app.access_keys (id, label, scope, token_hash)
+      values ('33333333-3333-4333-8333-333333333333', 'PC', 'live_feed', repeat('a', 64))`);
+    const asRole = async (role: string, sql: string): Promise<'ok' | 'denied'> => {
+      await context.raw.exec(`set role ${role}`);
+      try { await context.raw.exec(sql); return 'ok'; } catch (error) {
+        if (/permission denied/.test(String((error as Error).message))) return 'denied';
+        throw error;
+      } finally { await context.raw.exec('reset role'); }
+    };
+    // The identity column needs no separate sequence grant.
+    assert.equal(await asRole('szronox_api', `insert into app.live_messages (id, author_id, kind, level)
+      values (gen_random_uuid(), '${user}', 'signal', 'urgent')`), 'ok');
+    assert.equal(await asRole('szronox_api', `update app.live_messages set status = 'seen', status_at = now()`), 'ok');
+    assert.equal(await asRole('szronox_api', 'delete from app.live_messages'), 'denied');
+    assert.equal(await asRole('szronox_api', 'update app.access_keys set last_used_at = now()'), 'ok');
+    assert.equal(await asRole('szronox_api', 'update app.access_keys set revoked_at = null'), 'denied');
+    assert.equal(await asRole('szronox_api', `insert into app.access_keys (id, label, scope, token_hash)
+      values (gen_random_uuid(), 'x', 'live_feed', repeat('b', 64))`), 'denied');
+    assert.equal(await asRole('szronox_worker', 'select 1 from app.live_messages'), 'denied');
+    assert.equal(await asRole('szronox_worker', 'select 1 from app.access_keys'), 'denied');
   } finally {
     await context.close();
   }

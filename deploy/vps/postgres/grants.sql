@@ -66,6 +66,18 @@ revoke insert, update, delete on
   app.programme_sections, app.programme_proposals, app.programme_chunks
   from szronox_api, szronox_worker;
 
+-- STREAM-LIVE-01: live messages are API-only. Users create them and the device routes update
+-- their status; nothing deletes them. Access keys are minted and revoked by the operator command
+-- running as the owner; the API only resolves them and stamps last_used_at (column grant), so a
+-- compromised API can neither create a key nor un-revoke one. The worker sees neither table.
+grant select, insert, update on app.live_messages to szronox_api;
+revoke delete on app.live_messages from szronox_api;
+revoke all on app.live_messages from szronox_worker;
+grant select on app.access_keys to szronox_api;
+revoke insert, update, delete on app.access_keys from szronox_api;
+grant update (last_used_at) on app.access_keys to szronox_api;
+revoke all on app.access_keys from szronox_worker;
+
 -- ── Roster ──────────────────────────────────────────────────────────────────────
 -- Read-only for both. The roster is an operator decision applied by the provisioning
 -- command under the owner role.
