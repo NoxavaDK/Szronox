@@ -1,0 +1,138 @@
+/*
+ * Na żywo — design/live-delta-spec.md. Fluid: one column in a small window (the reference is
+ * ~360–480 px wide, ~600 px tall), two columns from 760 px. The two full-width buttons per
+ * block are the spec's explicit exceptions to compact text actions.
+ */
+.live { max-width: 1100px; margin: 0 auto; }
+
+.columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sz-space-4); }
+@media (min-width: 760px) {
+  .columns { grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: var(--sz-space-6) 32px; align-items: start; }
+}
+
+.compose { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sz-space-4); min-width: 0; }
+.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sz-space-2); min-width: 0; }
+.section + .section { border-top: 1px solid var(--sz-color-divider); padding-top: var(--sz-space-4); }
+
+.label {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sz-color-text-secondary);
+}
+
+/* Exception 1: outlined, not filled; the dot repeats the colour and ✓ marks the active one. */
+.signalButton {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sz-space-3);
+  width: 100%;
+  min-height: 52px;
+  padding: 0 var(--sz-space-4);
+  border: 1.5px solid currentColor;
+  border-radius: var(--sz-radius-sm);
+  background: var(--sz-color-surface);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.signalButton > span:last-child { color: var(--sz-color-text-primary); }
+.signalButton:disabled { opacity: 0.55; cursor: default; }
+.signalButton[aria-pressed='true'] { background: var(--sz-color-danger-tint); }
+.moment[aria-pressed='true'] { background: var(--sz-color-attention-tint); }
+.urgent { color: var(--sz-color-urgent); }
+.moment { color: var(--sz-color-warning); }
+.dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: currentColor; }
+
+.signalLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--sz-space-3);
+  margin: 0;
+  font-size: var(--sz-text-metadata-size);
+  line-height: var(--sz-text-metadata-line);
+  color: var(--sz-color-text-primary);
+}
+.textAction {
+  appearance: none;
+  border: 0;
+  background: none;
+  min-height: var(--sz-touch-target);
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--sz-color-cobalt);
+  cursor: pointer;
+}
+
+.quote, .source {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--sz-color-divider);
+  border-radius: var(--sz-radius-sm);
+  background: var(--sz-color-surface);
+  color: var(--sz-color-text-primary);
+  font: inherit;
+  font-size: var(--sz-text-body-size);
+  line-height: var(--sz-text-body-line);
+  padding: var(--sz-space-2) var(--sz-space-3);
+}
+.quote { resize: vertical; min-height: calc(4 * var(--sz-text-body-line) + 2 * var(--sz-space-2)); }
+.source { min-height: var(--sz-touch-target); }
+.quote:focus-visible, .source:focus-visible { outline: 2px solid var(--sz-color-cobalt); outline-offset: 1px; }
+
+.counter {
+  margin: calc(-1 * var(--sz-space-1)) 0 0;
+  text-align: right;
+  font-size: var(--sz-text-metadata-size);
+  color: var(--sz-color-text-secondary);
+}
+.counterOver { color: var(--sz-color-urgent); font-weight: 600; }
+
+/* Exception 2. */
+.sendButton {
+  appearance: none;
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--sz-radius-sm);
+  background: var(--sz-color-cobalt);
+  color: var(--sz-color-on-cobalt);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sendButton:disabled { opacity: 0.45; cursor: default; }
+
+.sent, .error, .connection, .empty { margin: 0; font-size: var(--sz-text-metadata-size); line-height: var(--sz-text-metadata-line); }
+.sent { color: var(--sz-color-success); }
+.error { color: var(--sz-color-urgent); }
+.connection { color: var(--sz-color-text-secondary); margin: calc(-1 * var(--sz-space-2)) 0 var(--sz-space-3); }
+.empty { color: var(--sz-color-text-secondary); }
+
+.history { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sz-space-2); min-width: 0; border-top: 1px solid var(--sz-color-divider); padding-top: var(--sz-space-4); }
+@media (min-width: 760px) { .history { border-top: 0; padding-top: 0; } }
+.rows { list-style: none; margin: 0; padding: 0; }
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sz-space-3);
+  padding: var(--sz-space-2) 0;
+  border-bottom: 1px solid var(--sz-color-divider);
+  font-size: 14px;
+  line-height: 20px;
+}
+.rowText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sz-color-text-primary); }
+.rowStatus { flex: none; font-size: var(--sz-text-metadata-size); color: var(--sz-color-text-primary); }
+.statusShown { color: var(--sz-color-success); font-weight: 600; }
+.statusMuted { color: var(--sz-color-text-secondary); }

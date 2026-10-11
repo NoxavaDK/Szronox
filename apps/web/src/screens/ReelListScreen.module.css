@@ -276,3 +276,7 @@
   display: inline-flex; align-items: center; justify-content: center; color: var(--sz-color-text-secondary); cursor: pointer;
 }
 .headerMenu:focus-visible { outline: 2px solid var(--sz-color-action); outline-offset: -2px; }
+
+/* STREAM-LIVE-01: Plan and Na żywo sit together beside the title. */
+.headerLinks { display: flex; align-items: center; margin-right: auto; }
+.headerLinks .planLink { margin: 0; }

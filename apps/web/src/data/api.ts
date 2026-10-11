@@ -7,6 +7,7 @@ import type {
   SelectHookRequest, SelectHookResponse, KdriveFolderRequest, KdriveFolderResponse, KdriveFolderState,
   UploadTransport, User, VerifyExportRequest, KdriveUploadStartRequest, KdriveUploadStartResponse,
   KdriveUploadState, AttachKdriveUploadRequest,
+  CreateLiveMessageRequest, LiveMessage, LiveMessageListResponse,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
 
@@ -113,6 +114,9 @@ export class CoreApiClient {
   }
 
   me = () => this.request<MeResponse>('/me');
+  /** STREAM-LIVE-01. Idempotent on operationId, so a retry after a dropped response is safe. */
+  sendLiveMessage = (body: CreateLiveMessageRequest) => this.request<LiveMessage>('/live/messages', { method: 'POST', body: JSON.stringify(body) });
+  myLiveMessages = () => this.request<LiveMessageListResponse>('/live/messages/mine');
   list(query: ReelListQuery & { limit?: number } = {}) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
