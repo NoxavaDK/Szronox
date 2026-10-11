@@ -510,6 +510,8 @@ export interface ReelListScreenProps {
   onOpenDeleted: () => void;
   /** CONTENT-PLANNER-01: the mobile entry to the PLAN view. Absent when PLAN is already on screen. */
   onOpenPlan?: () => void;
+  /** STREAM-LIVE-01: the quiet `Na żywo` header link, directly after `Plan`. */
+  onOpenLive?: () => void;
   /** Quiet account action; shown only when the list occupies the full screen. */
   onSignOut?: () => void;
   /** Rendered as a side pane: the fixed Nowy pomysł button stays within the pane's own column. */

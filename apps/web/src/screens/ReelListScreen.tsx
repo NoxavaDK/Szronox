@@ -36,9 +36,14 @@ export function ReelListScreen(props: ReelListScreenProps) {
     <div className={styles.screen} data-embedded={props.embedded ? 'true' : undefined}>
       <header className={styles.header}>
         <h1 className={styles.title}>Rolki</h1>
-        {props.onOpenPlan ? (
-          <button type="button" className={styles.planLink} onClick={props.onOpenPlan}>Plan</button>
-        ) : null}
+        <span className={styles.headerLinks}>
+          {props.onOpenPlan ? (
+            <button type="button" className={styles.planLink} onClick={props.onOpenPlan}>Plan</button>
+          ) : null}
+          {props.onOpenLive ? (
+            <button type="button" className={styles.planLink} onClick={props.onOpenLive}>Na żywo</button>
+          ) : null}
+        </span>
         {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}
         <button type="button" className={styles.headerMenu} onClick={props.onOpenDeleted} aria-label="Usunięte"><OverflowIcon /></button>
         <Avatar user={currentUser} size={32} />

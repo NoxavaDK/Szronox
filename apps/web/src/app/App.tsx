@@ -15,6 +15,7 @@ import { useAppController } from '../controllers/useAppController.js';
 import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
 import { ReelListScreen } from '../screens/ReelListScreen.js';
+import { LiveScreen } from '../screens/LiveScreen.js';
 import { DeletedReelsScreen } from '../screens/DeletedReelsScreen.js';
 import { AiWorkspace } from '../screens/AiWorkspace.js';
 import { MemePicker } from '../screens/MemePicker.js';
@@ -415,6 +416,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     /></>;
   }
 
+  if (c.route.name === 'live' && c.user) {
+    return <>{notice}<LiveScreen api={api} user={c.user} onBack={c.leaveLive} /></>;
+  }
+
   if (c.route.name === 'deleted') {
     return <>{notice}<DeletedReelsScreen
       onBack={() => c.setRoute({ name: 'list' })}
@@ -756,6 +761,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     onAddNew={() => { setDrawerView(null); c.startCapture(); }}
     onRetry={() => void c.loadList()}
     onOpenDeleted={() => c.setRoute({ name: 'deleted' })}
+    onOpenLive={c.openLive}
     quickActions={{
       openReelId: quickOpenReelId,
       open: quickOpen,

@@ -92,3 +92,7 @@ Luna completed UI-04 on `codex/ui-04-list-script` at `be98a84` (implementation `
 ## SOURCE-02 + MEME-VIDEO-01 — operator-approved 2026-10-02
 
 The operator approved both task scopes and the exact Luna models in `SOURCE-02-MEME-VIDEO-01-luna-handoff.md`: SOURCE-02 on `gpt-6-luna/medium`, MEME-VIDEO-01 on `gpt-6-luna/high`. Root pinned the shared T00/wire-contract/migration baseline at `b0ff4a6`. SOURCE-02 is assigned to branch `codex/source-02`; MEME-VIDEO-01 is assigned to branch `codex/meme-video-01`. Each uses its own worktree and handoff allowlist/acceptance criteria. Integrate SOURCE-02 before MEME-VIDEO-01 because both touch the core repository. No merge, DEV migration, live kDrive test or deployment is authorized.
+
+## STREAM-LIVE-01 — live messages and access keys, operator-approved 2026-10-11
+
+Operator approved one manual implementation on Claude Opus 5.5 in `.worktrees/stream-live-01` (branch `claude/stream-live-01`). Scope, editable files and acceptance: [STREAM-LIVE-01-proposal.md](STREAM-LIVE-01-proposal.md); contract: T00 section STREAM-LIVE-01. Order: pin contracts/migration (operator review) → visual delta `design/live-delta-spec.md` (operator review) → implementation and handoff. Includes the approved device-key exception to VPS-00 and migration 0016 (STREAM-01/02 renumbered to 0017/0018). No merge, DEV migration or deployment authorized.

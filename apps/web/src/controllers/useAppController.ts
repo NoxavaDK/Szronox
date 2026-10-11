@@ -20,7 +20,11 @@ export type Route =
   /** `Usunięte` — a secondary view, never a sixth status (frozen batch sec. 8). */
   | { name: 'deleted' }
   /** CONTENT-PLANNER-01: the full-width PLAN view on single-pane (mobile) layouts. */
-  | { name: 'plan' };
+  | { name: 'plan' }
+  /** STREAM-LIVE-01: `Na żywo`, also reachable directly at `/na-zywo` for a small side window. */
+  | { name: 'live' };
+
+const LIVE_PATH = '/na-zywo';
 
 /**
  * How many workspace panes the viewport holds (CONTENT-PLANNER-01). `single` is the mobile
@@ -559,6 +563,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   useEffect(() => {
     if (deepLinkAttempted.current || !user) return;
     deepLinkAttempted.current = true;
+    if (typeof location !== 'undefined' && location.pathname === LIVE_PATH) { setRoute({ name: 'live' }); return; }
     const match = typeof location === 'undefined' ? null : location.pathname.match(/^\/reels\/([^/]+)\/?$/);
     if (match) void openDetail(decodeURIComponent(match[1]));
   }, [openDetail, user]);
@@ -567,6 +572,8 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onPopState = () => {
+      if (location.pathname === LIVE_PATH) { setRoute({ name: 'live' }); return; }
+      if (route.name === 'live') { setRoute(primaryRoute()); return; }
       const match = location.pathname.match(/^\/reels\/([^/]+)\/?$/);
       if (match) {
         const id = decodeURIComponent(match[1]);
@@ -585,6 +592,12 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, []);
 
   const leaveDetail = useCallback(() => { setRoute(primaryRoute()); syncListUrl(); }, [syncListUrl]);
+
+  const openLive = useCallback(() => {
+    setRoute({ name: 'live' });
+    if (typeof history !== 'undefined' && location.pathname !== LIVE_PATH) history.pushState({}, '', LIVE_PATH);
+  }, []);
+  const leaveLive = useCallback(() => { setRoute(primaryRoute()); syncListUrl(); }, [syncListUrl]);
 
   const startCapture = useCallback(() => {
     if (!user) return; const reelId = crypto.randomUUID();
@@ -1283,7 +1296,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, [conflict, hookEdits, newHook, saveState]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
+  return { openLive, leaveLive, user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
     hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent,
     newHook: newHook && newHook.reelId === current?.id ? newHook : null, startNewHook, changeNewHook, cancelNewHook, saveNewHook, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,
