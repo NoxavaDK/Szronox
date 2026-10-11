@@ -512,3 +512,45 @@ export interface ApiError {
   details?: Record<string, unknown>;
 }
 export interface ErrorResponse { error: ApiError }
+
+/**
+ * STREAM-LIVE-01: live messages during a broadcast. Both users send them from "Na żywo";
+ * the streaming PC reads them with a `live_feed` access key and reports their status.
+ */
+export type LiveMessageKind = 'quote' | 'signal' | 'signal_cancel';
+/** `urgent` = "Pilnie chcę coś powiedzieć", `moment` = "Gdy będzie chwila". */
+export type LiveSignalLevel = 'urgent' | 'moment';
+export type LiveMessageStatus = 'sent' | 'delivered' | 'waiting' | 'shown' | 'dismissed' | 'seen' | 'expired' | 'replaced';
+export interface LiveMessage {
+  id: Id;
+  kind: LiveMessageKind;
+  /** Quote only: 1–400 characters. */
+  text: string | null;
+  /** Quote only: up to 120 characters; null when not given. */
+  source: string | null;
+  /** Signal only. */
+  level: LiveSignalLevel | null;
+  status: LiveMessageStatus;
+  /** Null while `sent`. */
+  statusAt: IsoDateTime | null;
+  createdAt: IsoDateTime;
+}
+/** POST /live/messages. Idempotent on operationId; no expectedVersion (nothing is edited). */
+export interface CreateLiveMessageRequest {
+  operationId: Id;
+  kind: LiveMessageKind;
+  text?: string;
+  source?: string;
+  level?: LiveSignalLevel;
+}
+/** GET /live/messages/mine: the caller's own most recent messages, newest first. */
+export interface LiveMessageListResponse { items: LiveMessage[] }
+/** Device feed item: every author's message, oldest first. */
+export interface LiveFeedItem extends LiveMessage { authorName: User['name'] }
+/**
+ * GET /live/feed?after=<cursor>. Without `after`, returns no items and the current cursor, so a
+ * newly started reader begins at "now" instead of replaying earlier broadcasts.
+ */
+export interface LiveFeedResponse { items: LiveFeedItem[]; cursor: string }
+/** POST /live/status. Same status again is a no-op; disallowed transitions are 422. */
+export interface LiveStatusRequest { id: Id; status: Exclude<LiveMessageStatus, 'sent'> }

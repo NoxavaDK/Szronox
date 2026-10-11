@@ -1,6 +1,6 @@
 # October 2026 plan — source attribution, ideas in the planner, kDrive layout, streams
 
-Status: **operator decisions recorded 2026-10-01 (§0)**. Draft plan, root-owned. Nothing here is
+Status: **operator decisions recorded 2026-10-01 (§0)**. Migration numbers renumbered 2026-10-11: 0016 is taken by STREAM-LIVE-01 (operator-approved), so STREAM-01 uses 0017 and STREAM-02 0018. Draft plan, root-owned. Nothing here is
 dispatched. Before each task starts, the root presents task, model, files and acceptance for explicit
 approval (AGENTS.md), and pins that task's T00 amendment, contracts and migration first.
 
@@ -11,8 +11,8 @@ Order and dependencies:
 | SOURCE-01 — Źródło field | small–medium | — | 0014 |
 | IDEAS-PLAN — ideas in NIEZAPLANOWANE | small | — | none |
 | KDRIVE-03 — folder layout | medium | GATE: kDrive move probe | none (or 0015 if a column is needed) |
-| STREAM-01 — stream format and topics | large | SOURCE-01, IDEAS-PLAN; visual spec delta | 0016 |
-| STREAM-02 — AI per topic | large | STREAM-01 | 0017 |
+| STREAM-01 — stream format and topics | large | SOURCE-01, IDEAS-PLAN; visual spec delta | 0017 |
+| STREAM-02 — AI per topic | large | STREAM-01 | 0018 |
 
 SOURCE-01 and IDEAS-PLAN are independent and can run in parallel worktrees. KDRIVE-03 can create
 `Streamy/` only after STREAM-01 exists; until then it ships `Rolki/` and `Memy/`.
@@ -180,7 +180,7 @@ A stream **is a Reel** with `format = 'stream'`, so planning, the five statuses,
 verification, kDrive folder, export upload, feed cover, description/hashtags/Źródło and soft
 delete all apply unchanged. What is new is an ordered topic list.
 
-- Migration 0016:
+- Migration 0017:
   - `app.reels.format text not null default 'reel' check (format in ('reel','stream'))`. Chosen at
     creation, not changeable in v1. Existing rows are `reel`.
   - `app.reels.absorbed_into uuid null references app.reels(id)` — set on an idea absorbed into a
