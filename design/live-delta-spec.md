@@ -1,23 +1,37 @@
 # LIVE VISUAL DELTA — Na żywo (STREAM-LIVE-01)
 
-Status: **draft for operator approval, 2026-10-11.** Governs only the Na żywo screen and its entry
+Status: **approved by the operator 2026-10-11** (with the sizing and label corrections below). Governs only the Na żywo screen and its entry
 point. Everything else follows the frozen visual specification. All visible UI is Polish.
 
-Context: used on a phone **during a live broadcast**, often one-handed and under time pressure.
-That is the reason for the two explicit exceptions below (full-width signal buttons and a
-full-width send button); everything else keeps the compact editorial language.
+Context: used **during a live broadcast**, typically in a **small browser window** placed beside
+other work on a desktop (Szron shrinks it so it does not take the whole screen), sometimes on a
+phone. Fast, unmistakable actions under time pressure are the reason for the two explicit
+exceptions below (full-width signal buttons and a full-width send button); everything else keeps
+the compact editorial language.
 
 ## A. Entry point
 
 In the `Rolki` header, a quiet text link **`Na żywo`** directly after `Plan`, same style as `Plan`.
 Not a status tab, not a floating action. Na żywo uses the same back affordance as `Plan`.
 
-## B. Screen (360 px reference, clean reflow at 320 px)
+## B. Screen
+
+**Sizing (operator correction).** Modular and fluid, not phone-only. Reference: a small browser
+window about **360–480 px wide and possibly only ~600 px tall**. It must work from 320 px up to a
+full desktop window:
+
+- below 760 px: one column in the order shown below; compact vertical rhythm (section gaps
+  ~16 px) so signal and quote blocks fit in ~600 px height without scrolling; `WYSŁANE` follows
+  and may scroll.
+- from 760 px: two columns — left (max ~440 px) signal + quote, right `WYSŁANE` filling the
+  rest; the page content is capped at ~1100 px and centred. Nothing stretches into very long
+  lines: inputs and buttons take their column's width.
+- no horizontal scrolling at any width; touch targets stay ~44 px.
 
 ```
 ‹ Rolki                     Na żywo
 ──────────────────────────────────────
-SYGNAŁ DLA PROWADZĄCEGO
+SYGNAŁ DLA KUBY
 ┌──────────────────────────────────┐
 │  ● Pilnie chcę coś powiedzieć     │   urgent  #B42332
 └──────────────────────────────────┘
@@ -42,7 +56,9 @@ Sygnał · Gdy będzie chwila          Zobaczony · 20:51
 
 ### Signal block
 
-- Section label `SYGNAŁ DLA PROWADZĄCEGO` (11–12 uppercase, secondary text).
+- Section label `SYGNAŁ DLA KUBY` (11–12 uppercase, secondary text).
+- Shown to `SZRON` only. Kuba (`NOXAVA`) is the recipient, so for him the signal block is absent
+  and the screen starts with `CYTAT NA STREAM`. (The API still accepts signals from both users.)
 - **Exception 1:** two full-width buttons, min height 52 px, 8 px apart, small radius (as inputs),
   white surface with a 1.5 px border in the semantic colour and a leading filled dot in the same
   colour; label in primary text, weight ~600. Not filled, no shadow, no icon besides the dot.
