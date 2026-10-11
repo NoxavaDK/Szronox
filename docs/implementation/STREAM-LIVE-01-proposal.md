@@ -150,3 +150,5 @@ exception to VPS-00, with keys designed as named, scoped records so future per-p
 added by a later amendment; migration 0016 with STREAM-01/02 renumbered to 0017/0018. Steps 1
 (contracts) and 2 (visual delta) still stop for the operator's review. No merge, DEV migration or
 deployment is authorized.
+
+Steps 1 and 2 approved by the operator 2026-10-11 (visual delta with sizing and label corrections). Step 3 implementation authorized; no merge, DEV migration or deployment.
