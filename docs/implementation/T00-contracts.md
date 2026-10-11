@@ -427,3 +427,39 @@ The operator authorized KDRIVE-01a (API, configuration, tests and DEV deployment
 **Na żywo screen.** Reachable from the app's main navigation for both users. Exact layout and Polish copy are pinned in `design/live-delta-spec.md` once the operator approves it; no UI beyond that spec. Quote and source fields, `Wyślij na stream`, the three signal buttons, and the user's own recent messages with Polish status labels. Drafts are memory-only; a failed send keeps the text. No AI entry points.
 
 **Acceptance.** Per-kind validation and limits in API and SQL; idempotent create; own-messages isolation; feed cursor order, limit, "start at now" and read-only behavior; key accepted only on the two device routes and refused with cookie/Origin; revoked/unknown key 401; transition table including no-op and invalid cases; rate limits; API role grants and the privilege refusal rules updated (worker none); contracts/API build and web typecheck. **Open real-world gates (separate approval):** DEV migration and deployment, real phone use, StreamControl reading DEV.
+
+## STREAM-01 — streams and topics (operator-authorized 2026-10-11)
+
+Authority: `docs/implementation/OCT-2026-plan.md` §4 and `design/oct-2026-delta-spec.md` §D (D1–D9, Astra-reviewed, operator-approved 2026-10-11). Migration `0017_streams.sql`; wire types in `packages/contracts` (`ReelFormat`, `StreamTopic`, `StreamTopicSource`, the four request types and `StreamTopicCandidate`). "Five statuses only" is unchanged.
+
+**Model.** A stream is a Reel with `format = 'stream'`. Planning, statuses, editor, verification, kDrive folder, export, feed cover, publication fields and soft delete apply to it unchanged. `format` is fixed at creation (`CreateReelRequest.format`, default `'reel'`). A stream requires a non-empty trimmed `title` and may have an empty capture; `initialScript` and `initialHook` are refused on a stream (`VALIDATION_ERROR`). For a `'reel'`, `title` in the request is refused, and the existing capture rules are unchanged. Every Reel on the wire carries `format`, `absorbedInto`, `topics` (`[]` for reels) and `inStreams` (active streams that link this Reel; `[]` when none).
+
+**Topics.** `stream_topics` rows are ordered by contiguous 0-based `position`.
+- *Absorbed*: the source is an `idea` (`format='reel'`, not deleted, not absorbed, not linked in any stream). Absorbing copies the idea's `title`/`inputNote`/`script` into the topic's `title`/`notes`/`script` and sets the idea's `absorbed_into`. The topic row is the editable copy; capture, `sourceMetadata`, `publicationSource` and `sourceLink` stay on the idea and are exposed through `StreamTopic.source`. **Odłącz** (DELETE on an absorbed topic) writes title→`title`, notes→`inputNote`, script→`script` back to the idea (incrementing its `version`, and its `scriptRevision` only when the script text changed), clears `absorbed_into`, removes the row and renumbers positions. The idea returns to the list as `idea`.
+- *Linked*: the source is any non-deleted, non-absorbed `format='reel'` Reel. The row stores no copy (`''` fields); `source` is read live. Removing the topic removes only the reference.
+- A stream is never a topic. A Reel appears at most once per stream. An absorbed idea belongs to exactly one stream. `to_record` and later may only be linked. An idea already absorbed elsewhere is refused, and so is an idea already linked in any stream (it would disappear from under that reference). Refusals are `422 VALIDATION_ERROR` with `reason`: `not_a_stream`, `source_is_stream`, `already_in_stream`, `absorbed_elsewhere`, `linked_elsewhere`, `absorb_requires_idea`, `source_deleted`, `topic_not_absorbed`.
+- **New topic** (`mode: 'new'`): one write creates a hidden absorbed idea (client `reelId`, `status='idea'`, `absorbed_into` = stream, capture `{ url: link }` when a link is given, else `{ images: [] }`, `inputNote` = note) and its topic (client `topicId`) at the end. This is the only exception to the "text, URL or image required" capture rule. A given link is validated like `sourceLink` (full http(s), ≤ 2048) and enqueues SOURCE-01 metadata for the new idea after commit.
+- **Topic edits** (PATCH, absorbed only): `title`/`notes`/`script`, plus `publicationSource` which is written to the idea with SOURCE-01 semantics (`null` automatic, `''` suppressed, ≤ 1000). SOURCE-01 refresh of an absorbed idea's metadata uses the existing refresh route on the idea's ID.
+- Absorb, link, new, edit, reorder and remove are each one transaction, version-checked against the **stream's** `version` and idempotent on `operationId` through `app.operations`. Each increments the stream's `version`/`updated_at` and returns the authoritative stream `Reel`. Reorder takes the complete list of the stream's topic IDs; any other set is `VALIDATION_ERROR` `reason: topic_set_mismatch`.
+
+**Hidden absorbed ideas.** A Reel with `absorbed_into` set is excluded from `GET /reels` (both visibilities), the planner, search and topic candidates. `GET /reels/:id` still returns it. `PATCH /reels/:id`, delete/restore, hook, meme, export, verification, kDrive and AI routes on it are refused with `422 VALIDATION_ERROR` `reason: absorbed_into_stream`. Its only write paths are the stream topic routes and the SOURCE-01 metadata refresh.
+
+**Lifecycle.** Soft-deleting a stream sets the same `deleted_at` on all its absorbed ideas in the same transaction; restoring it clears `deleted_at` on all of them. Topics, order and positions are untouched. `Usunięte` lists only the stream. Soft-deleting or restoring a linked Reel never touches the stream; its topic shows `source.deletedAt`. A deleted stream refuses topic mutations like any other edit of a deleted Reel. Linked-Reel `inStreams` lists only non-deleted streams.
+
+**No AI on streams.** `POST /reels/:id/ai-runs` on a stream returns `422 VALIDATION_ERROR` with `reason: not_available_for_stream`, checked before enqueue. Hooks, memes, exports, verification and kDrive routes behave as for a Reel (UI hides hooks per D3). `Utwórz folder` keeps today's location until KDRIVE-03.
+
+**Copy composition.** A stream's `Kopiuj opis` = Opis, then the topics' `source.sourceLine` values in topic order (empty skipped, exact duplicates removed, joined by one newline), then Hashtagi. Non-empty sections are joined by two newlines; nothing is trimmed or rewritten. The stream's own `publicationSource` is not used. Reel composition is unchanged.
+
+**Routes** (session, exact Origin and CSRF on unsafe methods, as for every route):
+
+| Route | Contract |
+| --- | --- |
+| POST /reels/:id/topics | `AddStreamTopicRequest` (absorb / link / new) |
+| PATCH /reels/:id/topics/:topicId | `StreamTopicPatchRequest`, absorbed only |
+| DELETE /reels/:id/topics/:topicId | `RemoveStreamTopicRequest`: Odłącz (absorbed) or remove reference (linked) |
+| PUT /reels/:id/topic-order | `StreamTopicOrderRequest` |
+| GET /reels/:id/topic-candidates?q= | Non-deleted, non-absorbed `format='reel'` Reels matching `q` on title (case-insensitive), ideas and later statuses, `inThisStream` flagged; at most 100 |
+
+**Grants.** The API gets select/insert/update/delete on `app.stream_topics`; the worker gets nothing on it (STREAM-02 will extend it). Worker access to `app.reels` is unchanged.
+
+Acceptance: covered by the STREAM-01a (API) and STREAM-01b (web) dispatch in `docs/implementation/STREAM-01-dispatch.md`. Open real-world gates: the DEV migration and deployment, and real-device use.

@@ -206,11 +206,82 @@ export interface Reel {
   plannedPublicationDate: IsoDate | null;
   /** Optional part of the day; only ever set together with a date. */
   plannedPublicationSlot: PublicationSlot | null;
+  /** STREAM-01: fixed at creation; every pre-existing Reel is 'reel'. */
+  format: ReelFormat;
+  /** STREAM-01: set only on an idea absorbed into that stream; such a Reel is hidden, not deleted. */
+  absorbedInto: Id | null;
+  /** STREAM-01: ordered topics of a stream (position order); always [] for format 'reel'. */
+  topics: StreamTopic[];
+  /** STREAM-01 (D6): active streams that link this Reel as a reference topic; [] when none. */
+  inStreams: StreamRef[];
   createdBy: Id;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   deletedAt: IsoDateTime | null;
 }
+/** STREAM-01 */
+export type ReelFormat = 'reel' | 'stream';
+export type StreamTopicKind = 'absorbed' | 'linked';
+export interface StreamRef { id: Id; title: string }
+/** Live, read-only view of the Reel behind a topic (the absorbed idea or the referenced Reel). */
+export interface StreamTopicSource {
+  reelId: Id;
+  /** The source Reel's own title (for absorbed topics the editable copy is StreamTopic.title). */
+  title: string;
+  status: ReelStatus;
+  editorId: Id | null;
+  /** Effective attribution: publicationSource ?? sourceMetadata?.line ?? '' of the source Reel. */
+  sourceLine: string;
+  /** Absorbed topics only (D4 `Źródło` and `Materiał źródłowy`); null for linked topics. */
+  publicationSource: string | null;
+  sourceMetadata: SourceMetadata | null;
+  sourceLink: string | null;
+  originalInput: CaptureInput | null;
+  /** A deleted referenced Reel stays as a muted `Usunięta rolka` row. */
+  deletedAt: IsoDateTime | null;
+}
+export interface StreamTopic {
+  id: Id;
+  kind: StreamTopicKind;
+  /** 0-based, contiguous, unique per stream. */
+  position: number;
+  /** Absorbed: editable copy. Linked: always '' (read source.title live). */
+  title: string;
+  notes: string;
+  script: string;
+  source: StreamTopicSource;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+/** POST /reels/:streamId/topics — every variant is a version-checked mutation of the stream. */
+export type AddStreamTopicRequest = MutationContext & (
+  | { mode: 'absorb'; reelId: Id }
+  | { mode: 'link'; reelId: Id }
+  /** `+ Nowy temat`: creates a hidden absorbed idea; reelId is client-generated like POST /reels. */
+  | { mode: 'new'; topicId: Id; reelId: Id; title: string; link?: string; note?: string }
+);
+/** PATCH /reels/:streamId/topics/:topicId — absorbed topics only. */
+export interface StreamTopicPatchRequest extends MutationContext {
+  changes: Partial<Pick<StreamTopic, 'title' | 'notes' | 'script'>> & {
+    /** Written to the absorbed idea's publicationSource with SOURCE-01 semantics. */
+    publicationSource?: string | null;
+  };
+}
+/** DELETE /reels/:streamId/topics/:topicId — linked: remove reference; absorbed: Odłącz. */
+export type RemoveStreamTopicRequest = MutationContext;
+/** PUT /reels/:streamId/topic-order — the complete new order of the stream's topic IDs. */
+export interface StreamTopicOrderRequest extends MutationContext { topicIds: Id[] }
+/** GET /reels/:streamId/topic-candidates?q= — the D5 picker. */
+export interface StreamTopicCandidate {
+  id: Id;
+  title: string;
+  status: ReelStatus;
+  plannedPublicationDate: IsoDate | null;
+  plannedPublicationSlot: PublicationSlot | null;
+  /** Rows already in this stream are listed disabled (`W tym streamie`). */
+  inThisStream: boolean;
+}
+export interface StreamTopicCandidatesResponse { items: StreamTopicCandidate[] }
 export interface CaptureImageDescriptor {
   attachmentId: Id;
   fileName: string;
@@ -243,6 +314,9 @@ export interface CreateReelRequest {
   initialScript?: string;
   initialHook?: string;
   priority?: Priority;
+  /** STREAM-01: defaults to 'reel'. A stream requires a non-empty title and may have an empty input. */
+  format?: ReelFormat;
+  title?: string;
 }
 export interface ReelPatchRequest extends MutationContext {
   changes: Partial<Pick<Reel,
