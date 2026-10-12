@@ -154,6 +154,13 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
     if (body.initialScript !== undefined && typeof body.initialScript !== 'string') {
       throw validationError('initialScript must be a string');
     }
+    // STREAM-01: format defaults to 'reel'; a stream's non-empty title is validated downstream.
+    if (body.format !== undefined && body.format !== 'reel' && body.format !== 'stream') {
+      throw validationError('format must be "reel" or "stream"', { field: 'format' });
+    }
+    if (body.title !== undefined && typeof body.title !== 'string') {
+      throw validationError('title must be a string', { field: 'title' });
+    }
 
     const reel = await repository.createReel(actor, {
       operationId,
@@ -162,6 +169,8 @@ export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDepen
       initialScript: body.initialScript as string | undefined,
       initialHook: typeof body.initialHook === 'string' ? body.initialHook : undefined,
       priority: body.priority as never,
+      format: body.format as never,
+      title: body.title as string | undefined,
     });
     if (sourceMetadata && reel.sourceMetadata?.state === 'pending') {
       void sourceMetadata.enqueue(reel.id, reel.sourceMetadata.requestId).catch(() => undefined);

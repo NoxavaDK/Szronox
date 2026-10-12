@@ -571,9 +571,10 @@ test('deleting a linked Reel never touches the stream, and shows source.deletedA
     assert.equal(after.version, linked.version, 'deleting the linked Reel does not touch the stream');
     assert.ok(after.topics[0].source.deletedAt, 'the topic shows the deleted source');
 
-    // The now-deleted linked Reel no longer lists the stream as active in inStreams.
+    // inStreams filters on whether the STREAM is deleted, not the linked Reel itself: the
+    // stream is still active, so it still names it even though the Reel is now deleted.
     const deletedTarget = await core.getReel(target.id, { includeDeleted: true });
-    assert.deepEqual(deletedTarget.inStreams, []);
+    assert.deepEqual(deletedTarget.inStreams, [{ id: s.id, title: 'Stream' }]);
   } finally { await db.close(); }
 });
 
