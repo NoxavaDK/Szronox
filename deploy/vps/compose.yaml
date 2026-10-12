@@ -167,6 +167,10 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the exact browser origin; VPS-05 supplies the HTTPS hostname}
       APP_STORAGE_ROOT: /var/lib/szronox/storage
       AI_ENABLED: ${AI_ENABLED:-false}
+      # CAPTURE-DRAFT-01: capture queues one automatic develop run only when exactly "true";
+      # capture itself always succeeds either way. API-only — the worker never reads these.
+      AI_AUTO_DRAFT_ENABLED: ${AI_AUTO_DRAFT_ENABLED:-false}
+      AI_AUTO_DRAFT_DAILY_LIMIT: ${AI_AUTO_DRAFT_DAILY_LIMIT:-50}
       # The addresses of the reverse proxy, so request.ip is the real client and the
       # login throttle keys per client. Empty means trust nothing, which behind a proxy
       # makes that throttle one global counter. Never "true": any client could then
