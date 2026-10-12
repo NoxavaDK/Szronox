@@ -23,7 +23,7 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
     showAccompanyingText, onRevealAccompanyingText, accompanyingText, onChangeAccompanyingText,
     showHookField, onRevealHookField, initialHook, onChangeInitialHook,
     priority, onChangePriority,
-    canSave, onSave, onOpracuj, saveState,
+    canSave, onSave, onOpracuj, saveState, autoDraftPending,
   } = props;
 
   // Detected-share payloads start collapsed to a compact chip (sec. 3); "Zmień" reveals
@@ -151,15 +151,17 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
         <TextAction onClick={onOpracuj} tone="quiet">
           ✦ Opracuj
         </TextAction>
-        <AutosaveMessage state={saveState} />
+        <AutosaveMessage state={saveState} autoDraftPending={autoDraftPending} />
       </div>
     </div>
   );
 }
 
-function AutosaveMessage({ state }: { state: QuickAddScreenProps['saveState'] }) {
+function AutosaveMessage({ state, autoDraftPending }: { state: QuickAddScreenProps['saveState']; autoDraftPending?: boolean }) {
   if (state === 'saved') {
-    return <p className={styles.autosave}>Szkic zapisany</p>;
+    // CAPTURE-DRAFT-01: appended only when this save's Reel actually got a capture-triggered
+    // draft queued; never implies one where there is none.
+    return <p className={styles.autosave}>{autoDraftPending ? 'Szkic zapisany. Przygotowuję szkic.' : 'Szkic zapisany'}</p>;
   }
   if (state === 'offline') {
     return (

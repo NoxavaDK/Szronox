@@ -46,7 +46,9 @@ test('a HOOKI row selects on the row itself; edit and delete are sibling control
   // One concise instruction instead of a second `Wybierz hook` action inside HOOKI.
   assert.ok(screen.includes('Stuknij hook, aby go wybrać'));
   assert.equal(screen.includes('hookChooseAction'), false);
-  assert.equal(screen.includes('Użyj'), false, 'no per-hook use action');
+  // Scoped to the hook row itself: CAPTURE-DRAFT-01 adds an unrelated "Użyj" action (applying
+  // the auto-draft title suggestion) well above this section, which this must not catch.
+  assert.equal(row.includes('Użyj'), false, 'no per-hook use action');
 });
 
 test('inline edit offers Gotowe and Anuluj, and keeps an orphaned draft visible', () => {

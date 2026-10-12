@@ -599,6 +599,12 @@ export interface QuickAddScreenProps {
   onOpracuj: () => void;
 
   saveState: SaveState;
+  /**
+   * CAPTURE-DRAFT-01: true when the Reel this save created/kept has `autoDraft` — appends
+   * "Przygotowuję szkic." to the `saved` confirmation. Irrelevant, and ignored, for any other
+   * `saveState`.
+   */
+  autoDraftPending?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +650,15 @@ export interface ReelOverflowProps {
   deleteState: SaveState;
 }
 
+/**
+ * CAPTURE-DRAFT-01: the capture-triggered draft row under the title. The caller decides which
+ * variant (if any) applies from `Reel.autoDraft` and the live title — a failed or stale draft,
+ * or a title that already exists, renders nothing here, so this is never passed in that case.
+ */
+export type AutoDraftRowView =
+  | { state: 'preparing' }
+  | { state: 'ready'; titleSuggestion: string; onUseTitle: () => void; onOpenDraft: () => void };
+
 export interface ReelDetailScreenProps {
   onBack: () => void;
   title: string;
@@ -654,6 +669,8 @@ export interface ReelDetailScreenProps {
    */
   titlePlaceholder?: string;
   sourceDomain?: string;
+  /** CAPTURE-DRAFT-01: shown only while `title` is empty; absent otherwise. */
+  autoDraft?: AutoDraftRowView;
 
   metadata: ReelDetailMetadataView;
   /**
