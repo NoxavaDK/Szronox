@@ -290,3 +290,16 @@ test('deriving a label never alters the capture it reads', () => {
   assert.equal(label.sourceDomain, 'example.test');
   assert.deepEqual(input, snapshot);
 });
+
+test('root integration: a full Reel resolves its selected hook from hooks + selectedHookId', () => {
+  const label = reelLabel({
+    title: '',
+    originalInput: { url: 'https://example.com/a/b', images: [] },
+    hooks: [{ id: 'h1', text: 'Inny hak' }, { id: 'h2', text: 'Nie zabijaj, nie cudzołóż, nie śmieć?' }],
+    selectedHookId: 'h2',
+  });
+  assert.equal(label.text, 'Nie zabijaj, nie cudzołóż, nie śmieć?');
+  assert.equal(label.derived, true);
+  const unselected = reelLabel({ title: '', originalInput: { text: 'Własne słowa', images: [] }, hooks: [{ id: 'h1', text: 'Hak' }], selectedHookId: null });
+  assert.equal(unselected.text, 'Własne słowa');
+});

@@ -255,7 +255,7 @@ export function captureLabel(input: CaptureInput): string {
  */
 export function reelLabel(
   reel: Pick<Reel, 'title' | 'originalInput'> &
-    Partial<Pick<Reel, 'script' | 'createdAt'>> & {
+    Partial<Pick<Reel, 'script' | 'createdAt' | 'hooks' | 'selectedHookId'>> & {
       /** CAPTURE-DRAFT-01 rung 2: the selected hook's text, when there is one. */
       selectedHookText?: string | null;
       /** CAPTURE-DRAFT-01 rung 3: only consulted once that run has succeeded. */
@@ -270,11 +270,16 @@ export function reelLabel(
 
   if (reel.title.trim() !== '') return withDomain(reel.title, false);
 
+  // Root integration: a full Reel carries hooks + selectedHookId rather than the text, so every
+  // caller that passes a whole Reel gets rung 2 without having to resolve the hook itself.
+  const selectedHookText = reel.selectedHookText
+    ?? (reel.selectedHookId ? reel.hooks?.find((hook) => hook.id === reel.selectedHookId)?.text : undefined);
+
   // CAPTURE-DRAFT-01 rungs 2–4, each ahead of the share's own `title` field (rung 5), which
   // stays exactly where it already was: inside `authorWords` below. Only the chain's new rungs
   // were inserted ahead of it, not its own position.
-  if (reel.selectedHookText && reel.selectedHookText.trim() !== '') {
-    return withDomain(tidy(reel.selectedHookText), true);
+  if (selectedHookText && selectedHookText.trim() !== '') {
+    return withDomain(tidy(selectedHookText), true);
   }
   if (reel.autoDraft?.state === 'succeeded' && reel.autoDraft.titleSuggestion && reel.autoDraft.titleSuggestion.trim() !== '') {
     return withDomain(tidy(reel.autoDraft.titleSuggestion), true);
