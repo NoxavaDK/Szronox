@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
-import type { Reel, StreamTopic } from '../../../../packages/contracts/src/index.js';
+import type { Reel, StreamTopic, StreamTopicSource } from '../../../../packages/contracts/src/index.js';
 import type { CoreApiClient } from '../data/api.js';
 import { ClientApiError, polishError } from '../data/errors.js';
-import { flushTopicBeforeSwitch, topicSourceLabel, type TopicDraftSaveState } from '../data/streams.js';
+import { flushTopicBeforeSwitch, topicLabel, type TopicDraftSaveState } from '../data/streams.js';
+import { reelLabel, UNTITLED_LABEL } from '../data/reel-label.js';
 import { STATUS_LABELS } from '../ui/screen-contracts.js';
 import { TextAction } from '../ui/primitives.js';
 import { OverflowIcon } from '../ui/icons.js';
@@ -17,6 +18,12 @@ interface TopicDraft {
   publicationSource: string | null;
   saveState: TopicDraftSaveState;
   error: string | null;
+}
+
+/** `topicLabel`'s fallback is `reelLabel`'s script/capture-derived text, computed here (see `data/streams.ts`). */
+function sourceLabel(source: StreamTopicSource): string {
+  const fallback = source.originalInput ? reelLabel({ title: '', originalInput: source.originalInput }).text : UNTITLED_LABEL;
+  return topicLabel({ title: source.title, selectedHookText: source.selectedHookText }, fallback);
 }
 
 function draftFromTopic(topic: StreamTopic): TopicDraft {
@@ -224,7 +231,7 @@ export function StreamTopics({ api, stream, onStreamChange, onOpenReel, readOnly
               <li key={topic.id} className={styles.row}>
                 <span className={styles.rowNumber}>{index + 1}.</span>
                 <span className={styles.rowBody}>
-                  <span className={styles.rowTitle}>{topic.title.trim() || topicSourceLabel(topic.source)}</span>
+                  <span className={styles.rowTitle}>{topic.title.trim() || sourceLabel(topic.source)}</span>
                   <span className={styles.rowMeta}>{topicMeta(topic)}</span>
                 </span>
               </li>
@@ -245,8 +252,8 @@ export function StreamTopics({ api, stream, onStreamChange, onOpenReel, readOnly
           const expanded = topic.id === expandedId;
           const deletedLinked = topic.kind === 'linked' && topic.source.deletedAt !== null;
           const label = topic.kind === 'absorbed'
-            ? (topic.title.trim() || topicSourceLabel(topic.source))
-            : topicSourceLabel(topic.source);
+            ? (topic.title.trim() || sourceLabel(topic.source))
+            : sourceLabel(topic.source);
           const draft = drafts[topic.id] ?? draftFromTopic(topic);
           return (
             <li

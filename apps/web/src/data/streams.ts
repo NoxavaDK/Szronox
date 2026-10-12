@@ -4,12 +4,12 @@
  * `StreamTopicPicker.tsx` own the API calls and call into these functions for the parts worth
  * testing in isolation.
  */
-import type { CaptureInput, ReelStatus, StreamTopicCandidate, StreamTopicSource } from '../../../../packages/contracts/src/index.js';
-import { MAX_LABEL_LENGTH, reelLabel, UNTITLED_LABEL } from './reel-label.js';
+import type { ReelStatus, StreamTopicCandidate } from '../../../../packages/contracts/src/index.js';
 
+const MAX_HOOK_LABEL_LENGTH = 80;
 function tidyHook(value: string): string {
   const collapsed = value.replace(/\s+/g, ' ').trim();
-  return collapsed.length <= MAX_LABEL_LENGTH ? collapsed : `${collapsed.slice(0, MAX_LABEL_LENGTH - 1).trimEnd()}…`;
+  return collapsed.length <= MAX_HOOK_LABEL_LENGTH ? collapsed : `${collapsed.slice(0, MAX_HOOK_LABEL_LENGTH - 1).trimEnd()}…`;
 }
 
 /**
@@ -18,29 +18,20 @@ function tidyHook(value: string): string {
  *
  * Order: the typed title, else the source Reel's selected hook text (the one rung the shared
  * `reelLabel()` in `reel-label.ts` does not yet cover — CAPTURE-DRAFT-01 owns adding it there,
- * so it is not duplicated into that file), else `reelLabel`'s own script/capture-derived label,
- * else `Bez tytułu`.
+ * so it is not duplicated into that file), else the caller's `fallback`.
+ *
+ * `fallback` is a parameter, computed by the caller from `reelLabel()`/`UNTITLED_LABEL`
+ * (`reel-label.ts`), rather than this module importing those values itself: `reel-label.ts`'s
+ * runtime (value) exports do not resolve here under plain `node --experimental-strip-types
+ * --test` ESM resolution the way an `import type` does (confirmed empirically — see
+ * STREAM-01b-result.md "Limitations"), even though the same `./x.js` specifier resolves fine
+ * under the Vite/tsc build this module also runs under. Keeping this module free of sibling
+ * *value* imports sidesteps it entirely rather than working around it per-file.
  */
-export function topicLabel(input: {
-  title: string;
-  originalInput: CaptureInput | null;
-  script?: string | null;
-  selectedHookText: string | null;
-}): string {
+export function topicLabel(input: { title: string; selectedHookText: string | null }, fallback: string): string {
   if (input.title.trim() !== '') return input.title;
   if (input.selectedHookText && input.selectedHookText.trim() !== '') return tidyHook(input.selectedHookText);
-  if (input.originalInput === null) return UNTITLED_LABEL;
-  return reelLabel({ title: '', originalInput: input.originalInput, script: input.script ?? undefined }).text;
-}
-
-/** `topicLabel` for a D5 picker row. */
-export function topicCandidateLabel(candidate: Pick<StreamTopicCandidate, 'title' | 'originalInput' | 'script' | 'selectedHookText'>): string {
-  return topicLabel(candidate);
-}
-
-/** `topicLabel` for a TEMATY row's live `source` (absorbed or linked). */
-export function topicSourceLabel(source: Pick<StreamTopicSource, 'title' | 'originalInput' | 'selectedHookText'>): string {
-  return topicLabel({ title: source.title, originalInput: source.originalInput, selectedHookText: source.selectedHookText });
+  return fallback;
 }
 
 /** D5: `ROLKI` first, in this exact status order, then `POMYSŁY` (`idea`). */

@@ -1210,13 +1210,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
 
   const copyPublication = useCallback(async () => {
     if (!current) return; const { publicationDescription: description, publicationHashtags: hashtags } = current;
+    // During the Cofnij window the restored automatic value is the truth; the old manual
+    // text is only held for undo, never displayed or copied.
+    const source = current.publicationSource ?? current.sourceMetadata?.line ?? '';
     // STREAM-01 D7: a stream's ŹRÓDŁA come from its topics' source lines, in topic order; its
-    // own `publicationSource` is never used (T00 "Copy composition").
+    // own `publicationSource` (and so `source` above) is never used for it (T00 "Copy composition").
     const value = current.format === 'stream'
       ? composeStreamPublicationText(description, current.topics.map((topic) => topic.source.sourceLine), hashtags)
-      // During the Cofnij window the restored automatic value is the truth; the old manual
-      // text is only held for undo, never displayed or copied.
-      : composePublicationText(description, current.publicationSource ?? current.sourceMetadata?.line ?? '', hashtags);
+      : composePublicationText(description, source, hashtags);
     if (!value) { setMessage('Brak opisu i hashtagów do skopiowania.'); return; }
     try { if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE'); await navigator.clipboard.writeText(value); setMessage('Skopiowano opis.'); }
     catch { setMessage(`Nie udało się skopiować. Zaznacz i skopiuj ręcznie:\n\n${value}`); }

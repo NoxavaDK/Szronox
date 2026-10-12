@@ -3,8 +3,15 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Reel, StreamTopicCandidate } from '../../../../packages/contracts/src/index.js';
 import type { CoreApiClient } from '../data/api.js';
 import { polishError } from '../data/errors.js';
-import { groupStreamCandidates, isDirectLinkCandidate, topicCandidateLabel } from '../data/streams.js';
+import { groupStreamCandidates, isDirectLinkCandidate, topicLabel } from '../data/streams.js';
+import { reelLabel } from '../data/reel-label.js';
 import { STATUS_LABELS } from '../ui/screen-contracts.js';
+
+/** `topicLabel`'s fallback is `reelLabel`'s script/capture-derived text (see `data/streams.ts`). */
+function candidateLabel(candidate: StreamTopicCandidate): string {
+  const fallback = reelLabel({ title: '', originalInput: candidate.originalInput, script: candidate.script }).text;
+  return topicLabel({ title: candidate.title, selectedHookText: candidate.selectedHookText }, fallback);
+}
 import { TextAction } from '../ui/primitives.js';
 import { CloseIcon } from '../ui/icons.js';
 import styles from './StreamTopicPicker.module.css';
@@ -79,7 +86,7 @@ export function StreamTopicPicker({ api, stream, onClose, onAdded }: {
   const grouped = groupStreamCandidates(items);
 
   const row = (candidate: StreamTopicCandidate) => {
-    const label = topicCandidateLabel(candidate);
+    const label = candidateLabel(candidate);
     const disabled = candidate.inThisStream;
     const expanded = expandedId === candidate.id;
     return (
