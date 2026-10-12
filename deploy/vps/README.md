@@ -87,6 +87,8 @@ Application configuration, identical here and in `compose.yaml`:
 | `APP_STORAGE_ROOT` | `/var/lib/szronox/storage` | outside the served web tree |
 | `APP_ALLOWLIST` | `NOXAVA:<uuid>,SZRON:<uuid>` | compared against the database, never written by the API |
 | `LOG_LEVEL` | `info` | redacting options are applied; `silent` disables logging |
+| `AI_AUTO_DRAFT_ENABLED` | `false` | CAPTURE-DRAFT-01: capture queues one automatic `develop` run only when exactly `true`; capture always succeeds either way |
+| `AI_AUTO_DRAFT_DAILY_LIMIT` | `50` | CAPTURE-DRAFT-01: capture-triggered runs allowed per Europe/Warsaw day; integer 0–1000, a config error otherwise |
 
 One more host variable, not application configuration:
 
