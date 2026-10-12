@@ -120,3 +120,18 @@ export function CalendarIcon(props: IconProps) {
     </svg>
   );
 }
+
+/**
+ * STREAM-01 (D1): the stream marker — a plain outline "broadcast" pictogram (a dot with two
+ * concentric signal arcs), stroke matching the feed-cover pictogram style. Always paired with
+ * the word "Stream" wherever it appears; never shown alone as the only signal.
+ */
+export function BroadcastIcon(props: IconProps) {
+  return (
+    <svg {...base(props.size ?? 16, props)}>
+      <circle cx="10" cy="13.6" r="1.25" fill="currentColor" stroke="none" />
+      <path d="M7 11.4a4.3 4.3 0 0 1 6 0" />
+      <path d="M4.4 8.9a7.9 7.9 0 0 1 11.2 0" />
+    </svg>
+  );
+}

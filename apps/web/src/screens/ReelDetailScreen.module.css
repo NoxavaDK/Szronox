@@ -71,6 +71,11 @@
   max-height: 50px;
 }
 @media (min-width: 700px) { .titleField { font-size: 21px; line-height: 27px; min-height: 54px; max-height: 54px; } }
+
+/* STREAM-01 (D1) */
+.titleRow { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.titleStreamGlyph { flex-shrink: 0; margin-top: 4px; color: var(--sz-color-text-secondary); }
+
 .titleMeta { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .titleEdit {
   appearance: none; border: 0; background: none; padding: 0; min-height: 28px;
@@ -123,6 +128,20 @@
 .memeDetach { appearance: none; border: 0; background: none; min-width: 32px; min-height: 36px; font: inherit; font-size: 16px; color: var(--sz-color-text-secondary); cursor: pointer; }
 .otherHooks { border-top: 1px solid var(--sz-color-divider); }
 .otherHooks summary { display: flex; align-items: center; min-height: 44px; color: var(--sz-color-text-secondary); font-size: 13px; cursor: pointer; }
+
+/* STREAM-01 (D6) */
+.streamsLinkWrap { position: relative; display: inline-flex; }
+.streamsList {
+  position: absolute; top: 100%; left: 0; z-index: 2; margin: 2px 0 0; padding: 4px 0;
+  list-style: none; min-width: 180px; background: var(--sz-color-surface);
+  border: 1px solid var(--sz-color-divider); border-radius: 6px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+.streamsListItem {
+  display: block; width: 100%; appearance: none; border: 0; background: none; text-align: left;
+  min-height: var(--sz-touch-target); padding: 0 var(--sz-space-3); font: inherit; font-size: 13px;
+  color: var(--sz-color-text-primary); cursor: pointer;
+}
+.streamsListItem:hover, .streamsListItem:focus-visible { background: var(--sz-color-background); }
 
 .metadataVerified {
   color: var(--sz-color-success);

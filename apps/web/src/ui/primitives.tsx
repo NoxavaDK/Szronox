@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { Priority } from '@szronox/contracts';
 import type { EditorView } from './screen-contracts.js';
 import { priorityColor, priorityLabel } from './tokens.js';
-import { CoverPictogramIcon, PlusIcon, WarningIcon } from './icons.js';
+import { BroadcastIcon, CoverPictogramIcon, PlusIcon, WarningIcon } from './icons.js';
 import styles from './primitives.module.css';
 
 export function Avatar({ user, size = 28 }: { user: EditorView; size?: number }) {
@@ -268,6 +268,20 @@ export function CoverIndicator({
     >
       <CoverPictogramIcon size={size} done={done} />
     </button>
+  );
+}
+
+/**
+ * STREAM-01 (D1): the stream marker, used identically in list rows, planner cards and the
+ * Reel Detail title row — the icon is always paired with the word "Stream" (never alone,
+ * since colour/icon-only signals are never the only cue). Accessible name is "Stream".
+ */
+export function StreamMarker({ className }: { className?: string }) {
+  return (
+    <span className={className} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--sz-color-text-secondary)', flexShrink: 0 }}>
+      <BroadcastIcon size={14} aria-hidden="true" />
+      <span>Stream</span>
+    </span>
   );
 }
 

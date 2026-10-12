@@ -8,6 +8,8 @@ import type {
   UploadTransport, User, VerifyExportRequest, KdriveUploadStartRequest, KdriveUploadStartResponse,
   KdriveUploadState, AttachKdriveUploadRequest,
   CreateLiveMessageRequest, LiveMessage, LiveMessageListResponse,
+  AddStreamTopicRequest, RemoveStreamTopicRequest, StreamTopicOrderRequest,
+  StreamTopicPatchRequest, StreamTopicCandidatesResponse,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
 
@@ -157,6 +159,19 @@ export class CoreApiClient {
   attachMeme = (reelId: string, body: AttachMemeRequest) => this.request<Reel>(`/reels/${reelId}/memes`, { method: 'POST', body: JSON.stringify(body) });
   detachMeme = (reelId: string, memeId: string, body: { operationId: string; expectedVersion: number }) => this.request<Reel>(`/reels/${reelId}/memes/${memeId}`, { method: 'DELETE', body: JSON.stringify(body) });
   detachProgramme = (reelId: string, body: { operationId: string; expectedVersion: number }) => this.request<Reel>(`/reels/${reelId}/programme-association`, { method: 'DELETE', body: JSON.stringify(body) });
+
+  // ── STREAM-01: topics ───────────────────────────────────────────────────
+
+  addStreamTopic = (streamId: string, body: AddStreamTopicRequest) =>
+    this.request<Reel>(`/reels/${encodeURIComponent(streamId)}/topics`, { method: 'POST', body: JSON.stringify(body) });
+  patchStreamTopic = (streamId: string, topicId: string, body: StreamTopicPatchRequest) =>
+    this.request<Reel>(`/reels/${encodeURIComponent(streamId)}/topics/${encodeURIComponent(topicId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+  removeStreamTopic = (streamId: string, topicId: string, body: RemoveStreamTopicRequest) =>
+    this.request<Reel>(`/reels/${encodeURIComponent(streamId)}/topics/${encodeURIComponent(topicId)}`, { method: 'DELETE', body: JSON.stringify(body) });
+  reorderStreamTopics = (streamId: string, body: StreamTopicOrderRequest) =>
+    this.request<Reel>(`/reels/${encodeURIComponent(streamId)}/topic-order`, { method: 'PUT', body: JSON.stringify(body) });
+  streamTopicCandidates = (streamId: string, q = '') =>
+    this.request<StreamTopicCandidatesResponse>(`/reels/${encodeURIComponent(streamId)}/topic-candidates${q ? `?q=${encodeURIComponent(q)}` : ''}`);
 
   // ── Private attachment transport ───────────────────────────────────────────
   //

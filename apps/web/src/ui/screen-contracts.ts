@@ -23,11 +23,17 @@
 import type {
   Id,
   Priority,
+  Reel,
+  ReelFormat,
   ReelHook,
   ReelStatus,
   User,
   VerificationState,
 } from '@szronox/contracts';
+// STREAM-01: `StreamTopics` is a bounded, self-contained CRUD surface (see `streamTopics` below)
+// that owns its own API calls directly, the same pragmatic exception `LiveScreen` already makes
+// (STREAM-LIVE-01) to the "screens never fetch or persist data" rule stated above.
+import type { CoreApiClient } from '../data/api.js';
 
 export type EditorView = Pick<User, 'id' | 'name' | 'avatarUrl'>;
 
@@ -422,6 +428,11 @@ export interface ReelListItemView {
   feedCoverDone: boolean;
   /** CONTENT-PLANNER-01: short plan label (`Jutro, 18:00`), or null/absent when unplanned. */
   planLabel?: string | null;
+  /**
+   * STREAM-01 (D1). Optional so a host that has not yet threaded `Reel.format` through still
+   * compiles and renders exactly as before — the marker only appears once it is supplied.
+   */
+  format?: ReelFormat;
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +495,8 @@ export interface ReelQuickActionsProps {
   selectionError: string | null;
   saveState: SaveState;
   undo: ReelUndoView | null;
+  /** STREAM-01 (D9): see `ReelOverflowProps.deleteConfirmBody`. Keyed by the Reel's own id. */
+  deleteConfirmBody?: Record<Id, string>;
 }
 
 export interface ReelListScreenProps {
@@ -599,6 +612,20 @@ export interface QuickAddScreenProps {
   onOpracuj: () => void;
 
   saveState: SaveState;
+
+  // ── STREAM-01 (D2) ─────────────────────────────────────────────────────
+  /**
+   * The compact `ROLKA | STREAM` selector above the type tabs. Optional: when `onChangeFormat`
+   * is absent the selector is not rendered at all, so a host that has not wired stream creation
+   * yet gets exactly today's Quick Add. D2: Android Share Target always opens with
+   * `format: 'reel'` (the host's choice of initial value) — the selector itself always stays
+   * available, there is no disabled/fixed state.
+   */
+  format?: ReelFormat;
+  onChangeFormat?: (format: ReelFormat) => void;
+  /** `Tytuł streamu` — required, shown only when `format === 'stream'`. */
+  streamTitle?: string;
+  onChangeStreamTitle?: (value: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +652,8 @@ export interface ReelDetailMetadataView {
   feedCoverDone: boolean;
   /** Null when there is no current export — render no verification chip at all. */
   verificationState: VerificationState | null;
+  /** STREAM-01 (D1/D3). Optional for the same backward-compatibility reason as `ReelListItemView`. */
+  format?: ReelFormat;
 }
 
 /**
@@ -642,6 +671,12 @@ export interface ReelOverflowProps {
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
   deleteState: SaveState;
+  /**
+   * STREAM-01 (D9): overrides `COPY.deleteConfirmBody` with the stream-with-topics wording
+   * (`Usunąć stream „<tytuł>”? Razem z nim zostaną usunięte N tematy…`). Absent keeps the
+   * existing Reel wording exactly as before.
+   */
+  deleteConfirmBody?: string;
 }
 
 export interface ReelDetailScreenProps {
@@ -732,6 +767,24 @@ export interface ReelDetailScreenProps {
   saveState: SaveState;
   /** A conflict on a whole-Reel save, distinct from a per-field one. */
   conflict?: ConflictRecoveryView;
+
+  // ── STREAM-01 ──────────────────────────────────────────────────────────
+  /**
+   * D6: the quiet "W streamie: <tytuł>" / "W 2 streamach" metadata row for a Reel that is
+   * referenced (linked) as a topic by one or more active streams. `[]`/absent renders nothing.
+   */
+  inStreams?: Array<{ id: Id; title: string }>;
+  onOpenStream?: (id: Id) => void;
+  /**
+   * D3/D4/D5: present only for a stream Reel (`metadata.format === 'stream'`). Bundles the live
+   * API client and the stream Reel itself rather than a fully decomposed view, mirroring how
+   * `LiveScreen` owns its own fetch/mutation state (STREAM-LIVE-01) — topics are a bounded,
+   * self-contained CRUD surface nested one level under the Reel, and routing every field
+   * through the host's single-Reel patch/draft machinery would duplicate it for no benefit.
+   * `ReelDetailScreen` still enforces D3 itself (no AI/hooks/script for a stream) regardless of
+   * whether this is supplied, so a host that has not wired it yet never regresses D3.
+   */
+  streamTopics?: { api: CoreApiClient; stream: Reel; onStreamChange: (reel: Reel) => void; onOpenReel?: (id: Id) => void };
 }
 
 // ---------------------------------------------------------------------------
@@ -799,6 +852,13 @@ export interface PublicationSectionProps {
   publicationLinks: PublicationLinkView[];
   onAddPublicationLink: () => void;
   onOpenPublicationLink: (id: Id) => void;
+
+  /**
+   * D7: a stream's PUBLIKACJA replaces the editable `Źródło` field with `ŹRÓDŁA`, a read-only
+   * list of one line per topic (topic order, duplicates removed; each edited on its own topic
+   * or Rolka). Present only for a stream; `source`/`onChangeSource`/etc. above are then unused.
+   */
+  streamSourceLines?: string[];
 }
 
 export interface KdriveUploadView {

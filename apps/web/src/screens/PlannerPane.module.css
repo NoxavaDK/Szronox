@@ -239,6 +239,19 @@
   outline-offset: -2px;
 }
 
+/* STREAM-01 (D1) */
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cardStreamGlyph {
+  flex-shrink: 0;
+  color: var(--sz-color-text-secondary);
+}
+
 .cardTitle {
   font-size: 14.5px;
   line-height: 19px;
@@ -246,6 +259,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .cardTitleDerived {
