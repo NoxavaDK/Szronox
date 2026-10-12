@@ -153,6 +153,12 @@ export interface ExtractedSourceMetadata {
   publishedDate: string | null;
   line: string;
   state: 'found' | 'partial';
+  /**
+   * CAPTURE-DRAFT-01: og:title, else <title>, with a trailing ` | site` / ` - site` /
+   * ` – site` suffix stripped when it equals `siteName` (case-insensitive). Null when neither
+   * tag is present or the collapsed text is empty.
+   */
+  headline: string | null;
 }
 
 const collapse = (value: unknown, cap: number): string | null => {
@@ -207,6 +213,28 @@ function displayDate(iso: string | null): string | null {
   return `${day}.${month}.${year}`;
 }
 
+/**
+ * CAPTURE-DRAFT-01 headline: og:title, else <title>; a trailing ` | site`, ` - site` or
+ * ` – site` suffix is removed when the text after the separator equals `site`
+ * (case-insensitive). Collapsed and capped at 300 characters.
+ */
+function extractHeadline(document: Document, site: string): string | null {
+  const raw = collapse(meta(document, 'og:title', 'property'), 600)
+    ?? collapse(document.querySelector('title')?.textContent, 600);
+  if (!raw) return null;
+  let headline = raw;
+  for (const separator of [' | ', ' - ', ' – ']) {
+    const index = headline.lastIndexOf(separator);
+    if (index <= 0) continue;
+    const suffix = headline.slice(index + separator.length).trim();
+    if (suffix.toLocaleLowerCase() === site.trim().toLocaleLowerCase()) {
+      headline = headline.slice(0, index).trim();
+      break;
+    }
+  }
+  return collapse(headline, 300);
+}
+
 /** Deterministic, metadata-only extraction. No page body text or linked resources are read. */
 export function extractSourceMetadata(html: string | Buffer, finalUrl: string): ExtractedSourceMetadata {
   const { document } = parseHTML(typeof html === 'string' ? html : html.toString('utf8'));
@@ -233,5 +261,9 @@ export function extractSourceMetadata(html: string | Buffer, finalUrl: string): 
   const dateCandidates = [article?.datePublished, meta(document, 'article:published_time', 'property'), meta(document, 'date'), meta(document, 'pubdate'), document.querySelector('article time[datetime]')?.getAttribute('datetime')];
   const publishedDate = dateCandidates.map(localDate).find((date) => date !== null) ?? null;
   const parts = [author, site, displayDate(publishedDate)].filter((part): part is string => Boolean(part));
-  return { author, siteName: site, publishedDate, line: `Źródło: ${parts.join(', ')}`, state: author || publisherName || meta(document, 'og:site_name', 'property') || meta(document, 'application-name') || publishedDate ? 'found' : 'partial' };
+  return {
+    author, siteName: site, publishedDate, line: `Źródło: ${parts.join(', ')}`,
+    state: author || publisherName || meta(document, 'og:site_name', 'property') || meta(document, 'application-name') || publishedDate ? 'found' : 'partial',
+    headline: extractHeadline(document, site),
+  };
 }
