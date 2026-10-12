@@ -463,3 +463,24 @@ Authority: `docs/implementation/OCT-2026-plan.md` §4 and `design/oct-2026-delta
 **Grants.** The API gets select/insert/update/delete on `app.stream_topics`; the worker gets nothing on it (STREAM-02 will extend it). Worker access to `app.reels` is unchanged.
 
 Acceptance: covered by the STREAM-01a (API) and STREAM-01b (web) dispatch in `docs/implementation/STREAM-01-dispatch.md`. Open real-world gates: the DEV migration and deployment, and real-device use.
+
+## CAPTURE-DRAFT-01 — names and an automatic draft at capture (operator-authorized 2026-10-11)
+
+Authority: `docs/implementation/CAPTURE-DRAFT-01-proposal.md` (approved as written, including its visual delta). Migration `0018_capture_draft.sql`; wire: `SourceMetadata.headline`, `Reel.autoDraft` (`AutoDraftSummary`), `AiRunBase.trigger`. This amends the earlier rule that capture has no AI dependency: capture still never *waits* for, or fails because of, AI.
+
+**Label chain (presentation only, nothing written to `title`):** typed `title` → selected hook text → `autoDraft.titleSuggestion` when `state = 'succeeded'` → `sourceMetadata.headline` → the share's `title` field when it is not a URL → the existing rules (own text, script opening, URL slug / `Materiał z <host>`) → `Zdjęcie · <d mmm>` / `<n> zdjęcia|zdjęć · <d mmm>` (capture date, Polish plural forms) instead of file names → `Bez tytułu`. Every rung after the typed title is `derived: true` and is never loaded into the editable title field.
+
+**Headline:** the SOURCE-01 fetch also extracts `og:title`, else `<title>`, collapses whitespace, removes a trailing ` | <site>` / ` - <site>` / ` – <site>` suffix when it equals `siteName` (case-insensitive), and caps it at 300 characters. It is stored in the existing `source_metadata` with the same requestId ownership. The attribution `line` is unchanged.
+
+**Automatic draft:** when `POST /reels` creates a new `format='reel'` Reel (never on an idempotent replay, never for a stream or a STREAM-01 `new` topic), the API inserts one `develop` run with `trigger='capture'`, `requested_by` = the capturer, in the **same transaction** as the Reel, using the same snapshot, model and prompt as a user Opracuj. It is skipped (capture still succeeds) when `AI_AUTO_DRAFT_ENABLED` is not `true` (API config, default false), or when the number of `trigger='capture'` runs created since the start of the current Europe/Warsaw day is at least `AI_AUTO_DRAFT_DAILY_LIMIT` (default 50, integer 0–1000). Results follow the existing develop rules unchanged: hooks are appended unselected, and title/script are applied only through the explicit `apply`. `Reel.autoDraft` is derived from that run (`titleSuggestion` only when succeeded; `isStale` as for any run).
+
+**UI:** proposal §"Visual delta". Detail rows under the title only while `title` is empty: `Przygotowuję szkic…` (queued/running); `Propozycja tytułu: <tekst>` + `Użyj` (applies `title` through the existing apply with the version check) and `Szkic gotowy · Zobacz` (opens the existing Opracuj result view for `autoDraft.runId`); nothing new when failed. The share/Quick Add save confirmation appends `Przygotowuję szkic.` when the created Reel has `autoDraft`.
+
+## VOICE-01 — the team's voice and own Rolki as context (operator-authorized 2026-10-11)
+
+Authority: `docs/implementation/VOICE-01-proposal.md` and `docs/product/voice-hook-patterns.md` (§5 prompt material). Prompt wording stays `development_provisional` and unfrozen. Wire: optional `AiInputSnapshot.styleExamples` (`StyleExample[]`).
+
+- `develop` and `generate_hooks` receive the SPOKEN voice (patterns doc §5). `generate_publication` receives the caption voice (prompt pack `SZRONOX-VOICE` with the patterns doc §4a corrections). Prompt IDs are bumped.
+- On enqueue of those three actions, the API selects at most 8 examples: Reels that are not deleted and not absorbed, `format='reel'`, status in `to_record|editing|ready|published`, with a non-empty script, excluding the run's own Reel, newest `updated_at` first. `hook` = the selected hook's text, else the text of the only `source='user'` hook when there is exactly one, else null. `scriptExcerpt` and `description` are cut at 600 characters.
+- `styleExamples` is stored in the snapshot but **excluded from the canonical input used for `inputHash` and from staleness comparison**. Legacy snapshots without it run unchanged. The prompt labels the examples as style references whose facts and wording must never be reused.
+- No change to result schemas, apply rules or hook-selection rules.

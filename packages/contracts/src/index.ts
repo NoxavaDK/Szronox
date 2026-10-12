@@ -52,6 +52,11 @@ export interface SourceMetadata {
   attempts: number;
   /** Set only when `state` is `failed`. */
   failure?: SourceFetchFailure | null;
+  /**
+   * CAPTURE-DRAFT-01: the article headline (og:title, else <title>, trailing site name removed when
+   * it equals siteName), at most 300 characters. Absent on rows fetched before it existed.
+   */
+  headline?: string | null;
 }
 export interface Meme {
   id: Id;
@@ -214,10 +219,20 @@ export interface Reel {
   topics: StreamTopic[];
   /** STREAM-01 (D6): active streams that link this Reel as a reference topic; [] when none. */
   inStreams: StreamRef[];
+  /** CAPTURE-DRAFT-01: the develop run queued by this Reel's capture, or null when none was queued. */
+  autoDraft: AutoDraftSummary | null;
   createdBy: Id;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   deletedAt: IsoDateTime | null;
+}
+/** CAPTURE-DRAFT-01 */
+export interface AutoDraftSummary {
+  runId: Id;
+  state: AiJobState;
+  /** DevelopResult.titleSuggestion once the run succeeded; otherwise null. */
+  titleSuggestion: string | null;
+  isStale: boolean;
 }
 /** STREAM-01 */
 export type ReelFormat = 'reel' | 'stream';
@@ -436,6 +451,22 @@ export interface AiInputSnapshot {
   memeCandidateIds: Id[];
   memeCandidates: Array<Pick<Meme, 'id' | 'name' | 'thumbnailRef'>>;
   programmeDocumentVersionId: Id | null;
+  /**
+   * VOICE-01: the team's own recent Reels as style examples (develop, generate_hooks,
+   * generate_publication). Recorded for provenance only: excluded from inputHash and staleness.
+   * Absent in older snapshots.
+   */
+  styleExamples?: StyleExample[];
+}
+/** VOICE-01: one past Reel used as a style example. */
+export interface StyleExample {
+  reelId: Id;
+  /** Selected hook, else the single team-written hook, else null. */
+  hook: string | null;
+  /** First 600 characters of the script. */
+  scriptExcerpt: string;
+  /** Publication description (first 600 characters), or '' when none. */
+  description: string;
 }
 /**
  * PUBLICATION-01: Opracuj no longer drafts publication copy. Historical stored develop results
@@ -533,6 +564,8 @@ export interface AiResultMap {
 export interface StartAiRunRequest extends MutationContext { action: AiAction }
 export interface AiRunBase {
   id: Id;
+  /** CAPTURE-DRAFT-01: 'capture' for the automatic draft queued by capture; legacy rows are 'user'. */
+  trigger: 'user' | 'capture';
   reelId: Id;
   state: AiJobState;
   input: AiInputSnapshot;
