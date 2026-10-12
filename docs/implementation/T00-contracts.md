@@ -442,7 +442,7 @@ Authority: `docs/implementation/OCT-2026-plan.md` §4 and `design/oct-2026-delta
 - **Topic edits** (PATCH, absorbed only): `title`/`notes`/`script`, plus `publicationSource` which is written to the idea with SOURCE-01 semantics (`null` automatic, `''` suppressed, ≤ 1000). SOURCE-01 refresh of an absorbed idea's metadata uses the existing refresh route on the idea's ID.
 - Absorb, link, new, edit, reorder and remove are each one transaction, version-checked against the **stream's** `version` and idempotent on `operationId` through `app.operations`. Each increments the stream's `version`/`updated_at` and returns the authoritative stream `Reel`. Reorder takes the complete list of the stream's topic IDs; any other set is `VALIDATION_ERROR` `reason: topic_set_mismatch`.
 
-**Hidden absorbed ideas.** A Reel with `absorbed_into` set is excluded from `GET /reels` (both visibilities), the planner, search and topic candidates. `GET /reels/:id` still returns it. `PATCH /reels/:id`, delete/restore, hook, meme, export, verification, kDrive and AI routes on it are refused with `422 VALIDATION_ERROR` `reason: absorbed_into_stream`. Its only write paths are the stream topic routes and the SOURCE-01 metadata refresh.
+**Hidden absorbed ideas.** A Reel with `absorbed_into` set is excluded from `GET /reels` (both visibilities), the planner, search and topic candidates. `GET /reels/:id` still returns it. `PATCH /reels/:id`, delete/restore, hook, meme (attach, detach, create-with-attach), export, verification, kDrive (folder, upload start, attach) and AI routes on it are refused with `422 VALIDATION_ERROR` `reason: absorbed_into_stream`. Its only write paths are the stream topic routes and the SOURCE-01 metadata refresh.
 
 **Lifecycle.** Soft-deleting a stream sets the same `deleted_at` on all its absorbed ideas in the same transaction; restoring it clears `deleted_at` on all of them. Topics, order and positions are untouched. `Usunięte` lists only the stream. Soft-deleting or restoring a linked Reel never touches the stream; its topic shows `source.deletedAt`. A deleted stream refuses topic mutations like any other edit of a deleted Reel. Linked-Reel `inStreams` lists only non-deleted streams.
 
@@ -458,7 +458,7 @@ Authority: `docs/implementation/OCT-2026-plan.md` §4 and `design/oct-2026-delta
 | PATCH /reels/:id/topics/:topicId | `StreamTopicPatchRequest`, absorbed only |
 | DELETE /reels/:id/topics/:topicId | `RemoveStreamTopicRequest`: Odłącz (absorbed) or remove reference (linked) |
 | PUT /reels/:id/topic-order | `StreamTopicOrderRequest` |
-| GET /reels/:id/topic-candidates?q= | Non-deleted, non-absorbed `format='reel'` Reels matching `q` on title (case-insensitive), ideas and later statuses, `inThisStream` flagged; at most 100 |
+| GET /reels/:id/topic-candidates?q= | Non-deleted, non-absorbed `format='reel'` Reels, ideas and later statuses, `inThisStream` flagged; at most 100, newest `updated_at` first. Integration amendment (2026-10-12): `q` matches case-insensitively and literally (LIKE wildcards escaped) on title, input note, script, original capture, selected hook text and source headline; each item carries `originalInput`, `script`, `selectedHookText` and `sourceMetadata` so the web can derive a label for the many untitled Reels. `StreamTopicSource` likewise carries `selectedHookText`. |
 
 **Grants.** The API gets select/insert/update/delete on `app.stream_topics`; the worker gets nothing on it (STREAM-02 will extend it). Worker access to `app.reels` is unchanged.
 

@@ -89,6 +89,7 @@ export interface StreamTopicSourceRow {
   source_link: string | null;
   original_input: CaptureInput;
   deleted_at: Date | string | null;
+  selected_hook_text: string | null;
 }
 
 export interface HookRow {
@@ -191,6 +192,7 @@ export function toStreamTopicSource(row: StreamTopicSourceRow, kind: StreamTopic
     sourceMetadata: row.source_metadata ?? null,
     sourceLink: row.source_link ?? null,
     originalInput: row.original_input ?? null,
+    selectedHookText: row.selected_hook_text ?? null,
     deletedAt: iso(row.deleted_at),
   };
 }

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { KdriveUploadStartRequest, KdriveUploadState } from '@szronox/contracts';
-import { CoreError, editConflict, idempotencyConflict, internalError, notFound, validationError } from '../core/errors.js';
+import { CoreError, absorbedIntoStream, editConflict, idempotencyConflict, internalError, notFound, validationError } from '../core/errors.js';
 import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
 import type { CoreDependencies } from '../core/routes.js';
 import { httpKdriveClient, KdriveError } from './client.js';
@@ -129,9 +129,10 @@ export function registerKdriveUploadRoutes(app: FastifyInstance, deps: CoreDepen
         // A transaction-scoped advisory lock, not `select … for update` on app.users:
         // row locks need UPDATE privilege, which szronox_api deliberately lacks there.
         await tx.query(`select pg_advisory_xact_lock(hashtextextended('kdrive-upload-user:' || $1, 0))`, [actor.id]);
-        const reelLock = await tx.query<{ version: number }>(
-          'select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
+        const reelLock = await tx.query<{ version: number; absorbed_into: string | null }>(
+          'select version, absorbed_into from app.reels where id=$1 and deleted_at is null for update', [reelId]);
         if (!reelLock.rows[0]) throw notFound('Reel not found');
+        if (reelLock.rows[0].absorbed_into !== null) throw absorbedIntoStream();
         if (reelLock.rows[0].version !== reservationReelVersion) throw editConflict(reelLock.rows[0].version);
         const counts = await tx.query<{ reel_count: number; user_count: number }>(`select
           count(*) filter(where reel_id=$1 and (state='open' or (state='failed' and error->>'reason' in ('start_in_progress','start_uncertain'))))::int reel_count,

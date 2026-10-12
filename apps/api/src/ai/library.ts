@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Database, Queryable } from '../db/client.js';
 import { pgErrorCode, PG_UNIQUE_VIOLATION } from '../db/client.js';
 import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
-import { CoreError, editConflict, idempotencyConflict, internalError, notFound, validationError } from '../core/errors.js';
+import { CoreError, absorbedIntoStream, editConflict, idempotencyConflict, internalError, notFound, validationError } from '../core/errors.js';
 import type { CoreDependencies } from '../core/routes.js';
 import { httpKdriveClient } from '../kdrive/client.js';
 import { createMemeCopyService, type MemeCopyService } from '../kdrive/meme-copy.js';
@@ -154,8 +154,9 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
     const expectedVersion = attach ? version(attach.expectedVersion) : null;
     const result = await idempotent(deps.db, actor, operationId, 'POST /memes', data, async (tx) => {
       if (reelId) {
-        const locked = await tx.query<{ version: number }>('select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
+        const locked = await tx.query<{ version: number; absorbed_into: string | null }>('select version, absorbed_into from app.reels where id=$1 and deleted_at is null for update', [reelId]);
         if (!locked.rows[0]) throw notFound('Reel not found');
+        if (locked.rows[0].absorbed_into !== null) throw absorbedIntoStream();
         if (locked.rows[0].version !== expectedVersion) throw editConflict(locked.rows[0].version);
       }
       if (!reelId) throw validationError('Meme creation requires a Reel context');
@@ -219,8 +220,9 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
     const data = (request.body ?? {}) as Record<string, unknown>;
     const operationId = uuid(data.operationId), memeId = uuid(data.memeId), expected = version(data.expectedVersion);
     const reel = await idempotent(deps.db, actor, operationId, 'POST /reels/:id/memes', { reelId, ...data }, async (tx) => {
-      const locked = await tx.query<{ version: number }>('select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
+      const locked = await tx.query<{ version: number; absorbed_into: string | null }>('select version, absorbed_into from app.reels where id=$1 and deleted_at is null for update', [reelId]);
       if (!locked.rows[0]) throw notFound('Reel not found');
+      if (locked.rows[0].absorbed_into !== null) throw absorbedIntoStream();
       if (locked.rows[0].version !== expected) throw editConflict(locked.rows[0].version);
       if (!(await tx.query('select id from app.memes where id=$1', [memeId])).rows[0]) throw validationError('Unknown meme');
       if ((await tx.query('select 1 from app.reel_memes where reel_id=$1 and meme_id=$2', [reelId, memeId])).rows[0]) {
@@ -241,8 +243,9 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
     const data = (request.body ?? {}) as Record<string, unknown>;
     const operationId = uuid(data.operationId), expected = version(data.expectedVersion);
     return idempotent(deps.db, actor, operationId, 'DELETE /reels/:id/memes/:memeId', { reelId, libraryId, ...data }, async (tx) => {
-      const locked = await tx.query<{ version: number }>('select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
+      const locked = await tx.query<{ version: number; absorbed_into: string | null }>('select version, absorbed_into from app.reels where id=$1 and deleted_at is null for update', [reelId]);
       if (!locked.rows[0]) throw notFound('Reel not found');
+      if (locked.rows[0].absorbed_into !== null) throw absorbedIntoStream();
       if (locked.rows[0].version !== expected) throw editConflict(locked.rows[0].version);
       await tx.query('delete from app.reel_memes where reel_id=$1 and meme_id=$2', [reelId, libraryId]);
       await tx.query('update app.reels set version=version+1,updated_at=now() where id=$1', [reelId]);
@@ -256,8 +259,9 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: CoreDependenci
     const data = (request.body ?? {}) as Record<string, unknown>;
     const operationId = uuid(data.operationId), expected = version(data.expectedVersion);
     return idempotent(deps.db, actor, operationId, 'DELETE /reels/:id/programme-association', { reelId, ...data }, async (tx) => {
-      const locked = await tx.query<{ version: number }>('select version from app.reels where id=$1 and deleted_at is null for update', [reelId]);
+      const locked = await tx.query<{ version: number; absorbed_into: string | null }>('select version, absorbed_into from app.reels where id=$1 and deleted_at is null for update', [reelId]);
       if (!locked.rows[0]) throw notFound('Reel not found');
+      if (locked.rows[0].absorbed_into !== null) throw absorbedIntoStream();
       if (locked.rows[0].version !== expected) throw editConflict(locked.rows[0].version);
       await tx.query(`update app.reels set programme_state='unchecked',programme_attachment=null,
         programme_input_hash=null,programme_document_version_id=null,version=version+1,updated_at=now() where id=$1`, [reelId]);

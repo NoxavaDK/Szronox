@@ -252,6 +252,8 @@ export interface StreamTopicSource {
   sourceMetadata: SourceMetadata | null;
   sourceLink: string | null;
   originalInput: CaptureInput | null;
+  /** Integration amendment: the source Reel's selected hook text, for its derived label. */
+  selectedHookText: string | null;
   /** A deleted referenced Reel stays as a muted `Usunięta rolka` row. */
   deletedAt: IsoDateTime | null;
 }
@@ -293,6 +295,14 @@ export interface StreamTopicCandidate {
   status: ReelStatus;
   plannedPublicationDate: IsoDate | null;
   plannedPublicationSlot: PublicationSlot | null;
+  /**
+   * Integration amendment: most Reels have no typed title, so the picker needs the material
+   * the web label chain uses (reel-label.ts) to show a readable row.
+   */
+  originalInput: CaptureInput;
+  script: string;
+  selectedHookText: string | null;
+  sourceMetadata: SourceMetadata | null;
   /** Rows already in this stream are listed disabled (`W tym streamie`). */
   inThisStream: boolean;
 }

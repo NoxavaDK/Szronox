@@ -234,8 +234,10 @@ export class CoreRepository {
     if (topics.rows.length === 0) return [];
     const sourceIds = [...new Set(topics.rows.map((topic) => topic.source_reel_id))];
     const sources = await tx.query<StreamTopicSourceRow>(
-      `select id, title, status, editor_id, publication_source, source_metadata, source_link, original_input, deleted_at
-       from app.reels where id = any($1::uuid[])`,
+      `select r.id, r.title, r.status, r.editor_id, r.publication_source, r.source_metadata, r.source_link,
+              r.original_input, r.deleted_at, h.text as selected_hook_text
+       from app.reels r left join app.reel_hooks h on h.id = r.selected_hook_id
+       where r.id = any($1::uuid[])`,
       [sourceIds],
     );
     const byId = new Map(sources.rows.map((source) => [source.id, source]));

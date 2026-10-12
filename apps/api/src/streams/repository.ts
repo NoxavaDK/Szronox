@@ -14,6 +14,8 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   AddStreamTopicRequest,
+  CaptureInput,
+  SourceMetadata,
   PublicationSlot,
   Reel,
   ReelStatus,
@@ -320,19 +322,29 @@ export class StreamsRepository {
   async topicCandidates(streamId: string, q: string | undefined): Promise<StreamTopicCandidatesResponse> {
     const stream = await this.core.getReel(streamId);
     if (stream.format !== 'stream') throw refusal('not_a_stream', 'Reel is not a stream');
-    const term = `%${(q ?? '').trim()}%`;
+    // Integration amendment: most Reels have no typed title, so the search also covers the
+    // capture, note, script and selected hook, LIKE wildcards in the query are matched literally,
+    // and the newest work comes first.
+    const escaped = (q ?? '').trim().replace(/[\\%_]/g, (character) => `\\${character}`);
+    const term = `%${escaped}%`;
     const rows = await this.db.query<{
       id: string; title: string; status: ReelStatus;
       planned_publication_date: string | null; planned_publication_slot: PublicationSlot | null;
-      in_this_stream: boolean;
+      original_input: CaptureInput; script: string; selected_hook_text: string | null;
+      source_metadata: SourceMetadata | null; in_this_stream: boolean;
     }>(
       `select r.id, r.title, r.status,
               to_char(r.planned_publication_date, 'YYYY-MM-DD') as planned_publication_date,
-              r.planned_publication_slot,
+              r.planned_publication_slot, r.original_input, r.script, r.source_metadata,
+              h.text as selected_hook_text,
               exists(select 1 from app.stream_topics t where t.stream_id = $1 and t.source_reel_id = r.id) as in_this_stream
        from app.reels r
-       where r.format = 'reel' and r.deleted_at is null and r.absorbed_into is null and r.title ilike $2
-       order by r.title asc, r.id asc
+       left join app.reel_hooks h on h.id = r.selected_hook_id
+       where r.format = 'reel' and r.deleted_at is null and r.absorbed_into is null
+         and (r.title ilike $2 or r.input_note ilike $2 or r.script ilike $2
+              or r.original_input::text ilike $2 or coalesce(h.text, '') ilike $2
+              or coalesce(r.source_metadata->>'headline', '') ilike $2)
+       order by r.updated_at desc, r.id asc
        limit 100`,
       [streamId, term],
     );
@@ -343,6 +355,10 @@ export class StreamsRepository {
         status: row.status,
         plannedPublicationDate: row.planned_publication_date ?? null,
         plannedPublicationSlot: row.planned_publication_slot ?? null,
+        originalInput: row.original_input,
+        script: row.script,
+        selectedHookText: row.selected_hook_text ?? null,
+        sourceMetadata: row.source_metadata ?? null,
         inThisStream: row.in_this_stream,
       })),
     };
