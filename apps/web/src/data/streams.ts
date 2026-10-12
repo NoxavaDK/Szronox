@@ -67,6 +67,29 @@ export function isDirectLinkCandidate(status: ReelStatus): boolean {
 
 export type TopicDraftSaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error';
 
+function topicsWord(count: number): string {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (count === 1) return 'temat';
+  if (lastTwo >= 12 && lastTwo <= 14) return 'tematów';
+  return last >= 2 && last <= 4 ? 'tematy' : 'tematów';
+}
+
+/**
+ * D9: the stream-with-topics delete-confirmation body, verbatim —
+ * `Usunąć stream „<tytuł>”? Razem z nim zostaną usunięte 2 tematy przeniesione z pomysłów.
+ * Możesz je przywrócić razem ze streamem z „Usunięte”.` for the two-topic case.
+ *
+ * Call this only when `absorbedTopicCount > 0`; D9 says "with none, the existing Reel wording
+ * applies" — the host passes `undefined` for `ReelOverflowProps.deleteConfirmBody` in that case,
+ * which keeps today's `COPY.deleteConfirmBody`.
+ */
+export function streamDeleteConfirmBody(title: string, absorbedTopicCount: number): string {
+  const verb = absorbedTopicCount === 1 ? 'zostanie usunięty' : 'zostaną usunięte';
+  const adjective = absorbedTopicCount === 1 ? 'przeniesiony' : 'przeniesione';
+  return `Usunąć stream „${title}”? Razem z nim ${verb} ${absorbedTopicCount} ${topicsWord(absorbedTopicCount)} ${adjective} z pomysłów. Możesz je przywrócić razem ze streamem z „Usunięte”.`;
+}
+
 /**
  * D4: "switching away from an expanded absorbed topic first flushes its pending save. If it
  * succeeds (or there was none), the switch happens. If it fails or conflicts, the switch does
