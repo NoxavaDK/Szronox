@@ -36,6 +36,11 @@ grant select on
   app.reels, app.reel_hooks, app.attachments, app.reel_memes, app.memes, app.operations
   to szronox_worker;
 
+-- STREAM-01: the API owns every topic write (absorb/link/new, edit, reorder, Odłącz/remove).
+-- STREAM-02 is what will give the worker any access here; until then it has none.
+grant select, insert, update, delete on app.stream_topics to szronox_api;
+revoke all on app.stream_topics from szronox_worker;
+
 -- KDRIVE-02: resumable provider session state is API-only. The worker has no
 -- kDrive credentials and cannot observe or mutate upload sessions.
 grant select, insert, update, delete on app.kdrive_uploads to szronox_api;

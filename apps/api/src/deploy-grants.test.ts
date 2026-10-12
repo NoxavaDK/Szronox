@@ -52,7 +52,7 @@ const repositoryRoot = path.resolve(here, '../../..');
 const deployDirectory = path.join(repositoryRoot, 'deploy', 'vps', 'postgres');
 
 const RUNTIME_ROLES = ['szronox_api', 'szronox_worker'] as const;
-const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys'] as const;
+const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys', 'app.stream_topics'] as const;
 
 /**
  * Pull the SQL out of the initdb script's heredoc.
@@ -456,6 +456,41 @@ test('STREAM-LIVE-01: the API role can write live messages and stamp keys, but c
       values (gen_random_uuid(), 'x', 'live_feed', repeat('b', 64))`), 'denied');
     assert.equal(await asRole('szronox_worker', 'select 1 from app.live_messages'), 'denied');
     assert.equal(await asRole('szronox_worker', 'select 1 from app.access_keys'), 'denied');
+  } finally {
+    await context.close();
+  }
+});
+
+// ══════════════════════ STREAM-01 grants, exercised as the role ══════════════════════
+
+test('STREAM-01: the API role has full DML on stream_topics; the worker role has none', async () => {
+  const context = await provisionDatabase();
+  try {
+    const user = '11111111-1111-4111-8111-111111111111';
+    await context.raw.exec(`insert into app.users (id, name) values ('${user}', 'NOXAVA') on conflict do nothing`);
+    await context.raw.exec(`insert into app.reels (id, format, title, original_input, created_by)
+      values ('44444444-4444-4444-8444-444444444441', 'stream', 'Stream', '{}', '${user}'),
+             ('44444444-4444-4444-8444-444444444442', 'reel', '', '{}', '${user}')`);
+    const asRole = async (role: string, sql: string): Promise<'ok' | 'denied'> => {
+      await context.raw.exec(`set role ${role}`);
+      try { await context.raw.exec(sql); return 'ok'; } catch (error) {
+        if (/permission denied/.test(String((error as Error).message))) return 'denied';
+        throw error;
+      } finally { await context.raw.exec('reset role'); }
+    };
+    const topicId = '55555555-5555-4555-8555-555555555555';
+    assert.equal(await asRole('szronox_api', `insert into app.stream_topics (id, stream_id, position, kind, source_reel_id)
+      values ('${topicId}', '44444444-4444-4444-8444-444444444441', 0, 'linked', '44444444-4444-4444-8444-444444444442')`), 'ok');
+    assert.equal(await asRole('szronox_api', `update app.stream_topics set position = 0 where id = '${topicId}'`), 'ok');
+    assert.equal(await asRole('szronox_api', `select 1 from app.stream_topics where id = '${topicId}'`), 'ok');
+    assert.equal(await asRole('szronox_api', `delete from app.stream_topics where id = '${topicId}'`), 'ok');
+    for (const sql of [
+      `select 1 from app.stream_topics`,
+      `insert into app.stream_topics (id, stream_id, position, kind, source_reel_id)
+        values (gen_random_uuid(), '44444444-4444-4444-8444-444444444441', 1, 'linked', '44444444-4444-4444-8444-444444444442')`,
+    ]) {
+      assert.equal(await asRole('szronox_worker', sql), 'denied');
+    }
   } finally {
     await context.close();
   }

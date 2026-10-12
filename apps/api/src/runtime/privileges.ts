@@ -42,6 +42,8 @@ const WATCHED_TABLES = [
   // STREAM-LIVE-01
   'app.live_messages',
   'app.access_keys',
+  // STREAM-01
+  'app.stream_topics',
 ] as const;
 
 interface FactsRow {
@@ -140,7 +142,8 @@ export function apiPrivilegeViolations(facts: RoleFacts): string[] {
  */
 export function workerPrivilegeViolations(facts: RoleFacts): string[] {
   const violations = baseViolations(facts);
-  for (const table of ['app.user_credentials', 'app.auth_sessions', 'app.live_messages', 'app.access_keys'] as const) {
+  // STREAM-01: STREAM-02 is what will give the worker any access to stream_topics.
+  for (const table of ['app.user_credentials', 'app.auth_sessions', 'app.live_messages', 'app.access_keys', 'app.stream_topics'] as const) {
     const grant = facts.privileges[table];
     if (grant.select || grant.insert || grant.update || grant.delete) {
       violations.push(`it may access ${table}`);

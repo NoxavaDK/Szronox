@@ -11,8 +11,13 @@ import type {
   CaptureInput,
   ExportReference,
   Reel,
+  ReelFormat,
   ReelHook,
   SourceMetadata,
+  StreamTopic,
+  StreamTopicKind,
+  StreamTopicSource,
+  StreamRef,
   VerificationRecord,
   VerificationState,
 } from '@szronox/contracts';
@@ -50,9 +55,39 @@ export interface ReelRow {
   /** Selected as text (`YYYY-MM-DD`), so no driver date parsing shifts the day. */
   planned_publication_date: string | null;
   planned_publication_slot: Reel['plannedPublicationSlot'];
+  /** STREAM-01 */
+  format: ReelFormat;
+  absorbed_into: string | null;
   created_by: string;
   created_at: Date | string;
   updated_at: Date | string;
+  deleted_at: Date | string | null;
+}
+
+/** STREAM-01: one row of `app.stream_topics`. */
+export interface StreamTopicRow {
+  id: string;
+  stream_id: string;
+  position: number;
+  kind: StreamTopicKind;
+  source_reel_id: string;
+  title: string;
+  notes: string;
+  script: string;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+/** STREAM-01: the narrow columns of the source Reel needed to build `StreamTopicSource`. */
+export interface StreamTopicSourceRow {
+  id: string;
+  title: string;
+  status: Reel['status'];
+  editor_id: string | null;
+  publication_source: string | null;
+  source_metadata: SourceMetadata | null;
+  source_link: string | null;
+  original_input: CaptureInput;
   deleted_at: Date | string | null;
 }
 
@@ -128,11 +163,59 @@ export function deriveVerificationState(
   return verification.exportRevision === currentExport.revision ? 'verified' : 'outdated';
 }
 
+/**
+ * STREAM-01: effective attribution of a Reel, used both for `Reel` itself (via existing
+ * publicationSource/sourceMetadata handling) and for a topic's live `source.sourceLine`.
+ */
+export function effectiveSourceLine(
+  publicationSource: string | null,
+  sourceMetadata: SourceMetadata | null,
+): string {
+  return publicationSource ?? sourceMetadata?.line ?? '';
+}
+
+/**
+ * STREAM-01: live view of the Reel behind a topic. `publicationSource` is exposed only for
+ * an absorbed topic (D4's `Źródło`/`Materiał źródłowy`); a linked topic never shows it, even
+ * though the underlying Reel may have one set — `sourceLine` is still computed from the real
+ * value so attribution is never silently blanked.
+ */
+export function toStreamTopicSource(row: StreamTopicSourceRow, kind: StreamTopicKind): StreamTopicSource {
+  return {
+    reelId: row.id,
+    title: row.title,
+    status: row.status,
+    editorId: row.editor_id,
+    sourceLine: effectiveSourceLine(row.publication_source ?? null, row.source_metadata ?? null),
+    publicationSource: kind === 'absorbed' ? row.publication_source ?? null : null,
+    sourceMetadata: row.source_metadata ?? null,
+    sourceLink: row.source_link ?? null,
+    originalInput: row.original_input ?? null,
+    deletedAt: iso(row.deleted_at),
+  };
+}
+
+export function toStreamTopic(row: StreamTopicRow, source: StreamTopicSource): StreamTopic {
+  return {
+    id: row.id,
+    kind: row.kind,
+    position: row.position,
+    title: row.title,
+    notes: row.notes,
+    script: row.script,
+    source,
+    createdAt: isoRequired(row.created_at),
+    updatedAt: isoRequired(row.updated_at),
+  };
+}
+
 export function toReel(
   row: ReelRow,
   hooks: HookRow[],
   attachments: AttachmentRow[],
   memeIds: string[],
+  topics: StreamTopic[] = [],
+  inStreams: StreamRef[] = [],
 ): Reel {
   return {
     id: row.id,
@@ -170,11 +253,11 @@ export function toReel(
     feedCoverAsset: row.feed_cover_asset ?? null,
     plannedPublicationDate: row.planned_publication_date ?? null,
     plannedPublicationSlot: row.planned_publication_slot ?? null,
-    // Root integration defaults until STREAM-01a / CAPTURE-DRAFT-01 populate these from the database.
-    format: 'reel',
-    absorbedInto: null,
-    topics: [],
-    inStreams: [],
+    format: row.format,
+    absorbedInto: row.absorbed_into ?? null,
+    topics,
+    inStreams,
+    // Root integration default until CAPTURE-DRAFT-01 derives it from the capture-triggered run.
     autoDraft: null,
     createdBy: row.created_by,
     createdAt: isoRequired(row.created_at),
