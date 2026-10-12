@@ -9,8 +9,9 @@ import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import type { AttachmentRecovery } from '../data/attachment-recovery.js';
 import { reelLabel } from '../data/reel-label.js';
+import { streamDeleteConfirmBody } from '../data/streams.js';
 import { detailPrimaryAction, isReadOnlyReel } from '../data/detail-actions.js';
-import { SCRIPT_REQUIRED, UNSAVED_BEFORE_PUBLICATION } from '../data/errors.js';
+import { SCRIPT_REQUIRED, UNSAVED_BEFORE_PUBLICATION, polishError } from '../data/errors.js';
 import { useAppController } from '../controllers/useAppController.js';
 import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
@@ -29,6 +30,7 @@ import {
   STATUS_LABELS,
   STATUS_TAB_LABELS,
   statusChangedLabel,
+  type AutoDraftRowView,
   type ConflictRecoveryView,
   type EditorView,
   type ListQuickActionsView,
@@ -38,6 +40,18 @@ import {
   type VerificationViewState,
 } from '../ui/screen-contracts.js';
 
+/** D7: the unique non-empty topic source lines of a stream, in topic order. */
+function streamSourceLinesOf(reel: Reel): string[] {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const topic of reel.topics) {
+    const line = topic.source.sourceLine;
+    if (line === '' || seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+  }
+  return lines;
+}
 
 export function App({ auth, api, store, queue, attachments }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue; attachments: AttachmentRecovery }) {
   const c = useAppController(auth, api, store, queue, attachments);
@@ -293,6 +307,19 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     void commandKdrive(reel, { mode: 'link', folderId });
   };
 
+  // STREAM-01 (D9): the list quick-actions delete dialog's body for every stream with
+  // absorbed topics, keyed by Reel id. A stream with no absorbed topics is absent, so its
+  // dialog keeps the exact Reel wording.
+  const streamDeleteConfirmBodies = useMemo(() => {
+    const bodies: Record<string, string> = {};
+    for (const reel of c.reels) {
+      if (reel.format !== 'stream') continue;
+      const absorbedTopicCount = reel.topics.filter((topic) => topic.kind === 'absorbed').length;
+      if (absorbedTopicCount > 0) bodies[reel.id] = streamDeleteConfirmBody(reelLabel(reel).text, absorbedTopicCount);
+    }
+    return bodies;
+  }, [c.reels]);
+
   const previews = useMemo(
     () => c.capture?.draft.input.images.map((image) => ({
       id: image.attachmentId,
@@ -355,6 +382,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       memeName: null,
       feedCoverDone: reel.feedCoverDone,
       planLabel: planLabel(planOf(reel), today),
+      format: reel.format,
     };
   };
 
@@ -405,7 +433,11 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onChangeInitialHook={(initialHook) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, initialHook } }))}
       priority={form.draft.priority}
       onChangePriority={(priority) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, priority } }))}
-      canSave={Boolean(form.draft.input.text || form.draft.input.url || form.draft.input.images.length)}
+      // D2: a stream requires only a non-empty trimmed title; its capture is optional. A reel
+      // keeps the existing "text, URL or image" rule.
+      canSave={(form.draft.format ?? 'reel') === 'stream'
+        ? Boolean((form.draft.streamTitle ?? '').trim())
+        : Boolean(form.draft.input.text || form.draft.input.url || form.draft.input.images.length)}
       onSave={() => void c.submitCapture()}
       onOpracuj={() => { void c.submitCapture(true).then((saved) => {
         if (!saved) return;
@@ -413,6 +445,14 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         else c.setMessage('Opracuj jest teraz niedostępne. Pomysł został zapisany.');
       }); }}
       saveState={c.saveState}
+      autoDraftPending={c.autoDraftPending}
+      // D2: the compact ROLKA | STREAM selector. Android Share Target always opens with no
+      // `format` on the draft, which defaults to 'reel' here — the selector itself stays
+      // available regardless.
+      format={form.draft.format ?? 'reel'}
+      onChangeFormat={(format) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, format } }))}
+      streamTitle={form.draft.streamTitle ?? ''}
+      onChangeStreamTitle={(streamTitle) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, streamTitle } }))}
     /></>;
   }
 
@@ -498,6 +538,38 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       void c.replaceExport({ url, label: exportLabel });
     };
     const readOnly = isReadOnlyReel(reel);
+    // STREAM-01 (D9): overrides the delete dialog's body only for a stream that has absorbed
+    // topics; a plain Reel, or a stream with none, keeps the exact existing wording.
+    const absorbedTopicCount = reel.topics.filter((topic) => topic.kind === 'absorbed').length;
+    const deleteConfirmBody = reel.format === 'stream' && absorbedTopicCount > 0
+      ? streamDeleteConfirmBody(label.text, absorbedTopicCount)
+      : undefined;
+    // CAPTURE-DRAFT-01: the Detail row under the title, only while there is no title yet and
+    // the draft is neither failed nor stale. `Użyj` applies the suggestion through the same
+    // AI apply route AiWorkspace's own title apply uses; `Zobacz` opens the existing Opracuj
+    // result view the same way the primary `Opracuj` context action already does.
+    const autoDraft: AutoDraftRowView | undefined = (() => {
+      const summary = reel.autoDraft;
+      if (reel.title.trim() !== '' || !summary || summary.isStale) return undefined;
+      if (summary.state === 'queued' || summary.state === 'running') return { state: 'preparing' };
+      if (summary.state === 'succeeded' && summary.titleSuggestion) {
+        const titleSuggestion = summary.titleSuggestion;
+        return {
+          state: 'ready',
+          titleSuggestion,
+          onUseTitle: () => {
+            void api.applyAi(summary.runId, {
+              operationId: crypto.randomUUID(),
+              expectedVersion: reel.version,
+              selection: 'title',
+              text: titleSuggestion,
+            }).then(c.acceptReel).catch((error) => c.setMessage(polishError(error)));
+          },
+          onOpenDraft: () => setAiView({ reelId: reel.id, view: 'develop', autoStart: false }),
+        };
+      }
+      return undefined;
+    })();
     const openSection = (section: DetailSection) => setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], [section]: true } }));
     /** Open a section, then scroll to and focus a control inside it once it has rendered. */
     const focusLater = (selector: string) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
@@ -554,6 +626,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onChangeTitle={(title) => c.changeReel({ title })}
       titlePlaceholder={label.derived ? label.text : undefined}
       sourceDomain={label.sourceDomain}
+      autoDraft={autoDraft}
       plan={reel.deletedAt ? undefined : { label: planLabel(planOf(reel), today), onOpen: () => openSchedule(reel.id) }}
       metadata={{
         status: reel.status,
@@ -564,6 +637,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         memeName: memeNames[0]?.name ?? null,
         feedCoverDone: reel.feedCoverDone,
         verificationState: reel.verificationState,
+        format: reel.format,
       }}
       contextAction={contextAction}
       readOnly={readOnly}
@@ -595,6 +669,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         onCancelDelete: () => setConfirmingDelete(false),
         onConfirmDelete: () => { setConfirmingDelete(false); void c.deleteCurrent(); },
         deleteState: c.saveState,
+        deleteConfirmBody,
       }}
       restore={reel.deletedAt ? { onRestore: () => void c.restore(reel), saveState: c.saveState } : undefined}
       onOpenFeedCover={() => setSectionOverrides((old) => ({ ...old, [reel.id]: { ...old[reel.id], publication: true } }))}
@@ -624,6 +699,15 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       onDetachMeme={(memeId) => { void api.detachMeme(reel.id, memeId, { operationId: crypto.randomUUID(), expectedVersion: reel.version })
         .then(c.acceptReel).catch((error) => c.setMessage(String(error))); }}
       onOpenProgramme={() => setAiView({ reelId: reel.id, view: reel.programmeAttachment ? 'attached_programme' : 'find_programme', autoStart: false })}
+      // STREAM-01 (D6): the quiet "W streamie" row for a Reel referenced by one or more
+      // active streams; [] renders nothing.
+      inStreams={reel.inStreams}
+      onOpenStream={(id) => void c.openDetail(id)}
+      // STREAM-01 (D3/D4/D5): present only for a stream Reel; `StreamTopics` owns its own
+      // fetch/mutation state against the live API, the same pattern `LiveScreen` already uses.
+      streamTopics={reel.format === 'stream'
+        ? { api, stream: reel, onStreamChange: c.acceptReel, onOpenReel: (id) => void c.openDetail(id) }
+        : undefined}
       sources={{
         expanded: expanded('sources'),
         onToggle: () => toggleSection('sources'),
@@ -735,6 +819,9 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
           if (url) c.changeReel({ publicationUrls: [...reel.publicationUrls, url] });
         },
         onOpenPublicationLink: (id) => window.open(reel.publicationUrls[Number(id)], '_blank', 'noopener,noreferrer'),
+        // D7: a stream's PUBLIKACJA shows ŹRÓDŁA — a read-only list of its topics' source
+        // lines — instead of the editable Źródło field above.
+        streamSourceLines: reel.format === 'stream' ? streamSourceLinesOf(reel) : undefined,
       }}
       saveState={c.saveState}
       conflict={c.conflict && !['script', 'inputNote', 'editingNotes'].includes(c.conflict.field) ? conflictView() : undefined}
@@ -790,6 +877,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       selectionError: quickError,
       saveState: quickSaveState,
       undo: undo ? { message: undo.message, onUndo: () => void onUndoStatus(), saveState: undoSaveState } : null,
+      deleteConfirmBody: streamDeleteConfirmBodies,
     }}
   />;
 
@@ -818,6 +906,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     // keyed by the same Reel id. Equal sibling keys made React leave a stale Detail behind.
     key={`schedule:${scheduleReel.id}`}
     reelTitle={reelLabel(scheduleReel).text}
+    isStream={scheduleReel.format === 'stream'}
     status={scheduleReel.status}
     plan={planOf(scheduleReel)}
     today={today}
