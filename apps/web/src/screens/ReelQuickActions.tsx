@@ -34,7 +34,7 @@ export function ReelQuickActionsSheet({
   const {
     open, onOpenStatus, onOpenAssign, onDismiss, editorOptions, onSelectStatus, onSelectEditor,
     onCopyLink, onOpenSchedule, kdriveEnabled, onOpenKdrive, onRequestDelete, confirmingDeleteId, onCancelDelete,
-    onConfirmDelete, selectionError, saveState,
+    onConfirmDelete, selectionError, saveState, deleteConfirmBody,
   } = quickActions;
 
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -88,7 +88,8 @@ export function ReelQuickActionsSheet({
         {confirming ? (
           <>
             <h2 className={styles.heading}>{COPY.deleteConfirmTitle}</h2>
-            <p className={styles.quiet}>{COPY.deleteConfirmBody}</p>
+            {/* STREAM-01 (D9): keyed by Reel id; absent keeps the exact Reel wording. */}
+            <p className={styles.quiet}>{deleteConfirmBody?.[item.id] ?? COPY.deleteConfirmBody}</p>
             <div className={styles.confirmActions}>
               <TextAction onClick={onCancelDelete} tone="quiet">{COPY.deleteCancel}</TextAction>
               {/* Red from the first step to the final one: destruction never turns blue. */}

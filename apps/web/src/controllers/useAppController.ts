@@ -99,6 +99,9 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   const sourceUndoTimer = useRef<number | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'error' | 'offline'>('idle');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'offline' | 'conflict' | 'error'>('idle');
+  // CAPTURE-DRAFT-01: whether the Reel this save created/kept queued an automatic draft.
+  // Reset at the start of every capture, so a stale value from a previous save never leaks in.
+  const [autoDraftPending, setAutoDraftPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [capture, setCapture] = useState<CaptureForm | null>(null);
   const [kdriveUploadJobs, setKdriveUploadJobs] = useState<Record<string, KdriveUploadJob>>({});
@@ -383,6 +386,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
           if (blob) blobs.set(image.attachmentId, blob);
         }
         setCapture({ draft, kind: detectedKindOf(draft.input), blobs, showAdditional: false, showHook: false, detectedKind: detectedKindOf(draft.input) });
+        setAutoDraftPending(false);
         setRoute({ name: 'capture', draftId: draft.reelId });
       } catch (error) {
         if (isAbandonedRequest(error)) return;
@@ -603,6 +607,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     if (!user) return; const reelId = crypto.randomUUID();
     const draft: CaptureDraft = { id: `${user.id}:${reelId}`, accountId: user.id, reelId, operationId: crypto.randomUUID(), input: { images: [] }, priority: 'normal', fileNames: {}, updatedAt: Date.now(), state: 'draft' };
     setCapture({ draft, kind: 'text', blobs: new Map(), showAdditional: false, showHook: false, detectedKind: null }); setRoute({ name: 'capture', draftId: reelId });
+    setAutoDraftPending(false);
     void store.saveCapture(draft, new Map()).catch((e) => { setSaveState('error'); setMessage(polishError(e)); });
   }, [store, user]);
   const updateCapture = useCallback((change: (form: CaptureForm) => CaptureForm) => {
@@ -642,9 +647,14 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       if (withAi && complete) {
         const reel = await api.reel(capture.draft.reelId);
         currentRef.current = reel; setCurrent(reel); setRoute({ name: 'detail', reelId: reel.id });
+        // CAPTURE-DRAFT-01: the save confirmation's "Przygotowuję szkic." addendum.
+        setAutoDraftPending(reel.autoDraft !== null);
         return reel;
       }
       await openDetail(capture.draft.reelId);
+      // `openDetail` just resolved `current` for this same Reel id (quietly, so the
+      // list/detail is not blanked mid-switch); reading it back here avoids a second fetch.
+      setAutoDraftPending(currentRef.current?.id === capture.draft.reelId && currentRef.current.autoDraft !== null);
       refreshPlanner();
       reportAttachments(progress);
       return null;
@@ -1300,7 +1310,7 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
   }, [conflict, hookEdits, newHook, saveState]);
 
   const counts = useMemo(() => Object.fromEntries((['idea', 'to_record', 'editing', 'ready', 'published'] as ReelStatus[]).map((s) => [s, s === status ? reels.length : undefined])), [reels.length, status]);
-  return { openLive, leaveLive, user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
+  return { openLive, leaveLive, user, peer, authStatus, route, setRoute, status, setStatus, reels, current, capture, loadState, saveState, autoDraftPending, message, setMessage, counts, recover, loadList, openDetail, leaveDetail, acceptReel, startCapture, updateCapture, addFiles, submitCapture, changeReel, removeHook, selectHook, hookSelecting,
     hookEdits, startHookEdit, changeHookEdit, cancelHookEdit, saveHookEdit, deleteCurrent,
     newHook: newHook && newHook.reelId === current?.id ? newHook : null, startNewHook, changeNewHook, cancelNewHook, saveNewHook, restore, copyPublication,
     deleted, loadDeleted, conflict, resolveConflict, replaceExport, verifyExport, signOut, signInAs,

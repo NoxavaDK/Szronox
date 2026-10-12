@@ -1,4 +1,4 @@
-import type { CaptureInput, Priority, ReelPatchRequest } from '../../../../packages/contracts/src/index.js';
+import type { CaptureInput, Priority, ReelFormat, ReelPatchRequest } from '../../../../packages/contracts/src/index.js';
 
 export type QueueKind = 'create' | 'patch' | 'remove-hook' | 'delete' | 'restore';
 export interface QueueItem {
@@ -20,6 +20,10 @@ export interface CaptureDraft {
   /** Meaning of the main TEKST field; absent legacy drafts remain Pomysł. */
   textMode?: 'idea' | 'script';
   initialHook?: string;
+  /** WIRE-01/D2: absent (legacy) drafts read as 'reel' — see `createRequestFromDraft`. */
+  format?: ReelFormat;
+  /** WIRE-01/D2: `Tytuł streamu`; only meaningful when `format === 'stream'`. */
+  streamTitle?: string;
   priority: Priority;
   fileNames: Record<string, string>;
   updatedAt: number;

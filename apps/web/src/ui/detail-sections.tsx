@@ -483,7 +483,7 @@ function KdriveUploadStatus({ job, onCancel, onRetry }: { job: NonNullable<Mater
 
 /** Only `Usuń rolkę`. Confirmation uses the frozen copy and exact button labels. */
 export function ReelOverflow(props: ReelOverflowProps) {
-  const { open, onOpen, onDismiss, onRequestDelete, confirmingDelete, onCancelDelete, onConfirmDelete, deleteState } = props;
+  const { open, onOpen, onDismiss, onRequestDelete, confirmingDelete, onCancelDelete, onConfirmDelete, deleteState, deleteConfirmBody } = props;
   return (
     <>
       <button type="button" className={styles.overflowTrigger} onClick={onOpen} aria-label="Więcej">⋮</button>
@@ -501,7 +501,9 @@ export function ReelOverflow(props: ReelOverflowProps) {
           {/* A T06-owned dialog, so the exact Anuluj/Usuń labels hold on every platform. */}
           <div className={styles.sheet} role="dialog" aria-modal="true" aria-label={COPY.deleteConfirmTitle}>
             <h2 className={styles.sheetHeading}>{COPY.deleteConfirmTitle}</h2>
-            <p className={styles.quiet}>{COPY.deleteConfirmBody}</p>
+            {/* STREAM-01 (D9): the host overrides this with the stream-with-topics wording when
+                the Reel is a stream with absorbed topics; absent keeps the exact Reel wording. */}
+            <p className={styles.quiet}>{deleteConfirmBody ?? COPY.deleteConfirmBody}</p>
             <div className={styles.confirmActions}>
               <TextAction onClick={onCancelDelete} tone="quiet">{COPY.deleteCancel}</TextAction>
               {/* The final destructive step stays red, as it started in the menu. */}
