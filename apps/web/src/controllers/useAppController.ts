@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { onlyHooksChanged } from '../data/auto-draft.js';
 import type { CaptureImageDescriptor, KdriveUploadPurpose, KdriveUploadState, Reel, ReelPatchRequest, ReelStatus, User } from '../../../../packages/contracts/src/index.js';
 import type { AuthStatus, BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
@@ -866,6 +868,45 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
     try { acceptServerReel(current, await api.removeHook(current.id, hookId, request), true); setSaveState('saved'); }
     catch (error) { if (isAbandonedRequest(error)) return; await store.enqueue({ id: request.operationId, accountId: user.id, kind: 'remove-hook', reelId: current.id, createdAt: Date.now(), state: error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'pending', payload: { hookId, request } }); setSaveState(error instanceof ClientApiError && error.status === 409 ? 'conflict' : 'offline'); setMessage(polishError(error)); }
   }, [acceptServerReel, api, current, store, user]);
+
+  // CAPTURE-DRAFT-01 (root integration): while the open Reel's automatic draft is queued or
+  // running, watch that one run and refresh the Reel once when it finishes, so the title
+  // suggestion and the new hook alternatives appear without leaving the screen. Bounded: one
+  // check every 4 s, only while the page is visible, for at most 3 minutes; a failed check just
+  // waits for the next one. The worker's result moves the Reel exactly one version on and touches
+  // only hooks, so that case rebases a pending local edit instead of turning it into a conflict.
+  const draftRunId = current?.autoDraft && (current.autoDraft.state === 'queued' || current.autoDraft.state === 'running')
+    ? current.autoDraft.runId : null;
+  const draftReelId = draftRunId ? current?.id ?? null : null;
+  useEffect(() => {
+    if (!draftRunId || !draftReelId) return undefined;
+    let cancelled = false;
+    let timer = 0;
+    const deadline = Date.now() + 180_000;
+    const tick = async () => {
+      if (cancelled || Date.now() > deadline) return;
+      if (document.visibilityState === 'visible') {
+        try {
+          const run = await api.aiRun(draftRunId);
+          if (cancelled) return;
+          if (run.state === 'succeeded' || run.state === 'failed') {
+            const server = await api.reel(draftReelId);
+            const before = currentRef.current;
+            if (cancelled || !before || before.id !== draftReelId) return;
+            // `before` already shows any unsent local edit, so compare it with the server copy
+            // carrying that same edit; only then is "nothing but hooks changed" meaningful.
+            const pendingChanges = pendingPatches.current.get(draftReelId)?.changes ?? {};
+            const own = server.version === before.version + 1 && onlyHooksChanged(before, { ...server, ...pendingChanges });
+            acceptServerReel(before, server, own);
+            return;
+          }
+        } catch { /* transient: try again on the next check */ }
+      }
+      if (!cancelled) timer = window.setTimeout(() => { void tick(); }, 4_000);
+    };
+    timer = window.setTimeout(() => { void tick(); }, 4_000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [acceptServerReel, api, draftReelId, draftRunId]);
 
   /** Re-read the Reel after a refused hook mutation, so the rendered selection is the server's. */
   const refreshAfterRefusal = useCallback(async (before: Reel): Promise<Reel | null> => {
