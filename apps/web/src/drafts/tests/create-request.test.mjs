@@ -29,3 +29,37 @@ test('legacy drafts default to idea semantics and empty scripts do not block oth
   assert.equal(createRequestFromDraft(draft()).initialScript, undefined);
   assert.equal(createRequestFromDraft(draft({ textMode: 'script', input: { text: '  ', url: 'https://example.com', images: [] } })).initialScript, undefined);
 });
+
+test('a legacy draft with no format field reads as a reel and never sends a title', () => {
+  const request = createRequestFromDraft(draft());
+  assert.equal(request.format, undefined);
+  assert.equal('title' in request, false);
+});
+
+test('a stream draft sends format, the trimmed title, and never initialScript/initialHook', () => {
+  const request = createRequestFromDraft(draft({
+    format: 'stream',
+    streamTitle: '  Nowy stream  ',
+    textMode: 'script',
+    initialHook: 'coś',
+    input: { text: 'Pomysł na stream', url: undefined, images: [] },
+  }));
+  assert.equal(request.format, 'stream');
+  assert.equal(request.title, 'Nowy stream');
+  assert.equal(request.initialScript, undefined);
+  assert.equal(request.initialHook, undefined);
+  assert.deepEqual(request.input, { text: 'Pomysł na stream', url: undefined, images: [] });
+});
+
+test('a stream draft may have an empty capture — only the title is required', () => {
+  const request = createRequestFromDraft(draft({ format: 'stream', streamTitle: 'Tylko tytuł', input: { images: [] } }));
+  assert.equal(request.format, 'stream');
+  assert.equal(request.title, 'Tylko tytuł');
+  assert.deepEqual(request.input, { images: [] });
+});
+
+test('a reel draft never sends format/title even when present on an old mixed-up draft', () => {
+  const request = createRequestFromDraft(draft({ format: 'reel', streamTitle: 'nieużywane' }));
+  assert.equal(request.format, undefined);
+  assert.equal('title' in request, false);
+});
