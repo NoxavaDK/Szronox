@@ -14,6 +14,11 @@ const KIND_OPTIONS: Array<{ value: CaptureKind; label: string }> = [
 const KIND_LABEL: Record<CaptureKind, string> = { image: 'Zdjęcie', url: 'Link', text: 'Tekst' };
 
 /** "Nowy pomysł" — frozen-visual-spec.md sec. 3. Controlled: all state and intents come from props. */
+const FORMAT_OPTIONS: Array<{ value: 'reel' | 'stream'; label: string }> = [
+  { value: 'reel', label: 'ROLKA' },
+  { value: 'stream', label: 'STREAM' },
+];
+
 export function QuickAddScreen(props: QuickAddScreenProps) {
   const {
     onBack, detectedKind, selectedKind, onChangeKind,
@@ -24,11 +29,14 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
     showHookField, onRevealHookField, initialHook, onChangeInitialHook,
     priority, onChangePriority,
     canSave, onSave, onOpracuj, saveState, autoDraftPending,
+    format, onChangeFormat, streamTitle, onChangeStreamTitle,
   } = props;
 
   // Detected-share payloads start collapsed to a compact chip (sec. 3); "Zmień" reveals
   // the full selector. Purely presentational — it does not affect the selected kind.
   const [selectorRevealed, setSelectorRevealed] = useState(detectedKind === null);
+  // D2: STREAM has no AI entry point — hide `✦ Opracuj` and `+ Hook` for it.
+  const isStream = format === 'stream';
 
   return (
     <div className={styles.screen}>
@@ -36,8 +44,27 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
         <button type="button" className={styles.backButton} onClick={onBack} aria-label="Wstecz">
           <BackArrowIcon />
         </button>
-        <h1 className={styles.title}>Nowy pomysł</h1>
+        <h1 className={styles.title}>{isStream ? 'Nowy stream' : 'Nowy pomysł'}</h1>
       </header>
+
+      {/* D2: compact ROLKA | STREAM selector, above the capture-type tabs. Absent entirely
+          when the host has not wired stream creation yet. */}
+      {onChangeFormat ? (
+        <CompactTabs label="Format" options={FORMAT_OPTIONS} value={format ?? 'reel'} onChange={onChangeFormat} />
+      ) : null}
+
+      {isStream ? (
+        <div className={styles.section}>
+          <span className={styles.sectionLabel}>Tytuł streamu</span>
+          <input
+            className={styles.urlField}
+            type="text"
+            aria-label="Tytuł streamu"
+            value={streamTitle ?? ''}
+            onChange={(event) => onChangeStreamTitle?.(event.target.value)}
+          />
+        </div>
+      ) : null}
 
       {detectedKind !== null && !selectorRevealed ? (
         <div className={styles.detectedChip}>
@@ -114,7 +141,8 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
         {selectedKind !== 'text' && !showAccompanyingText ? (
           <TextAction onClick={onRevealAccompanyingText}>+ Dodaj tekst</TextAction>
         ) : null}
-        {!showHookField ? <TextAction onClick={onRevealHookField}>+ Hook</TextAction> : null}
+        {/* D2/D3: no AI entry point (and so no `+ Hook`) for a stream. */}
+        {!isStream && !showHookField ? <TextAction onClick={onRevealHookField}>+ Hook</TextAction> : null}
       </div>
 
       {selectedKind !== 'text' && showAccompanyingText ? (
@@ -129,7 +157,7 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
         </div>
       ) : null}
 
-      {showHookField ? (
+      {!isStream && showHookField ? (
         <div className={styles.section}>
           <span className={styles.sectionLabel}>Hook</span>
           <input
@@ -148,9 +176,12 @@ export function QuickAddScreen(props: QuickAddScreenProps) {
         <Button onClick={onSave} disabled={!canSave} fullWidth>
           ZAPISZ
         </Button>
-        <TextAction onClick={onOpracuj} tone="quiet">
-          ✦ Opracuj
-        </TextAction>
+        {/* D2: ZAPISZ is the only bottom action for a stream — no Opracuj. */}
+        {!isStream ? (
+          <TextAction onClick={onOpracuj} tone="quiet">
+            ✦ Opracuj
+          </TextAction>
+        ) : null}
         <AutosaveMessage state={saveState} autoDraftPending={autoDraftPending} />
       </div>
     </div>

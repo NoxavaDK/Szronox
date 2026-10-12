@@ -1,8 +1,8 @@
 import '../ui/tokens.css';
 import type { DeletedReelsScreenProps } from '../ui/screen-contracts.js';
 import { COPY } from '../ui/screen-contracts.js';
-import { StatusBanner } from '../ui/primitives.js';
-import { BackArrowIcon } from '../ui/icons.js';
+import { StatusBanner, StreamMarker } from '../ui/primitives.js';
+import { BackArrowIcon, BroadcastIcon } from '../ui/icons.js';
 import styles from './ReelListScreen.module.css';
 
 /**
@@ -35,11 +35,14 @@ export function DeletedReelsScreen({ onBack, loadState, items, onOpenReel, onRet
           <li key={item.id}>
             <button type="button" className={`${styles.row} ${styles.deletedRow}`} onClick={() => onOpenReel(item.id)}>
               <span className={styles.titleLine}>
+                {/* STREAM-01 (D1): the marker also appears in the Usunięte list. */}
+                {item.format === 'stream' ? <BroadcastIcon size={14} aria-hidden="true" className={styles.streamGlyph} /> : null}
                 {/* Same treatment as the active list: an untitled Reel is labelled from its
                     capture, quietly, rather than rendering an empty row. */}
                 <span className={item.titleIsDerived ? `${styles.rowTitle} ${styles.rowTitleDerived}` : styles.rowTitle}>
                   {item.title}
                 </span>
+                {item.format === 'stream' ? <span className={styles.metaItem}><StreamMarker /></span> : null}
               </span>
               <span className={styles.deletedAction}>Otwórz</span>
             </button>

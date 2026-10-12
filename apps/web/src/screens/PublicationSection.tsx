@@ -21,6 +21,7 @@ export function PublicationSection(props: PublicationSectionProps) {
     hashtags, onChangeHashtags,
     onCopyDescription, onGeneratePublication, generatePublicationEnabled, generatePublicationHint, plan, isPublished, isReady,
     publishedAt, publicationLinks, onAddPublicationLink, onOpenPublicationLink,
+    streamSourceLines,
   } = props;
   // UI-02 F: generation leads while there is no description; copying leads once there is copy.
   const emphasis = publicationEmphasis(description, hashtags);
@@ -64,7 +65,8 @@ export function PublicationSection(props: PublicationSectionProps) {
         {plan.label ? <span>Termin: <strong>{plan.label}</strong> · Zmień termin</span> : <span>Zaplanuj</span>}
       </button> : null}
 
-      {onGeneratePublication && !isPublished ? <div className={styles.generateRow} data-emphasis={emphasis.generate}>
+      {/* D3: no `Wygeneruj opis` on a stream — `streamSourceLines` presence implies format 'stream'. */}
+      {onGeneratePublication && !isPublished && !streamSourceLines ? <div className={styles.generateRow} data-emphasis={emphasis.generate}>
         <ActionButton tone={emphasis.generate} onClick={onGeneratePublication} disabled={!generatePublicationEnabled}>
           {emphasis.generate === 'primary' ? 'Wygeneruj opis' : 'Wygeneruj nowy opis'}
         </ActionButton>
@@ -85,21 +87,35 @@ export function PublicationSection(props: PublicationSectionProps) {
         />
       </div>
 
-      <div className={styles.block}>
-        <span className={styles.label}>Źródło</span>
-        <textarea className={styles.textField} aria-label="Źródło" value={source} onChange={(event) => onChangeSource(event.target.value)} />
-        <div className={styles.sourceMeta}>
-          <span>{sourceUndoAvailable ? 'Przywrócono automatyczne źródło.' : sourceManual ? 'Wpisane ręcznie' : sourceMetadataState === 'pending' ? sourceLongWait ? 'Pobieranie trwa dłużej niż zwykle.' : 'Pobieranie danych źródła…' : sourceMetadataState === 'found' ? 'Automatycznie z linku' : sourceMetadataState === 'partial' ? 'Automatycznie z adresu strony' : sourceMetadataState === 'failed' ? 'Nie udało się pobrać danych źródła.' : sourceMetadataState === 'blocked' ? 'Strona blokuje automatyczne pobieranie. Wpisz autora ręcznie.' : sourceMetadataState === 'unsupported' ? 'Tego linku nie da się odczytać automatycznie. Wpisz źródło ręcznie.' : sourceMetadataState === 'no_url' ? 'Brak linku w materiale.' : 'Pobierz dane źródła z linku.'}</span>
-          {sourceUndoAvailable ? <TextAction onClick={onUndoRestoreSource}>Cofnij</TextAction>
-            : sourceManual ? sourceAutomaticAvailable ? <TextAction onClick={onRestoreAutomaticSource}>Przywróć automatyczne</TextAction> : null
-              : sourceMetadataState === 'pending' ? sourceLongWait ? <TextAction onClick={onCheckSource}>Sprawdź</TextAction> : null
-                : sourceMetadataState === 'no_url' ? <TextAction onClick={onAddArticleLink}>Dodaj link</TextAction>
-                  : sourceMetadataState === 'blocked' || sourceMetadataState === 'unsupported' ? null
-                  : sourceMetadataState === 'failed' ? <TextAction onClick={onRefreshSource}>Ponów</TextAction>
-                    : sourceMetadataState === 'never' || sourceMetadataState === null ? <TextAction onClick={onRefreshSource}>Pobierz</TextAction>
-                      : <TextAction onClick={onRefreshSource}>Odśwież</TextAction>}
+      {streamSourceLines ? (
+        /* D7: a stream's ŹRÓDŁA — read-only, one line per topic, in topic order; each is edited
+           on its own topic (absorbed) or Rolka (linked), never here. */
+        <div className={styles.block}>
+          <span className={styles.label}>Źródła</span>
+          {streamSourceLines.length > 0 ? (
+            <ul className={styles.textField} aria-label="Źródła" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+              {streamSourceLines.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}
+            </ul>
+          ) : null}
+          <div className={styles.sourceMeta}><span>Źródła z tematów</span></div>
         </div>
-      </div>
+      ) : (
+        <div className={styles.block}>
+          <span className={styles.label}>Źródło</span>
+          <textarea className={styles.textField} aria-label="Źródło" value={source} onChange={(event) => onChangeSource(event.target.value)} />
+          <div className={styles.sourceMeta}>
+            <span>{sourceUndoAvailable ? 'Przywrócono automatyczne źródło.' : sourceManual ? 'Wpisane ręcznie' : sourceMetadataState === 'pending' ? sourceLongWait ? 'Pobieranie trwa dłużej niż zwykle.' : 'Pobieranie danych źródła…' : sourceMetadataState === 'found' ? 'Automatycznie z linku' : sourceMetadataState === 'partial' ? 'Automatycznie z adresu strony' : sourceMetadataState === 'failed' ? 'Nie udało się pobrać danych źródła.' : sourceMetadataState === 'blocked' ? 'Strona blokuje automatyczne pobieranie. Wpisz autora ręcznie.' : sourceMetadataState === 'unsupported' ? 'Tego linku nie da się odczytać automatycznie. Wpisz źródło ręcznie.' : sourceMetadataState === 'no_url' ? 'Brak linku w materiale.' : 'Pobierz dane źródła z linku.'}</span>
+            {sourceUndoAvailable ? <TextAction onClick={onUndoRestoreSource}>Cofnij</TextAction>
+              : sourceManual ? sourceAutomaticAvailable ? <TextAction onClick={onRestoreAutomaticSource}>Przywróć automatyczne</TextAction> : null
+                : sourceMetadataState === 'pending' ? sourceLongWait ? <TextAction onClick={onCheckSource}>Sprawdź</TextAction> : null
+                  : sourceMetadataState === 'no_url' ? <TextAction onClick={onAddArticleLink}>Dodaj link</TextAction>
+                    : sourceMetadataState === 'blocked' || sourceMetadataState === 'unsupported' ? null
+                    : sourceMetadataState === 'failed' ? <TextAction onClick={onRefreshSource}>Ponów</TextAction>
+                      : sourceMetadataState === 'never' || sourceMetadataState === null ? <TextAction onClick={onRefreshSource}>Pobierz</TextAction>
+                        : <TextAction onClick={onRefreshSource}>Odśwież</TextAction>}
+          </div>
+        </div>
+      )}
 
       <div className={styles.block}>
         <span className={styles.label}>Hashtagi</span>

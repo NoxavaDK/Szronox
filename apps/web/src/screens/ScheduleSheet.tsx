@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { ReelStatus } from '../../../../packages/contracts/src/index.js';
 import { PUBLICATION_SLOTS, SLOT_LABELS, planLabel, quickDays, type Plan, type PublicationSlot } from '../data/planner.js';
-import { TextAction } from '../ui/primitives.js';
+import { StreamMarker, TextAction } from '../ui/primitives.js';
 import { COPY } from '../ui/screen-contracts.js';
 import sheetStyles from './ReelQuickActions.module.css';
 import styles from './ScheduleSheet.module.css';
 
 export interface ScheduleSheetProps {
   reelTitle: string;
+  /** STREAM-01 (D1 marker only). Absent/false renders exactly as before. */
+  isStream?: boolean;
   status: ReelStatus;
   /** The Reel's current plan; `date: null` means unplanned. */
   plan: Plan;
@@ -27,7 +29,7 @@ export interface ScheduleSheetProps {
  * date alone is a complete plan; the slot is never required and tapping the chosen slot again
  * clears it. The server applies any first-date idea promotion.
  */
-export function ScheduleSheet({ reelTitle, status, plan, today, onConfirm, onClear, onDismiss, saving, error }: ScheduleSheetProps) {
+export function ScheduleSheet({ reelTitle, isStream, status, plan, today, onConfirm, onClear, onDismiss, saving, error }: ScheduleSheetProps) {
   const [date, setDate] = useState<string | null>(plan.date);
   const [slot, setSlot] = useState<PublicationSlot | null>(plan.slot);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -65,7 +67,11 @@ export function ScheduleSheet({ reelTitle, status, plan, today, onConfirm, onCle
         onKeyDown={onKeyDown}
       >
         <h2 className={sheetStyles.heading}>Zaplanuj publikację</h2>
-        <p className={sheetStyles.subject}>{reelTitle}{current ? ` · teraz: ${current}` : ''}</p>
+        <p className={sheetStyles.subject}>
+          {/* STREAM-01 (D1 marker only). */}
+          {isStream ? <><StreamMarker /> · </> : null}
+          {reelTitle}{current ? ` · teraz: ${current}` : ''}
+        </p>
 
         <div className={styles.days} role="group" aria-label="Dzień publikacji">
           {days.map((day) => (

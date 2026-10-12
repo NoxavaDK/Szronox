@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import '../ui/tokens.css';
 import type { ReelListItemView, ReelListScreenProps, ReelQuickActionsProps } from '../ui/screen-contracts.js';
-import { Avatar, AttentionStrip, CoverIndicator, FloatingAddButton, PriorityGlyph, StatusBanner } from '../ui/primitives.js';
+import { Avatar, AttentionStrip, CoverIndicator, FloatingAddButton, PriorityGlyph, StatusBanner, StreamMarker } from '../ui/primitives.js';
 import { StatusSelector } from '../ui/StatusSelector.js';
 import { useRowGesture, prefersReducedMotion } from '../ui/gestures.js';
 import { RadialQuickMenu, ReelQuickActionsSheet, UndoSnackbar, quickAdvanceLabel } from './ReelQuickActions.js';
-import { OverflowIcon } from '../ui/icons.js';
+import { BroadcastIcon, OverflowIcon } from '../ui/icons.js';
 import { COPY } from '../ui/screen-contracts.js';
 import { STATUS_LABELS } from '../ui/screen-contracts.js';
 import styles from './ReelListScreen.module.css';
@@ -217,6 +217,8 @@ function ReelRow({
         {isUrgent ? <span className={styles.urgentRail} aria-hidden /> : null}
         <div className={styles.rowMain}>
           <div className={styles.titleLine}>
+            {/* STREAM-01 (D1): before the title, paired with the "Stream" word in metaLine below. */}
+            {item.format === 'stream' ? <BroadcastIcon size={14} aria-hidden="true" className={styles.streamGlyph} /> : null}
             {/* A derived label sits in the same slot at the same size — only quieter, so it
                 does not read as a title someone wrote. Layout and row height are unchanged. */}
             <span className={item.titleIsDerived ? `${styles.rowTitle} ${styles.rowTitleDerived}` : styles.rowTitle}>
@@ -225,6 +227,8 @@ function ReelRow({
             {item.priority === 'evergreen' ? <PriorityGlyph priority={item.priority} /> : null}
           </div>
           <div className={styles.metaLine}>
+            {/* D1: ranks directly after the title; it never yields to narrower widths. */}
+            {item.format === 'stream' ? <span className={styles.metaItem}><StreamMarker /></span> : null}
             {item.sourceDomain ? <span className={styles.metaItem}>{item.sourceDomain}</span> : null}
             {showStatus ? <span className={item.status === 'ready' || item.status === 'published' ? `${styles.metaItem} ${styles.metaReady}` : styles.metaItem}>
               {item.status === 'ready' || item.status === 'published' ? `✓ ${STATUS_LABELS[item.status]}` : STATUS_LABELS[item.status]}

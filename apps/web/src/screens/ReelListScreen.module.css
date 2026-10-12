@@ -120,6 +120,13 @@
   min-width: 0;
 }
 
+/* STREAM-01 (D1): sits before the title, vertically centred against its first line. */
+.streamGlyph {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--sz-color-text-secondary);
+}
+
 .rowTitle {
   font-size: var(--sz-text-reel-title-size);
   line-height: var(--sz-text-reel-title-line);

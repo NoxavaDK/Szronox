@@ -1,8 +1,8 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import '../ui/tokens.css';
 import { STATUS_LABELS, type HookEditView, type ReelDetailScreenProps } from '../ui/screen-contracts.js';
-import { ActionButton, CoverIndicator, SectionRow, TextAction } from '../ui/primitives.js';
-import { BackArrowIcon, CheckIcon, CloseIcon, WarningIcon } from '../ui/icons.js';
+import { ActionButton, CoverIndicator, SectionRow, StreamMarker, TextAction } from '../ui/primitives.js';
+import { BackArrowIcon, BroadcastIcon, CheckIcon, CloseIcon, WarningIcon } from '../ui/icons.js';
 import {
   ConflictNotice,
   EditingNotesSection,
@@ -13,6 +13,7 @@ import {
   SourcesSection,
 } from '../ui/detail-sections.js';
 import { PublicationSection } from './PublicationSection.js';
+import { StreamTopics } from './StreamTopics.js';
 import styles from './ReelDetailScreen.module.css';
 
 /**
@@ -34,9 +35,16 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
     publicationExpanded, onTogglePublication, publication,
     saveState, conflict,
     aiRowEnabled, onAiAction, onOpenMeme, onDetachMeme, attachedMemes, onOpenProgramme,
+    inStreams, onOpenStream, streamTopics,
   } = props;
+  // STREAM-01 (D3): a stream replaces HOOK/HOOKI and SCENARIUSZ with TEMATY and shows no AI
+  // entry point anywhere — enforced here regardless of what the host passes for aiRowEnabled,
+  // so a host that has not finished wiring streamTopics/metadata.format cannot regress D3.
+  const isStream = metadata.format === 'stream';
   const publicationRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  // STREAM-01 (D6): "W 2 streamach" opens a short list to pick from; a single stream opens it directly.
+  const [streamsListOpen, setStreamsListOpen] = useState(false);
   const openFeedCover = () => {
     onOpenFeedCover();
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
@@ -105,19 +113,25 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           <BackArrowIcon />
         </button>
         <div className={styles.titleIdentity}>
-          <textarea
-            ref={titleRef}
-            className={styles.titleField}
-            aria-label="Tytuł"
-            value={title}
-            rows={2}
-            readOnly={readOnly}
-            // The derived label, when there is no title. A placeholder keeps the field empty,
-            // so nothing here can be saved as a title the user did not write.
-            placeholder={titlePlaceholder}
-            onChange={(event) => onChangeTitle(event.target.value)}
-          />
+          <span className={styles.titleRow}>
+            {/* STREAM-01 (D1): before the title in the Detail title row too. */}
+            {isStream ? <BroadcastIcon size={15} aria-hidden="true" className={styles.titleStreamGlyph} /> : null}
+            <textarea
+              ref={titleRef}
+              className={styles.titleField}
+              aria-label="Tytuł"
+              value={title}
+              rows={2}
+              readOnly={readOnly}
+              // The derived label, when there is no title. A placeholder keeps the field empty,
+              // so nothing here can be saved as a title the user did not write.
+              placeholder={titlePlaceholder}
+              onChange={(event) => onChangeTitle(event.target.value)}
+            />
+          </span>
           <span className={styles.titleMeta}>
+            {/* D1: paired with the word "Stream" in the metadata cluster. */}
+            {isStream ? <StreamMarker /> : null}
             {sourceDomain ? <span className={styles.sourceDomain}>{sourceDomain}</span> : null}
             {/* A visible edit affordance: an untitled Reel shows a derived label that is not a title yet. */}
             {!readOnly ? <button type="button" className={styles.titleEdit} onClick={() => titleRef.current?.focus()}>
@@ -154,7 +168,31 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
           ? <p className={styles.readOnlyMeta}>{STATUS_LABELS[metadata.status]}{metadata.editor ? ` · ${metadata.editor.name}` : ''}</p>
           : <MetadataSelectors {...selectors} />}
         {!readOnly ? <div className={styles.metaLinks}>
-          {metadata.programmeState !== 'unchecked' ? (
+          {/* STREAM-01 (D6): shown on a Reel referenced by one or more active streams. */}
+          {inStreams && inStreams.length > 0 ? (
+            <span className={styles.streamsLinkWrap}>
+              <button
+                type="button"
+                className={styles.metadataInlineAction}
+                onClick={() => (inStreams.length === 1 ? onOpenStream?.(inStreams[0].id) : setStreamsListOpen((open) => !open))}
+              >
+                <BroadcastIcon size={13} aria-hidden="true" /> {inStreams.length === 1 ? `W streamie: ${inStreams[0].title}` : `W ${inStreams.length} streamach`}
+              </button>
+              {streamsListOpen && inStreams.length > 1 ? (
+                <ul className={styles.streamsList} role="list">
+                  {inStreams.map((stream) => (
+                    <li key={stream.id}>
+                      <button type="button" className={styles.streamsListItem} onClick={() => { setStreamsListOpen(false); onOpenStream?.(stream.id); }}>
+                        {stream.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </span>
+          ) : null}
+          {/* D3: no programme metadata/actions on a stream. */}
+          {!isStream && metadata.programmeState !== 'unchecked' ? (
             // Attached is a completed association (check); no match is ordinary information, never an error.
             <button type="button" className={styles.metadataProgramme} data-state={metadata.programmeState} onClick={onOpenProgramme}>
               {metadata.programmeState === 'matched' ? <><CheckIcon size={13} aria-hidden="true" /> Program: powiązane</> : 'Program: brak dopasowania'}
@@ -173,55 +211,74 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
       ) : null}
       <SourcesSection {...sources} readOnly={readOnly} />
 
-      <section className={styles.contentBlock} data-hooks-section>
-        <div className={styles.hookHeading}>
-          <h2 className={styles.sectionLabel}>Hooki</h2>
-          {/* One concise instruction instead of a second `Wybierz hook` action at this level. */}
-          {!readOnly && metadata.status !== 'published' && !selectedHook && hooks.length > 0 ? <span className={styles.hookHint}>Stuknij hook, aby go wybrać</span> : null}
-        </div>
-        <ul className={styles.hookList}>
-          {selectedHook ? renderHook(selectedHook) : null}
-          {otherHooks.length > 0 ? selectedHook ? <li className={styles.otherHooks}><details>
-            <summary>Pozostałe hooki ({otherHooks.length})</summary>
-            <ul className={styles.hookList}>{otherHooks.map(renderHook)}</ul>
-          </details></li> : otherHooks.map(renderHook) : null}
-          {/* A draft whose hook was deleted elsewhere: still shown, so the text is not lost. */}
-          {Object.entries(hookEdits)
-            .filter(([id]) => !hooks.some((hook) => hook.id === id))
-            .map(([id, edit]) => (
-              <li key={id} className={styles.hookRow}>
-                <HookEditor edit={edit} onChange={(text) => onChangeHookEdit(id, text)} onCancel={() => onCancelHookEdit(id)} />
-              </li>
-            ))}
-          {/* HOOK-ADD-01: a manual hook is appended as `własny` and is never selected automatically. */}
-          {!readOnly && newHook ? (
-            <li className={styles.hookRow}>
-              <HookEditor edit={newHook} onChange={onChangeNewHook} onSave={onSaveNewHook} onCancel={onCancelNewHook} />
-            </li>
-          ) : null}
-        </ul>
-        {!readOnly && !newHook ? <TextAction onClick={onStartNewHook}>+ Dodaj hook</TextAction> : null}
-      </section>
+      {/*
+       * STREAM-01 (D3): a stream's main editorial content is TEMATY, in place of HOOK/HOOKI,
+       * SCENARIUSZ and the AI action row — none of which are rendered at all for a stream,
+       * never merely disabled, per D3's "no AI entry point anywhere on a stream" rule.
+       */}
+      {isStream ? (
+        streamTopics ? (
+          <StreamTopics
+            api={streamTopics.api}
+            stream={streamTopics.stream}
+            onStreamChange={streamTopics.onStreamChange}
+            onOpenReel={streamTopics.onOpenReel}
+            readOnly={readOnly}
+          />
+        ) : null
+      ) : (
+        <>
+          <section className={styles.contentBlock} data-hooks-section>
+            <div className={styles.hookHeading}>
+              <h2 className={styles.sectionLabel}>Hooki</h2>
+              {/* One concise instruction instead of a second `Wybierz hook` action at this level. */}
+              {!readOnly && metadata.status !== 'published' && !selectedHook && hooks.length > 0 ? <span className={styles.hookHint}>Stuknij hook, aby go wybrać</span> : null}
+            </div>
+            <ul className={styles.hookList}>
+              {selectedHook ? renderHook(selectedHook) : null}
+              {otherHooks.length > 0 ? selectedHook ? <li className={styles.otherHooks}><details>
+                <summary>Pozostałe hooki ({otherHooks.length})</summary>
+                <ul className={styles.hookList}>{otherHooks.map(renderHook)}</ul>
+              </details></li> : otherHooks.map(renderHook) : null}
+              {/* A draft whose hook was deleted elsewhere: still shown, so the text is not lost. */}
+              {Object.entries(hookEdits)
+                .filter(([id]) => !hooks.some((hook) => hook.id === id))
+                .map(([id, edit]) => (
+                  <li key={id} className={styles.hookRow}>
+                    <HookEditor edit={edit} onChange={(text) => onChangeHookEdit(id, text)} onCancel={() => onCancelHookEdit(id)} />
+                  </li>
+                ))}
+              {/* HOOK-ADD-01: a manual hook is appended as `własny` and is never selected automatically. */}
+              {!readOnly && newHook ? (
+                <li className={styles.hookRow}>
+                  <HookEditor edit={newHook} onChange={onChangeNewHook} onSave={onSaveNewHook} onCancel={onCancelNewHook} />
+                </li>
+              ) : null}
+            </ul>
+            {!readOnly && !newHook ? <TextAction onClick={onStartNewHook}>+ Dodaj hook</TextAction> : null}
+          </section>
 
-      <section className={styles.contentBlock}>
-        <h2 className={styles.sectionLabel}>Skrypt</h2>
-        <textarea
-          id="reel-script"
-          className={styles.scriptField}
-          aria-label="Skrypt"
-          value={script}
-          rows={4}
-          readOnly={readOnly}
-          onChange={(event) => onChangeScript(event.target.value)}
-        />
-        {scriptConflict ? <ConflictNotice conflict={scriptConflict} /> : null}
-      </section>
+          <section className={styles.contentBlock}>
+            <h2 className={styles.sectionLabel}>Skrypt</h2>
+            <textarea
+              id="reel-script"
+              className={styles.scriptField}
+              aria-label="Skrypt"
+              value={script}
+              rows={4}
+              readOnly={readOnly}
+              onChange={(event) => onChangeScript(event.target.value)}
+            />
+            {scriptConflict ? <ConflictNotice conflict={scriptConflict} /> : null}
+          </section>
 
-      {!readOnly ? <div className={styles.aiRow} aria-label="Akcje AI">
-        <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('fact_check')}>Fakty</button>
-        <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('language_check')}>Aa Język</button>
-        <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('develop')}>✦ Opracuj</button>
-      </div> : null}
+          {!readOnly ? <div className={styles.aiRow} aria-label="Akcje AI">
+            <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('fact_check')}>Fakty</button>
+            <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('language_check')}>Aa Język</button>
+            <button type="button" className={styles.aiButton} disabled={!aiRowEnabled} onClick={() => onAiAction?.('develop')}>✦ Opracuj</button>
+          </div> : null}
+        </>
+      )}
 
       {/* Production (Materiały, Uwagi) and Publication are separate groups below the editorial work. */}
       {!readOnly ? <div className={styles.secondarySections}>

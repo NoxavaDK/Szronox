@@ -5,8 +5,8 @@ import type { Reel } from '../../../../packages/contracts/src/index.js';
 import { SLOT_LABELS, groupPlanner, planOf, unscheduledEmptyLabel, weekRangeLabel } from '../data/planner.js';
 import { reelLabel } from '../data/reel-label.js';
 import { COPY, STATUS_LABELS } from '../ui/screen-contracts.js';
-import { CoverIndicator, StatusBanner } from '../ui/primitives.js';
-import { BackArrowIcon, CalendarIcon, ChevronRightIcon } from '../ui/icons.js';
+import { CoverIndicator, StatusBanner, StreamMarker } from '../ui/primitives.js';
+import { BackArrowIcon, BroadcastIcon, CalendarIcon, ChevronRightIcon } from '../ui/icons.js';
 import styles from './PlannerPane.module.css';
 
 /** The drag payload type: only a SzroNox Reel card can be dropped on a day. */
@@ -190,8 +190,13 @@ function PlannerCard({ reel, selected, draggable, onOpen, onSchedule }: {
       } : undefined}
     >
       <button type="button" className={styles.cardMain} onClick={onOpen} aria-current={selected ? 'true' : undefined}>
-        <span className={label.derived ? `${styles.cardTitle} ${styles.cardTitleDerived}` : styles.cardTitle}>{label.text}</span>
+        <span className={styles.cardTitleRow}>
+          {/* STREAM-01 (D1). No other planner change (D8). */}
+          {reel.format === 'stream' ? <BroadcastIcon size={13} aria-hidden="true" className={styles.cardStreamGlyph} /> : null}
+          <span className={label.derived ? `${styles.cardTitle} ${styles.cardTitleDerived}` : styles.cardTitle}>{label.text}</span>
+        </span>
         <span className={styles.cardMeta}>
+          {reel.format === 'stream' ? <StreamMarker /> : null}
           {slot ? <span className={styles.cardTime}>{SLOT_LABELS[slot]}</span> : null}
           <span data-status={reel.status}>{reel.status === 'ready' ? '✓ Gotowe' : STATUS_LABELS[reel.status]}</span>
           {showCover ? <CoverIndicator done={reel.feedCoverDone} size={14} /> : null}
