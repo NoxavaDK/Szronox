@@ -5,6 +5,7 @@ import type { Reel, ReelStatus } from '../../../../packages/contracts/src/index.
 import { Login } from '../auth/Login.js';
 import type { BrowserSession } from '../auth/session.js';
 import type { CoreApiClient } from '../data/api.js';
+import { attachmentContentUrl } from '../data/api.js';
 import type { DraftStore } from '../drafts/store.js';
 import type { SyncQueue } from '../drafts/queue.js';
 import type { AttachmentRecovery } from '../data/attachment-recovery.js';
@@ -732,11 +733,19 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
         attachments: reel.originalInput.images.map((image) => ({
           id: image.attachmentId,
           fileName: image.fileName,
-          thumbnailUrl: null,
+          // Only a completed, validated upload has content to serve.
+          thumbnailUrl: reel.attachments.find((a) => a.id === image.attachmentId)?.state === 'ready'
+            ? attachmentContentUrl(reel.id, image.attachmentId) : null,
           // Preserved descriptors that were never accepted as uploads.
           unsupported: reel.attachments.find((a) => a.id === image.attachmentId)?.state === 'failed',
         })),
-        onOpenAttachment: () => c.setMessage('Podgląd załącznika będzie dostępny po wdrożeniu transportu plików.'),
+        onOpenAttachment: (attachmentId) => {
+          if (reel.attachments.find((a) => a.id === attachmentId)?.state !== 'ready') {
+            c.setMessage('Ten plik nie został jeszcze w pełni przesłany.');
+            return;
+          }
+          window.open(attachmentContentUrl(reel.id, attachmentId), '_blank', 'noopener');
+        },
         inputNote: reel.inputNote,
         onChangeInputNote: (inputNote) => c.changeReel({ inputNote }),
         inputNoteSaveState: c.saveState,

@@ -37,6 +37,14 @@ export interface SessionSource { context(): RequestContext }
  * failure of the request — the request may well have succeeded on the server — it
  * is a statement that its result belongs to an account that is no longer active.
  */
+/**
+ * Same-origin address of a stored, validated attachment's bytes (VPS-02 content route). The
+ * browser's session cookie authenticates it, so it works directly as an `<img src>` or a link.
+ */
+export function attachmentContentUrl(reelId: string, attachmentId: string): string {
+  return `/api/v1/reels/${encodeURIComponent(reelId)}/attachments/${encodeURIComponent(attachmentId)}/content`;
+}
+
 export class StaleResponseError extends Error {
   constructor(readonly dispatchedIn: number, readonly currentGeneration: number) {
     super('Response belongs to a previous session generation');
