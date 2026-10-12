@@ -171,3 +171,74 @@ test('a bare shared URL is not treated as usable textual grounding', async () =>
   });
   assert.ok(isSearch(requests[0]));
 });
+
+// ── VOICE-01: v3 generation prompts (saved_material, script_only, web_search) all carry the
+// CAPTION voice and, when present, the labelled style-examples block ───────────────────────
+
+const styleExample = { reelId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', hook: 'Stary hook', scriptExcerpt: 'Stary skrypt.', description: 'Stary opis.' };
+
+test('v3 saved_material prompt carries the CAPTION voice and style examples', async () => {
+  const requests: Req[] = [];
+  const work = await executeAction(v3({
+    originalInput: { text: 'Uchwała rady miasta: cena biletu miesięcznego wzrośnie ze 110 do 129 zł od 1 stycznia 2027.' },
+    styleExamples: [styleExample],
+  }), {
+    storageRoot: 'relative', retrieve: async () => { throw new Error('unexpected'); },
+    call: async (_model, request) => {
+      requests.push(request);
+      return candidate({ publicationDescriptionSuggestion: 'Bilet miesięczny podrożeje ze 110 do 129 zł.', publicationHashtagsSuggestion: '#Kraków', addsSupportedContext: true });
+    },
+  });
+  const prompt = promptOf(requests[0]);
+  assert.ok(prompt.includes('SZRONOX VOICE (captions)'));
+  assert.ok(prompt.includes(JSON.stringify([styleExample])));
+  assert.equal((work.result as { publicationGrounding: string }).publicationGrounding, 'saved_material');
+});
+
+test('v3 script_only fallback prompt carries the CAPTION voice and style examples', async () => {
+  const requests: Req[] = [];
+  const work = await executeAction(v3({ originalInput: { url: 'https://paywall.example/x' }, styleExamples: [styleExample] }), {
+    storageRoot: 'relative', retrieve: async () => { throw new Error('403'); },
+    call: async (_model, request) => {
+      requests.push(request);
+      return isSearch(request) ? grounding([]) : candidate({ publicationDescriptionSuggestion: 'Krótko.', publicationHashtagsSuggestion: '' });
+    },
+  });
+  const last = promptOf(requests[requests.length - 1]);
+  assert.ok(last.includes('SZRONOX VOICE (captions)'));
+  assert.ok(last.includes(JSON.stringify([styleExample])));
+  assert.equal((work.result as { publicationGrounding: string }).publicationGrounding, 'script_only');
+});
+
+test('v3 web_search prompt carries the CAPTION voice and style examples', async () => {
+  const requests: Req[] = [];
+  const excerpt = 'Zarząd Transportu Publicznego podał, że bilet miesięczny będzie kosztował 129 zł.';
+  const work = await executeAction(v3({ styleExamples: [styleExample] }), {
+    storageRoot: 'relative',
+    retrieve: async (url) => retrievedAs(url, excerpt),
+    call: async (_model, request) => {
+      requests.push(request);
+      if (isSearch(request)) return grounding(['https://grounding.example/a']);
+      return candidate({ publicationDescriptionSuggestion: 'Normalny bilet miesięczny ma kosztować 129 zł.', publicationHashtagsSuggestion: '#Kraków',
+        evidence: [{ sourceId: 'web-1', quote: 'bilet miesięczny będzie kosztował 129 zł' }] });
+    },
+  });
+  const last = promptOf(requests[requests.length - 1]);
+  assert.ok(last.includes('SZRONOX VOICE (captions)'));
+  assert.ok(last.includes(JSON.stringify([styleExample])));
+  assert.equal((work.result as { publicationGrounding: string }).publicationGrounding, 'web_search');
+});
+
+test('v3 prompts omit the examples block entirely for a legacy snapshot without styleExamples', async () => {
+  const requests: Req[] = [];
+  await executeAction(v3({ originalInput: { text: 'Uchwała rady miasta o cenach biletów.' } }), {
+    storageRoot: 'relative', retrieve: async () => { throw new Error('unexpected'); },
+    call: async (_model, request) => {
+      requests.push(request);
+      return candidate({ publicationDescriptionSuggestion: 'Opis.', publicationHashtagsSuggestion: '#x', addsSupportedContext: true });
+    },
+  });
+  const prompt = promptOf(requests[0]);
+  assert.ok(prompt.includes('SZRONOX VOICE (captions)'));
+  assert.equal(prompt.includes('Examples of this team'), false);
+});

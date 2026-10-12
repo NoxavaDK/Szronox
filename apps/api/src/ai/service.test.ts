@@ -35,6 +35,24 @@ async function readyInput(db: Awaited<ReturnType<typeof setup>>['db']) {
     validated_pixel_count=4,validated_at=now() where id=$1`, [imageId]);
 }
 
+/** VOICE-01: a minimal extra Reel, for style-example selection tests. */
+async function insertReel(db: Awaited<ReturnType<typeof setup>>['db'], id: string, overrides: {
+  status?: string; script?: string; format?: string; absorbedInto?: string | null;
+  publicationDescription?: string; deletedAt?: string | null; updatedAt?: string;
+} = {}): Promise<void> {
+  const opts = {
+    status: 'to_record', script: 'Przykładowy skrypt.', format: 'reel', absorbedInto: null,
+    publicationDescription: '', deletedAt: null, updatedAt: new Date().toISOString(), ...overrides,
+  };
+  await db.query(
+    `insert into app.reels (id, status, script, original_input, created_by, format, absorbed_into,
+                             publication_description, deleted_at, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, opts.status, opts.script, JSON.stringify({ text: 'x', images: [] }), user, opts.format,
+      opts.absorbedInto, opts.publicationDescription, opts.deletedAt, opts.updatedAt],
+  );
+}
+
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 /**
@@ -106,7 +124,7 @@ test('enqueue snapshots every validated input image and refuses pending ones', a
     assert.equal(run.input.attachments.length, 1);
     assert.equal(run.input.attachments[0].storageKey, undefined);
     assert.equal(run.promptStage, 'development_provisional');
-    assert.equal(run.promptId, 'gemini-02-development-provisional-v3');
+    assert.equal(run.promptId, 'gemini-02-development-provisional-v4');
   } finally { await db.close(); }
 });
 
@@ -157,7 +175,7 @@ test('new generate_publication snapshots versioned grounded context and ignores 
     assert.equal(stored.rows[0].input_snapshot.script, 'Stary skrypt.');
     assert.equal(stored.rows[0].input_snapshot.scriptRevision, 0);
     assert.equal(stored.rows[0].input_snapshot.publicationContextVersion, 3);
-    assert.equal(stored.rows[0].prompt_id, 'gemini-02-publication-provisional-v3');
+    assert.equal(stored.rows[0].prompt_id, 'gemini-02-publication-provisional-v4');
     // v3 may read completed capture images; a pending one is neither snapshotted nor a blocker.
     assert.deepEqual(stored.rows[0].input_snapshot.imageObjects, []);
     // Other actions keep their upload gate.
@@ -549,5 +567,163 @@ test('operation replay is scoped to actor and route', async () => {
     await assert.rejects(service.apply(actor, operationId, {
       operationId, expectedVersion: 1, selection: 'title', text: 'A',
     }), (error: { code?: string }) => error.code === 'IDEMPOTENCY_CONFLICT');
+  } finally { await db.close(); }
+});
+
+// ── VOICE-01: style-example selection, exactly per T00 ──────────────────────────────────────
+
+test('VOICE-01 style examples exclude idea/deleted/absorbed/stream/empty-script Reels, the run\'s own Reel, and are selected only for develop/generate_hooks/generate_publication', async () => {
+  const { db, service } = await setup();
+  try {
+    await readyInput(db);
+    // Otherwise-eligible, to prove the run's own Reel never becomes its own example.
+    await db.query("update app.reels set status='ready', script=$2 where id=$1", [reelId, 'Własny skrypt.']);
+    const ids = {
+      idea: '10000000-0000-4000-8000-000000000001', deleted: '10000000-0000-4000-8000-000000000002',
+      absorbed: '10000000-0000-4000-8000-000000000003', stream: '10000000-0000-4000-8000-000000000004',
+      emptyScript: '10000000-0000-4000-8000-000000000005', eligible: '10000000-0000-4000-8000-000000000006',
+    };
+    await insertReel(db, ids.idea, { status: 'idea', script: 'Pomysł.' });
+    await insertReel(db, ids.deleted, { status: 'ready', script: 'Usunięty.', deletedAt: new Date().toISOString() });
+    await insertReel(db, ids.absorbed, { status: 'to_record', script: 'Wchłonięty.', absorbedInto: reelId });
+    await insertReel(db, ids.stream, { status: 'to_record', script: 'Stream.', format: 'stream' });
+    await insertReel(db, ids.emptyScript, { status: 'ready', script: '   ' });
+    await insertReel(db, ids.eligible, { status: 'published', script: 'Opublikowany materiał.' });
+
+    const develop = await service.enqueue(actor, reelId, {
+      operationId: '10000000-0000-4000-8000-00000000000a', expectedVersion: 1, action: 'develop',
+    });
+    const snapshotOf = async (runId: string) => (await db.query<{ input_snapshot: { styleExamples?: Array<{ reelId: string }> } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [runId])).rows[0].input_snapshot;
+    assert.deepEqual((await snapshotOf(develop.id)).styleExamples?.map((example) => example.reelId), [ids.eligible]);
+
+    // fact_check, language_check and find_programme are not among the three style-example actions.
+    const factCheck = await service.enqueue(actor, reelId, {
+      operationId: '10000000-0000-4000-8000-00000000000b', expectedVersion: 1, action: 'fact_check',
+    });
+    assert.equal((await snapshotOf(factCheck.id)).styleExamples, undefined);
+  } finally { await db.close(); }
+});
+
+test('VOICE-01 hook fallback: selected hook wins, else the single user hook, else null when ambiguous or absent', async () => {
+  const { db, service } = await setup();
+  try {
+    await readyInput(db);
+    const ids = {
+      noHook: '11000000-0000-4000-8000-000000000001', selectedAi: '11000000-0000-4000-8000-000000000002',
+      singleUser: '11000000-0000-4000-8000-000000000003', multiUser: '11000000-0000-4000-8000-000000000004',
+    };
+    await insertReel(db, ids.noHook, { status: 'to_record', script: 'Bez hooka.' });
+    await insertReel(db, ids.selectedAi, { status: 'editing', script: 'Z wybranym hookiem AI.' });
+    await insertReel(db, ids.singleUser, { status: 'ready', script: 'Jeden hook zespołu.' });
+    await insertReel(db, ids.multiUser, { status: 'ready', script: 'Dwa hooki zespołu.' });
+
+    const aiHookId = '11000000-0000-4000-8000-000000000012';
+    await db.query('insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$2,$3,$4,0)',
+      [aiHookId, ids.selectedAi, 'Hook AI wybrany', 'ai']);
+    await db.query('update app.reels set selected_hook_id=$2 where id=$1', [ids.selectedAi, aiHookId]);
+
+    await db.query('insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$2,$3,$4,0)',
+      ['11000000-0000-4000-8000-000000000013', ids.singleUser, 'Jedyny hook zespołu', 'user']);
+
+    await db.query('insert into app.reel_hooks(id,reel_id,text,source,position) values($1,$3,$4,$5,0),($2,$3,$6,$5,1)',
+      ['11000000-0000-4000-8000-000000000014', '11000000-0000-4000-8000-000000000015', ids.multiUser,
+        'Pierwszy hook zespołu', 'user', 'Drugi hook zespołu']);
+
+    const run = await service.enqueue(actor, reelId, {
+      operationId: '11000000-0000-4000-8000-00000000000a', expectedVersion: 1, action: 'develop',
+    });
+    const stored = await db.query<{ input_snapshot: { styleExamples?: Array<{ reelId: string; hook: string | null }> } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [run.id]);
+    const byId = new Map((stored.rows[0].input_snapshot.styleExamples ?? []).map((example) => [example.reelId, example.hook]));
+    assert.equal(byId.get(ids.noHook), null, 'no hooks at all');
+    assert.equal(byId.get(ids.selectedAi), 'Hook AI wybrany', 'selected hook wins even when AI-sourced');
+    assert.equal(byId.get(ids.singleUser), 'Jedyny hook zespołu', 'falls back to the only team-written hook');
+    assert.equal(byId.get(ids.multiUser), null, 'two team-written hooks with no selection is ambiguous');
+  } finally { await db.close(); }
+});
+
+test('VOICE-01 scriptExcerpt and description are cut at exactly 600 characters', async () => {
+  const { db, service } = await setup();
+  try {
+    await readyInput(db);
+    const longScript = 'A'.repeat(700);
+    const longDescription = 'B'.repeat(700);
+    await insertReel(db, '12000000-0000-4000-8000-000000000001', {
+      status: 'ready', script: longScript, publicationDescription: longDescription,
+    });
+    const run = await service.enqueue(actor, reelId, {
+      operationId: '12000000-0000-4000-8000-00000000000a', expectedVersion: 1, action: 'develop',
+    });
+    const stored = await db.query<{ input_snapshot: { styleExamples?: Array<{ scriptExcerpt: string; description: string }> } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [run.id]);
+    const example = stored.rows[0].input_snapshot.styleExamples?.[0];
+    assert.equal(example?.scriptExcerpt.length, 600);
+    assert.equal(example?.description.length, 600);
+    assert.equal(example?.scriptExcerpt, 'A'.repeat(600));
+    assert.equal(example?.description, 'B'.repeat(600));
+  } finally { await db.close(); }
+});
+
+test('VOICE-01 selects at most 8 examples, newest updated_at first', async () => {
+  const { db, service } = await setup();
+  try {
+    await readyInput(db);
+    const base = new Date('2026-01-01T00:00:00Z').getTime();
+    const ids: string[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const id = `13000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      ids.push(id);
+      await insertReel(db, id, {
+        status: 'to_record', script: `Skrypt numer ${index}.`,
+        updatedAt: new Date(base + index * 60_000).toISOString(),
+      });
+    }
+    const run = await service.enqueue(actor, reelId, {
+      operationId: '13000000-0000-4000-8000-00000000000a', expectedVersion: 1, action: 'develop',
+    });
+    const stored = await db.query<{ input_snapshot: { styleExamples?: Array<{ reelId: string }> } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [run.id]);
+    const selected = stored.rows[0].input_snapshot.styleExamples ?? [];
+    assert.equal(selected.length, 8);
+    // Newest updated_at first: the 8 most recently inserted (highest index), descending.
+    assert.deepEqual(selected.map((example) => example.reelId), [...ids].reverse().slice(0, 8));
+  } finally { await db.close(); }
+});
+
+test('VOICE-01: styleExamples never enters inputHash or isStale; editing another Reel does not stale an existing run or change a new run\'s hash for the same Reel input', async () => {
+  const { db, service } = await setup();
+  try {
+    await readyInput(db);
+    const exampleId = '14000000-0000-4000-8000-000000000001';
+    await insertReel(db, exampleId, { status: 'ready', script: 'Pierwotny skrypt przykładu.' });
+
+    const first = await service.enqueue(actor, reelId, {
+      operationId: '14000000-0000-4000-8000-00000000000a', expectedVersion: 1, action: 'develop',
+    });
+    const firstRow = (await db.query<{ input_hash: string }>('select input_hash from app.ai_runs where id=$1', [first.id])).rows[0];
+    const firstSnapshot = (await db.query<{ input_snapshot: { styleExamples?: Array<{ reelId: string; scriptExcerpt: string }> } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [first.id])).rows[0].input_snapshot;
+    assert.equal(firstSnapshot.styleExamples?.[0]?.scriptExcerpt, 'Pierwotny skrypt przykładu.');
+    assert.equal((await service.get(actor, first.id)).isStale, false);
+
+    // Edit the OTHER Reel: its example content changes, but nothing about the main Reel's own
+    // relevant input (script, hooks, etc.) changes.
+    await db.query('update app.reels set script=$2, version=version+1, updated_at=now() where id=$1',
+      [exampleId, 'Zupełnie inny skrypt przykładu.']);
+
+    assert.equal((await service.get(actor, first.id)).isStale, false, 'editing another Reel never stales this run');
+
+    const second = await service.enqueue(actor, reelId, {
+      operationId: '14000000-0000-4000-8000-00000000000b', expectedVersion: 1, action: 'develop',
+    });
+    const secondRow = (await db.query<{ input_hash: string }>('select input_hash from app.ai_runs where id=$1', [second.id])).rows[0];
+    const secondSnapshot = (await db.query<{ input_snapshot: { styleExamples?: Array<{ reelId: string; scriptExcerpt: string }> } }>(
+      'select input_snapshot from app.ai_runs where id=$1', [second.id])).rows[0].input_snapshot;
+    // The example content really did change in the new snapshot...
+    assert.equal(secondSnapshot.styleExamples?.[0]?.scriptExcerpt, 'Zupełnie inny skrypt przykładu.');
+    // ...yet the hash for the same main-Reel input is identical, because styleExamples never
+    // enters the canonical relevant-input representation.
+    assert.equal(secondRow.input_hash, firstRow.input_hash);
   } finally { await db.close(); }
 });

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AiAction, AiInputSnapshot, AiRun, ApplyAiRequest, CaptureInput, DevelopResult, FactCheckResult, ProgrammeMatch, Reel } from '@szronox/contracts';
+import type { AiAction, AiInputSnapshot, AiRun, ApplyAiRequest, CaptureInput, DevelopResult, FactCheckResult, ProgrammeMatch, Reel, StyleExample } from '@szronox/contracts';
 import type { Database, Queryable } from '../db/client.js';
 import { pgErrorCode, PG_UNIQUE_VIOLATION } from '../db/client.js';
 import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
@@ -11,8 +11,23 @@ const MODEL = 'gemini-3.8-flash';
 // v2 (PUBLICATION-01): Opracuj without publication copy, plus generate_publication. Runs recorded
 // under v1 keep their label, so old output is never attributed to the split prompts.
 // v3 (HOOKS-SELECT-EDIT): Opracuj receives the selected hook as its current-hook context.
-const PROMPT_ID = 'gemini-02-development-provisional-v3';
+// v4 (VOICE-01): develop/generate_hooks gain the SPOKEN voice, generate_publication gains the
+// CAPTION voice, and all three may carry styleExamples; fact_check/language_check/find_programme
+// are unaffected and keep their v3 prompt identity.
+const DEVELOPMENT_PROMPT_ID_V3 = 'gemini-02-development-provisional-v3';
+const DEVELOPMENT_PROMPT_IDS: Record<AiAction, string> = {
+  develop: 'gemini-02-development-provisional-v4',
+  generate_hooks: 'gemini-02-development-provisional-v4',
+  fact_check: DEVELOPMENT_PROMPT_ID_V3,
+  language_check: DEVELOPMENT_PROMPT_ID_V3,
+  find_programme: DEVELOPMENT_PROMPT_ID_V3,
+  generate_publication: 'gemini-02-publication-provisional-v4',
+};
 export const ACTIONS: AiAction[] = ['develop', 'generate_hooks', 'fact_check', 'language_check', 'find_programme', 'generate_publication'];
+/** VOICE-01: these three actions alone receive the team's own past Reels as style examples. */
+const STYLE_EXAMPLE_ACTIONS: AiAction[] = ['develop', 'generate_hooks', 'generate_publication'];
+const MAX_STYLE_EXAMPLES = 8;
+const STYLE_EXAMPLE_EXCERPT_LIMIT = 600;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sourceHash = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
 const stale = (code: 'STALE_FACT_CLAIM' | 'STALE_LANGUAGE_RESULT' | 'STALE_PUBLICATION_RESULT' = 'STALE_FACT_CLAIM') =>
@@ -83,6 +98,43 @@ function mappedClaimSpan(original: string, claim: FactCheckResult['claims'][numb
   const offset = edits.filter((edit) => edit.end <= span.start)
     .reduce((total, edit) => total + edit.replacement.length - (edit.end - edit.start), 0);
   return { start: span.start + offset, end: span.end + offset };
+}
+
+interface StyleExampleRow {
+  reelId: string; script: string; publicationDescription: string;
+  selectedHookText: string | null; userHookTexts: string[] | null;
+}
+
+/**
+ * VOICE-01: the team's own recent Reels, read in the same locked transaction as the rest of
+ * the snapshot. Selection is exact per T00 VOICE-01: not deleted, not absorbed, format='reel',
+ * status in to_record|editing|ready|published, non-empty script, excluding this run's own Reel,
+ * newest updated_at first, max 8. hook = the selected hook's text, else the text of the single
+ * source='user' hook when there is exactly one, else null. scriptExcerpt/description are cut at
+ * 600 characters. This selection never reaches `relevant()`, so it never affects inputHash or
+ * staleness — see the dedicated test in service.test.ts.
+ */
+async function selectStyleExamples(tx: Queryable, excludeReelId: string): Promise<StyleExample[]> {
+  const rows = await tx.query<StyleExampleRow>(
+    `select r.id as "reelId", r.script, r.publication_description as "publicationDescription",
+            h.text as "selectedHookText",
+            (select array_agg(uh.text) from app.reel_hooks uh where uh.reel_id = r.id and uh.source = 'user') as "userHookTexts"
+       from app.reels r
+       left join app.reel_hooks h on h.id = r.selected_hook_id
+      where r.deleted_at is null and r.absorbed_into is null and r.format = 'reel'
+        and r.status in ('to_record', 'editing', 'ready', 'published')
+        and length(trim(r.script)) > 0
+        and r.id <> $1
+      order by r.updated_at desc
+      limit ${MAX_STYLE_EXAMPLES}`,
+    [excludeReelId],
+  );
+  return rows.rows.map((row) => ({
+    reelId: row.reelId,
+    hook: row.selectedHookText ?? (row.userHookTexts && row.userHookTexts.length === 1 ? row.userHookTexts[0] : null),
+    scriptExcerpt: row.script.slice(0, STYLE_EXAMPLE_EXCERPT_LIMIT),
+    description: (row.publicationDescription ?? '').slice(0, STYLE_EXAMPLE_EXCERPT_LIMIT),
+  }));
 }
 
 function visibleSnapshot(snapshot: InternalSnapshot): AiInputSnapshot {
@@ -269,6 +321,10 @@ export class AiService {
         ? await findEvidence(tx, release.releaseId,
           searchTerms([reel.script, ...reel.hooks.map((hook) => hook.text)]), MAX_EVIDENCE_CANDIDATES)
         : [];
+      // VOICE-01: selected only for the three actions that use it, and recorded for provenance
+      // only — never merged into `relevant()`, so it never affects inputHash/staleness.
+      const styleExamples = STYLE_EXAMPLE_ACTIONS.includes(body.action)
+        ? await selectStyleExamples(tx, reelId) : undefined;
       const snapshot: InternalSnapshot = {
         reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput, sourceLink: reel.sourceLink,
         script: reel.script, scriptRevision: reel.scriptRevision,
@@ -292,9 +348,10 @@ export class AiService {
         programmeEvidence, imageObjects: images.rows
           .filter((image) => !publication || (image.state === 'ready' && image.storageKey && image.validated_mime_type && image.validated_at))
           .map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
+        ...(styleExamples ? { styleExamples } : {}),
       };
       const id = randomUUID();
-      const promptId = publication ? 'gemini-02-publication-provisional-v3' : PROMPT_ID;
+      const promptId = DEVELOPMENT_PROMPT_IDS[body.action];
       await tx.query(
         `insert into app.ai_runs (id,reel_id,requested_by,action,input_snapshot,input_hash,model,prompt_id,prompt_stage)
          values ($1,$2,$3,$4,$5,$6,$7,$8,'development_provisional')`,

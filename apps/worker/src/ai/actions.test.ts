@@ -256,3 +256,76 @@ test('generate_hooks and fact_check keep every hook with nothing singled out', a
     }
   }
 });
+
+// ── VOICE-01: SPOKEN voice (develop/generate_hooks), CAPTION voice (generate_publication) and
+// the team's own past Reels as style examples ──────────────────────────────────────────────
+
+const styleExample = { reelId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', hook: 'Stary hook', scriptExcerpt: 'Stary skrypt.', description: 'Stary opis.' };
+
+test('develop and generate_hooks receive the SPOKEN voice and, when present, labelled style examples', async () => {
+  for (const action of ['develop', 'generate_hooks']) {
+    const input = run(action);
+    input.input_snapshot.styleExamples = [styleExample];
+    let prompt = '';
+    await withStorage((storageRoot) => executeAction(input, { storageRoot, call: async (_model, request) => {
+      prompt = promptOf(request);
+      return candidate(action === 'develop' ? developOutput : { hookAdditions: ['Nowy'] });
+    } }));
+    assert.ok(prompt.includes('SZRONOX SPOKEN VOICE'), `${action} receives the spoken voice`);
+    assert.match(prompt, /Examples of this team's past Reels.*never reuse their facts or wording/, `${action} labels the examples block`);
+    assert.ok(prompt.includes(JSON.stringify([styleExample])), `${action} includes the example JSON`);
+    assert.equal(prompt.includes('SZRONOX VOICE (captions)'), false, `${action} does not receive the caption voice`);
+  }
+});
+
+test('develop and generate_hooks omit the examples block entirely when the snapshot has none (legacy)', async () => {
+  for (const action of ['develop', 'generate_hooks']) {
+    const input = run(action);
+    assert.equal(input.input_snapshot.styleExamples, undefined);
+    let prompt = '';
+    await withStorage((storageRoot) => executeAction(input, { storageRoot, call: async (_model, request) => {
+      prompt = promptOf(request);
+      return candidate(action === 'develop' ? developOutput : { hookAdditions: ['Nowy'] });
+    } }));
+    assert.ok(prompt.includes('SZRONOX SPOKEN VOICE'), `${action} still receives the spoken voice`);
+    assert.equal(prompt.includes('Examples of this team'), false, `${action} has no examples block`);
+  }
+});
+
+test('legacy generate_publication (no publicationContextVersion) receives the CAPTION voice and examples', async () => {
+  const input = run('generate_publication');
+  input.input_snapshot.styleExamples = [styleExample];
+  const work = await executeAction(input, { storageRoot: 'relative', call: async (_model, request) => {
+    const prompt = promptOf(request);
+    assert.ok(prompt.includes('SZRONOX VOICE (captions)'));
+    assert.ok(prompt.includes(JSON.stringify([styleExample])));
+    assert.equal(prompt.includes('SZRONOX SPOKEN VOICE'), false, 'the spoken voice is not sent to publication');
+    return candidate({ publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' });
+  } });
+  assert.deepEqual(work.result, { publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' });
+});
+
+test('PUBLICATION-02 (v2) generate_publication receives the CAPTION voice and examples', async () => {
+  const input = run('generate_publication');
+  input.input_snapshot.publicationContextVersion = 2;
+  input.input_snapshot.styleExamples = [styleExample];
+  const work = await executeAction(input, { storageRoot: 'relative', call: async (_model, request) => {
+    const prompt = promptOf(request);
+    assert.ok(prompt.includes('SZRONOX VOICE (captions)'));
+    assert.ok(prompt.includes(JSON.stringify([styleExample])));
+    return candidate({ publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' });
+  } });
+  assert.deepEqual(work.result, { publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' });
+});
+
+test('legacy generate_publication without styleExamples (older snapshot) still runs with no examples block', async () => {
+  const input = run('generate_publication');
+  assert.equal(input.input_snapshot.styleExamples, undefined);
+  const work = await executeAction(input, { storageRoot: 'relative', call: async (_model, request) => {
+    const prompt = promptOf(request);
+    assert.ok(prompt.includes('SZRONOX VOICE (captions)'));
+    assert.equal(prompt.includes('Examples of this team'), false);
+    return candidate({ publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' });
+  } });
+  assert.deepEqual(work.result, { publicationDescriptionSuggestion: 'Opis', publicationHashtagsSuggestion: '#tag' });
+});
