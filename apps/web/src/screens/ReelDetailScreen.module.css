@@ -54,6 +54,9 @@
 .titleField {
   box-sizing: border-box;
   width: 100%;
+  /* STREAM-01 (D1): now a flex item of .titleRow alongside the stream glyph; flex:1 plus
+     min-width:0 is the standard way to let a flex item fill and shrink in a row container. */
+  flex: 1 1 auto;
   min-width: 0;
   border: none;
   background: none;
