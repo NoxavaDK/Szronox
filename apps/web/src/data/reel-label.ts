@@ -27,9 +27,20 @@
  *   6. Any non-empty original shared field, in received order. A safety net for a payload
  *      shaped differently from what capture mapped.
  *   7. `Bez tytułu`. Honest, and still better than a blank row.
+ *
+ * CAPTURE-DRAFT-01 (T00 binding section) extends the chain for a Reel (not a bare capture):
+ * typed title, then a selected hook's text, then an auto-draft title suggestion (once that run
+ * has succeeded), then the fetched article headline, then everything above (the share's own
+ * `title` field is still tried first inside `authorWords`, which is unchanged — only new rungs
+ * were inserted ahead of it) — except that a photo-only capture is now labelled
+ * `Zdjęcie · 11 paź` / `3 zdjęcia · 11 paź` (the Reel's own `createdAt`, Polish short month,
+ * Europe/Warsaw) instead of a file name. `captureLabel` keeps the file-name/count behaviour
+ * unchanged, because it runs before a Reel (and so a capture date) exists; `reelLabel` falls
+ * back to the same behaviour when a caller supplies no `createdAt` (e.g. a stream topic
+ * candidate, which has no capture-date field of its own).
  */
 
-import type { CaptureInput, Reel } from '../../../../packages/contracts/src/index.js';
+import type { AutoDraftSummary, CaptureInput, Reel, SourceMetadata } from '../../../../packages/contracts/src/index.js';
 
 /** Enough for the row, which ellipsises anyway; the cap keeps absurd input out of the DOM. */
 export const MAX_LABEL_LENGTH = 80;
@@ -185,19 +196,19 @@ export function scriptLabel(script: string | undefined): string | undefined {
   return tidy(sentence.replace(/[.…]+$/u, '') || line);
 }
 
-/** Derive a label from a capture alone. Exported for the capture-time preview and the tests. */
-export function captureLabel(input: CaptureInput): string {
-  const words = authorWords(input);
-  if (words !== undefined) return words;
-
+/**
+ * Rungs shared once "own words" are ruled out: a bare URL anywhere in the capture, the
+ * capture's own link, then the image rung (parameterised — `captureLabel`'s image rung differs
+ * from `reelLabel`'s only in whether it has a capture date to work with), then the last-resort
+ * original shared field, then `UNTITLED_LABEL`.
+ */
+function linkThenImages(input: CaptureInput, imageLabel: (images: CaptureInput['images']) => string): string {
   for (const raw of [input.url, input.text, input.additionalText, ...(input.originalShare?.fields ?? []).map((field) => field.value)]) {
     if (raw?.trim() && isBareUrl(raw.trim())) return urlLabel(raw);
   }
   if (input.url !== undefined && input.url.trim() !== '') return urlLabel(input.url);
 
-  const named = input.images.find((image) => image.fileName.trim() !== '');
-  if (named !== undefined) return tidy(named.fileName);
-  if (input.images.length > 0) return imageCountLabel(input.images.length);
+  if (input.images.length > 0) return imageLabel(input.images);
 
   for (const field of input.originalShare?.fields ?? []) {
     if (field.value.trim() === '') continue;
@@ -205,6 +216,27 @@ export function captureLabel(input: CaptureInput): string {
   }
 
   return UNTITLED_LABEL;
+}
+
+/** The pre-CAPTURE-DRAFT-01 image rung: the first usable file name, else a pluralised count. */
+function defaultImageLabel(images: CaptureInput['images']): string {
+  const named = images.find((image) => image.fileName.trim() !== '');
+  return named !== undefined ? tidy(named.fileName) : imageCountLabel(images.length);
+}
+
+const WARSAW_SHORT_DATE = new Intl.DateTimeFormat('pl-PL', { timeZone: 'Europe/Warsaw', day: 'numeric', month: 'short' });
+
+/** CAPTURE-DRAFT-01 rung 9: `Zdjęcie · 11 paź` / `3 zdjęcia · 11 paź`, by capture date. */
+function photoDateLabel(count: number, createdAt: string): string {
+  const when = WARSAW_SHORT_DATE.format(new Date(createdAt));
+  return count === 1 ? `Zdjęcie · ${when}` : `${imageCountLabel(count)} · ${when}`;
+}
+
+/** Derive a label from a capture alone. Exported for the capture-time preview and the tests. */
+export function captureLabel(input: CaptureInput): string {
+  const words = authorWords(input);
+  if (words !== undefined) return words;
+  return linkThenImages(input, defaultImageLabel);
 }
 
 /**
@@ -221,10 +253,43 @@ export function captureLabel(input: CaptureInput): string {
  * opening sentence is preferred over an opaque link token or file name. It can change as the
  * script is edited — acceptable for a label that exists only until someone writes a title.
  */
-export function reelLabel(reel: Pick<Reel, 'title' | 'originalInput'> & Partial<Pick<Reel, 'script'>>): ReelLabel {
+export function reelLabel(
+  reel: Pick<Reel, 'title' | 'originalInput'> &
+    Partial<Pick<Reel, 'script' | 'createdAt'>> & {
+      /** CAPTURE-DRAFT-01 rung 2: the selected hook's text, when there is one. */
+      selectedHookText?: string | null;
+      /** CAPTURE-DRAFT-01 rung 3: only consulted once that run has succeeded. */
+      autoDraft?: Pick<AutoDraftSummary, 'state' | 'titleSuggestion'> | null;
+      /** CAPTURE-DRAFT-01 rung 4: the fetched article headline. */
+      sourceMetadata?: Pick<SourceMetadata, 'headline'> | null;
+    },
+): ReelLabel {
   const domain = sourceDomain(captureUrl(reel.originalInput));
-  if (reel.title.trim() !== '') return { text: reel.title, derived: false, ...(domain ? { sourceDomain: domain } : {}) };
-  // Author words first, then the saved script, then link/image fallbacks. Nothing is fetched.
-  const text = authorWords(reel.originalInput) ?? scriptLabel(reel.script) ?? captureLabel(reel.originalInput);
-  return { text, derived: true, ...(domain ? { sourceDomain: domain } : {}) };
+  const withDomain = (text: string, derived: boolean): ReelLabel =>
+    ({ text, derived, ...(domain ? { sourceDomain: domain } : {}) });
+
+  if (reel.title.trim() !== '') return withDomain(reel.title, false);
+
+  // CAPTURE-DRAFT-01 rungs 2–4, each ahead of the share's own `title` field (rung 5), which
+  // stays exactly where it already was: inside `authorWords` below. Only the chain's new rungs
+  // were inserted ahead of it, not its own position.
+  if (reel.selectedHookText && reel.selectedHookText.trim() !== '') {
+    return withDomain(tidy(reel.selectedHookText), true);
+  }
+  if (reel.autoDraft?.state === 'succeeded' && reel.autoDraft.titleSuggestion && reel.autoDraft.titleSuggestion.trim() !== '') {
+    return withDomain(tidy(reel.autoDraft.titleSuggestion), true);
+  }
+  if (reel.sourceMetadata?.headline && reel.sourceMetadata.headline.trim() !== '') {
+    return withDomain(tidy(reel.sourceMetadata.headline), true);
+  }
+
+  // Rungs 5–8: the share's title field (inside authorWords), its own text, the saved script's
+  // opening line, then a URL slug — unchanged from before CAPTURE-DRAFT-01. Nothing is fetched.
+  const text = authorWords(reel.originalInput) ?? scriptLabel(reel.script) ?? linkThenImages(
+    reel.originalInput,
+    // Rung 9: dated by the Reel's own createdAt once there is one; a caller without it (a
+    // stream topic candidate has no capture-date field) keeps the file-name/count fallback.
+    (images) => reel.createdAt !== undefined ? photoDateLabel(images.length, reel.createdAt) : defaultImageLabel(images),
+  );
+  return withDomain(text, true);
 }

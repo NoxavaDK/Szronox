@@ -174,6 +174,105 @@ test('a capture with nothing usable says so rather than rendering blank', () => 
   assert.equal(reelLabel(reel('', { images: [] })).text, UNTITLED_LABEL);
 });
 
+// ═══════════════════ CAPTURE-DRAFT-01: the extended Reel label chain ═══════════════════
+
+test('rung 2: a selected hook text wins over everything derived', () => {
+  const result = reelLabel({
+    title: '', originalInput: { images: [], text: 'Pomysł na rolkę' },
+    selectedHookText: 'Najlepszy hook na świecie',
+    autoDraft: { runId: 'r1', state: 'succeeded', titleSuggestion: 'Propozycja AI', isStale: false },
+    sourceMetadata: { headline: 'Nagłówek artykułu' },
+  });
+  assert.deepEqual(result, { text: 'Najlepszy hook na świecie', derived: true });
+});
+
+test('rung 3: a succeeded auto-draft title suggestion wins over the headline, but only once succeeded', () => {
+  const base = {
+    title: '', originalInput: { images: [], text: 'Pomysł na rolkę' },
+    sourceMetadata: { headline: 'Nagłówek artykułu' },
+  };
+  assert.deepEqual(
+    reelLabel({ ...base, autoDraft: { runId: 'r1', state: 'succeeded', titleSuggestion: 'Propozycja AI', isStale: false } }),
+    { text: 'Propozycja AI', derived: true },
+  );
+  // Running (not yet succeeded): the suggestion is not used, so the headline shows instead.
+  assert.deepEqual(
+    reelLabel({ ...base, autoDraft: { runId: 'r1', state: 'running', titleSuggestion: null, isStale: false } }),
+    { text: 'Nagłówek artykułu', derived: true },
+  );
+});
+
+test('rung 4: the fetched article headline wins over the capture\'s own text', () => {
+  const result = reelLabel({
+    title: '', originalInput: { images: [], text: 'Pomysł na rolkę' },
+    sourceMetadata: { headline: 'Nagłówek artykułu' },
+  });
+  assert.deepEqual(result, { text: 'Nagłówek artykułu', derived: true });
+});
+
+test('rung 5: a Chrome-style Android share (bare URL text, headline title) is labelled by the title', () => {
+  const result = reelLabel({
+    title: '',
+    originalInput: {
+      images: [],
+      text: 'https://example.test/artykul-o-klimacie',
+      originalShare: { fields: [{ name: 'title', value: 'Nagłówek udostępnienia z Chrome' }], files: [] },
+    },
+  });
+  assert.deepEqual(
+    result,
+    { text: 'Nagłówek udostępnienia z Chrome', derived: true, sourceDomain: 'example.test' },
+  );
+});
+
+test('rung 6: the author\'s own text wins once no hook, draft, headline or share title apply', () => {
+  const result = reelLabel({ title: '', originalInput: { images: [], text: 'Mój komentarz do materiału' } });
+  assert.deepEqual(result, { text: 'Mój komentarz do materiału', derived: true });
+});
+
+test('rung 7: the saved script\'s opening sentence is used once the capture itself has no words', () => {
+  const result = reelLabel({ title: '', originalInput: { images: [] }, script: 'Pierwsza zdanie skryptu. Druga część.' });
+  assert.deepEqual(result, { text: 'Pierwsza zdanie skryptu', derived: true });
+});
+
+test('rung 8: a URL slug is used once there is no script either', () => {
+  const result = reelLabel({ title: '', originalInput: { images: [], url: 'https://example.test/artykul-testowy' } });
+  assert.deepEqual(result, { text: 'artykul testowy', derived: true, sourceDomain: 'example.test' });
+});
+
+test('rung 9: a photo-only capture is labelled by its capture date, not a file name', () => {
+  const single = reelLabel({
+    title: '', originalInput: { images: [{ attachmentId: 'a1', fileName: 'IMG_2034.jpg', mimeType: 'image/jpeg', byteSize: 10 }] },
+    createdAt: '2026-10-11T22:30:00.000Z', // 12 Oct local (Europe/Warsaw, CEST)
+  });
+  assert.deepEqual(single, { text: 'Zdjęcie · 12 paź', derived: true });
+
+  const many = reelLabel({
+    title: '', originalInput: {
+      images: [
+        { attachmentId: 'a1', fileName: 'a.jpg', mimeType: 'image/jpeg', byteSize: 10 },
+        { attachmentId: 'a2', fileName: 'b.jpg', mimeType: 'image/jpeg', byteSize: 10 },
+        { attachmentId: 'a3', fileName: 'c.jpg', mimeType: 'image/jpeg', byteSize: 10 },
+      ],
+    },
+    createdAt: '2026-10-11T22:30:00.000Z',
+  });
+  assert.deepEqual(many, { text: '3 zdjęcia · 12 paź', derived: true });
+});
+
+test('rung 9 falls back to the pre-existing file name/count label without a createdAt', () => {
+  // A caller with only CaptureInput (no Reel yet, e.g. a stream topic candidate) keeps the
+  // previous behaviour instead of guessing a date.
+  const result = reelLabel({
+    title: '', originalInput: { images: [{ attachmentId: 'a1', fileName: 'wykres.png', mimeType: 'image/png', byteSize: 10 }] },
+  });
+  assert.deepEqual(result, { text: 'wykres.png', derived: true });
+});
+
+test('rung 10: nothing usable still says Bez tytułu', () => {
+  assert.equal(reelLabel({ title: '', originalInput: { images: [] } }).text, UNTITLED_LABEL);
+});
+
 test('deriving a label never alters the capture it reads', () => {
   const input = {
     images: [{ attachmentId: 'a1', fileName: 'p.png', mimeType: 'image/png', byteSize: 10 }],

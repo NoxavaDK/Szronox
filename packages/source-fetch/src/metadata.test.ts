@@ -35,6 +35,44 @@ test('metadata-free social pages return partial host fallback', () => {
   const result = extractSourceMetadata('<html><head></head><body>post</body></html>', 'https://www.instagram.com/p/123');
   assert.equal(result.state, 'partial'); assert.equal(result.line, 'Źródło: instagram.com');
 });
+// CAPTURE-DRAFT-01: headline extraction.
+const headline = (html: string) => extractSourceMetadata(html, finalUrl).headline;
+
+test('headline prefers og:title over <title>', () => {
+  assert.equal(
+    headline('<meta property="og:title" content="  Tytuł   artykułu  "><title>Inny tytuł</title>'),
+    'Tytuł artykułu',
+  );
+});
+test('headline falls back to <title> when og:title is absent', () => {
+  assert.equal(headline('<title>Tytuł ze stopki</title>'), 'Tytuł ze stopki');
+});
+test('headline strips a trailing site-name suffix matching siteName, case-insensitively', () => {
+  assert.equal(
+    headline('<meta property="og:site_name" content="Example"><meta property="og:title" content="Nagłówek | EXAMPLE">'),
+    'Nagłówek',
+  );
+  assert.equal(
+    headline('<meta property="og:site_name" content="Example"><meta property="og:title" content="Nagłówek - Example">'),
+    'Nagłówek',
+  );
+  assert.equal(
+    headline('<meta property="og:site_name" content="Example"><meta property="og:title" content="Nagłówek – Example">'),
+    'Nagłówek',
+  );
+});
+test('headline keeps a suffix that does not match siteName', () => {
+  assert.equal(
+    headline('<meta property="og:site_name" content="Example"><meta property="og:title" content="Nagłówek | Inna strona">'),
+    'Nagłówek | Inna strona',
+  );
+});
+test('headline is capped at 300 characters and null when neither tag is present', () => {
+  const long = 'A'.repeat(400);
+  assert.equal(headline(`<title>${long}</title>`)?.length, 300);
+  assert.equal(headline('<html><head></head><body>post</body></html>'), null);
+});
+
 test('public URL guard rejects private and loopback addresses and redirect targets', async () => {
   for (const url of ['http://127.0.0.1', 'http://10.0.0.2', 'http://192.168.1.1', 'http://[::1]']) assert.throws(() => canonicalPublicUrl(url), { code: 'SOURCE_UNSUPPORTED' });
   assert.throws(() => resolvePublicRedirect('http://127.0.0.1/private', new URL('https://example.com/a')), { code: 'SOURCE_UNSUPPORTED' });

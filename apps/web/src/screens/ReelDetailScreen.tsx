@@ -24,7 +24,7 @@ import styles from './ReelDetailScreen.module.css';
  */
 export function ReelDetailScreen(props: ReelDetailScreenProps) {
   const {
-    onBack, title, onChangeTitle, titlePlaceholder, sourceDomain,
+    onBack, title, onChangeTitle, titlePlaceholder, sourceDomain, autoDraft,
     metadata, plan, contextAction, readOnly, selectors, overflow, onOpenFeedCover, restore,
     hooks, onRemoveHook, selectedHookId, onSelectHook, hookSelectionPending,
     hookEdits, onStartHookEdit, onChangeHookEdit, onSaveHookEdit, onCancelHookEdit,
@@ -131,6 +131,22 @@ export function ReelDetailScreen(props: ReelDetailScreenProps) {
 
       {/* Shown only when this Reel is soft-deleted: explains the state; Przywróć is the context action. */}
       {restore ? <RestoreBanner {...restore} /> : null}
+
+      {/*
+        CAPTURE-DRAFT-01: the capture-triggered draft row, only while there is no title yet.
+        `autoDraft` is undefined for a failed/stale run, so this never has to check that here.
+      */}
+      {!readOnly && title.trim() === '' && autoDraft ? (
+        <p className={styles.autoDraftRow}>
+          {autoDraft.state === 'preparing' ? 'Przygotowuję szkic…' : (
+            <>
+              <span>{`Propozycja tytułu: ${autoDraft.titleSuggestion}`}</span>
+              <TextAction onClick={autoDraft.onUseTitle}>Użyj</TextAction>
+              <TextAction tone="quiet" onClick={autoDraft.onOpenDraft}>Szkic gotowy · Zobacz</TextAction>
+            </>
+          )}
+        </p>
+      ) : null}
 
       <div className={styles.metaGroup}>
         {/* Controlled STATUS / PRIORYTET / MONTUJE (frozen batch sec. 3). A deleted Reel only shows them. */}

@@ -29,6 +29,8 @@ import type { Database } from '../db/client.js';
 import { registerAttachmentRoutes } from '../storage/routes.js';
 import type { KdriveConfig } from '../kdrive/config.js';
 import { SourceMetadataService } from '../source/metadata.js';
+import type { AutoDraftConfig } from './config.js';
+import { AiService } from '../ai/service.js';
 
 export interface CoreDependencies {
   db: Database;
@@ -39,6 +41,8 @@ export interface CoreDependencies {
   /** The two allowlisted users, for /me peer identity. */
   allowlist: Array<{ id: string; name: 'NOXAVA' | 'SZRON'; avatarUrl?: string | null }>;
   aiEnabled?: boolean;
+  /** CAPTURE-DRAFT-01: guards the capture-triggered `develop` run. Absent means disabled. */
+  aiAutoDraft?: AutoDraftConfig;
   /**
    * Private root holding archived programme sources. Absent means no archive is configured,
    * and the source route says so explicitly rather than serving an unverified file.
@@ -69,7 +73,12 @@ function requireMutationContext(body: unknown): { operationId: string; expectedV
 }
 
 export function registerCoreRoutes(app: FastifyInstance, dependencies: CoreDependencies): void {
-  const repository = new CoreRepository(dependencies.db);
+  // CAPTURE-DRAFT-01: a disabled/absent config makes the hook a no-op (enqueueCaptureDraft
+  // checks `enabled` itself), so capture behaves exactly as before when the feature is off.
+  const autoDraftConfig = dependencies.aiAutoDraft ?? { enabled: false, dailyLimit: 50 };
+  const aiService = new AiService(dependencies.db);
+  const repository = new CoreRepository(dependencies.db, (tx, actor, reel) =>
+    aiService.enqueueCaptureDraft(tx, actor, reel, autoDraftConfig));
   const limits = dependencies.attachmentLimits ?? DEFAULT_ATTACHMENT_LIMITS;
   const sourceMetadata = dependencies.sourceMetadata;
 
