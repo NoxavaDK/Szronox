@@ -21,14 +21,18 @@ import type {
   ExportReference,
   Priority,
   Reel,
+  ReelFormat,
   ReelHook,
   ReelStatus,
+  StreamRef,
+  StreamTopic,
 } from '@szronox/contracts';
 
 import type { Database, Queryable } from '../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../db/client.js';
 import { deriveSourceUrl, initialSourceMetadata } from '../source/metadata.js';
 import {
+  absorbedIntoStream,
   CoreError,
   editConflict,
   editorRequired,
@@ -44,9 +48,13 @@ import {
   type AttachmentRow,
   type HookRow,
   type ReelRow,
+  type StreamTopicRow,
+  type StreamTopicSourceRow,
   toAttachment,
   toHook,
   toReel,
+  toStreamTopic,
+  toStreamTopicSource,
 } from './mapping.js';
 import {
   digestUploadToken,
@@ -67,7 +75,7 @@ const REEL_COLUMNS = `
   published_at, publication_urls, publication_description, publication_hashtags,
   feed_cover_done, feed_cover_asset, created_by, created_at, updated_at, deleted_at,
   to_char(planned_publication_date, 'YYYY-MM-DD') as planned_publication_date,
-  planned_publication_slot
+  planned_publication_slot, format, absorbed_into
 `;
 
 /** Scalar fields PATCH may touch. Anything else is refused, not ignored. */
@@ -196,7 +204,7 @@ export class CoreRepository {
   }
 
   private async assemble(tx: Queryable, row: ReelRow): Promise<Reel> {
-    const [hooks, attachments, memes] = await Promise.all([
+    const [hooks, attachments, memes, topics, inStreams] = await Promise.all([
       tx.query<HookRow>(
         'select id, reel_id, text, source, position, created_at from app.reel_hooks where reel_id = $1 order by position asc',
         [row.id],
@@ -209,8 +217,51 @@ export class CoreRepository {
         'select meme_id from app.reel_memes where reel_id = $1 order by position asc',
         [row.id],
       ),
+      // STREAM-01: topics are only ever non-empty for a stream; a plain Reel never has any.
+      row.format === 'stream' ? this.loadTopics(tx, row.id) : Promise.resolve([]),
+      this.loadInStreams(tx, row.id),
     ]);
-    return toReel(row, hooks.rows, attachments.rows, memes.rows.map((entry) => entry.meme_id));
+    return toReel(row, hooks.rows, attachments.rows, memes.rows.map((entry) => entry.meme_id), topics, inStreams);
+  }
+
+  /** STREAM-01: a stream's ordered topics, each with its source Reel's live view attached. */
+  async loadTopics(tx: Queryable, streamId: string): Promise<StreamTopic[]> {
+    const topics = await tx.query<StreamTopicRow>(
+      `select id, stream_id, position, kind, source_reel_id, title, notes, script, created_at, updated_at
+       from app.stream_topics where stream_id = $1 order by position asc`,
+      [streamId],
+    );
+    if (topics.rows.length === 0) return [];
+    const sourceIds = [...new Set(topics.rows.map((topic) => topic.source_reel_id))];
+    const sources = await tx.query<StreamTopicSourceRow>(
+      `select id, title, status, editor_id, publication_source, source_metadata, source_link, original_input, deleted_at
+       from app.reels where id = any($1::uuid[])`,
+      [sourceIds],
+    );
+    const byId = new Map(sources.rows.map((source) => [source.id, source]));
+    return topics.rows.map((row) => {
+      const sourceRow = byId.get(row.source_reel_id);
+      // The foreign key guarantees the source Reel still exists; a missing row here would be
+      // a bug rather than a product state, so it is not masked as a quiet empty source.
+      if (!sourceRow) throw new Error(`Stream topic ${row.id} has no source Reel ${row.source_reel_id}`);
+      return toStreamTopic(row, toStreamTopicSource(sourceRow, row.kind));
+    });
+  }
+
+  /**
+   * STREAM-01 (D6): the active (non-deleted) streams that carry this Reel as a topic, absorbed
+   * or linked. A deleted stream never appears, and neither does a deleted linking stream's
+   * cascade-deleted absorbed idea (it is excluded by the same `deleted_at is null` clause).
+   */
+  async loadInStreams(tx: Queryable, reelId: string): Promise<StreamRef[]> {
+    const rows = await tx.query<{ id: string; title: string }>(
+      `select distinct r.id, r.title from app.reels r
+       join app.stream_topics t on t.stream_id = r.id
+       where t.source_reel_id = $1 and r.deleted_at is null and r.format = 'stream'
+       order by r.title asc, r.id asc`,
+      [reelId],
+    );
+    return rows.rows;
   }
 
   /**
@@ -237,6 +288,8 @@ export class CoreRepository {
     // Deleted is an explicit request, never a side effect of omitting a filter.
     const where: string[] = [
       query.visibility === 'deleted' ? 'deleted_at is not null' : 'deleted_at is null',
+      // STREAM-01: an idea absorbed into a stream is hidden from every list, active or deleted.
+      'absorbed_into is null',
     ];
 
     if (query.status) {
@@ -333,7 +386,12 @@ export class CoreRepository {
    * of them is the same operation (e.g. a capture queued offline before a contract gained a
    * defaulted field), so it returns the original result instead of a false conflict.
    */
-  private async idempotent<T>(
+  /**
+   * Public so sibling modules composed on top of this repository (e.g. STREAM-01's topic
+   * routes, which version-check against the same `app.reels` row) reuse this exact
+   * replay/record ledger instead of a second implementation of the same contract.
+   */
+  async idempotent<T>(
     actor: Actor, operationId: string, route: string, payload: unknown,
     body: (tx: Queryable) => Promise<T>, legacyPayloads: readonly unknown[] = [],
   ): Promise<T> {
@@ -365,8 +423,15 @@ export class CoreRepository {
    */
   async createReel(
     actor: Actor,
-    request: { operationId: string; reelId: string; input: CaptureInput; initialScript?: string; initialHook?: string; priority?: Priority },
+    request: {
+      operationId: string; reelId: string; input: CaptureInput; initialScript?: string;
+      initialHook?: string; priority?: Priority; format?: ReelFormat; title?: string;
+    },
   ): Promise<Reel> {
+    const format: ReelFormat = request.format ?? 'reel';
+    if (format !== 'reel' && format !== 'stream') {
+      throw validationError('format must be "reel" or "stream"', { field: 'format' });
+    }
     const images = request.input.images ?? [];
     const ids = images.map((image) => image.attachmentId);
     if (new Set(ids).size !== ids.length) {
@@ -374,26 +439,44 @@ export class CoreRepository {
     }
     for (const image of images) this.assertImageDescriptor(image);
 
-    const usable = Boolean(
-      (request.input.text && request.input.text.trim()) ||
-      (request.input.url && request.input.url.trim()) ||
-      images.length > 0,
-    );
-    if (!usable) throw validationError('Capture has no text, URL or supported image');
-    if (request.initialScript !== undefined && (
-      typeof request.initialScript !== 'string' ||
-      request.initialScript.trim() === '' ||
-      request.input.text !== request.initialScript
-    )) {
-      throw validationError('initialScript must be nonempty and exactly match input.text');
+    if (format === 'stream') {
+      // STREAM-01: a stream requires a title and never a script/hook; its capture may be empty.
+      if (typeof request.title !== 'string' || request.title.trim() === '') {
+        throw validationError('A stream requires a non-empty title', { field: 'title' });
+      }
+      if (request.initialScript !== undefined) {
+        throw validationError('initialScript is not allowed when creating a stream', { field: 'initialScript' });
+      }
+      if (request.initialHook !== undefined) {
+        throw validationError('initialHook is not allowed when creating a stream', { field: 'initialHook' });
+      }
+    } else {
+      if (request.title !== undefined) {
+        throw validationError('title is only allowed when creating a stream', { field: 'title' });
+      }
+      const usable = Boolean(
+        (request.input.text && request.input.text.trim()) ||
+        (request.input.url && request.input.url.trim()) ||
+        images.length > 0,
+      );
+      if (!usable) throw validationError('Capture has no text, URL or supported image');
+      if (request.initialScript !== undefined && (
+        typeof request.initialScript !== 'string' ||
+        request.initialScript.trim() === '' ||
+        request.input.text !== request.initialScript
+      )) {
+        throw validationError('initialScript must be nonempty and exactly match input.text');
+      }
     }
 
     return this.idempotent(actor, request.operationId, 'POST /reels', request, async (tx) => {
       await tx.query(
-        `insert into app.reels (id, original_input, input_note, script, script_revision, priority, created_by, source_metadata)
-         values ($1, $2, $3, $4, 0, coalesce($5, 'normal'), $6, $7)`,
+        `insert into app.reels (id, format, title, original_input, input_note, script, script_revision, priority, created_by, source_metadata)
+         values ($1, $2, $3, $4, $5, $6, 0, coalesce($7, 'normal'), $8, $9)`,
         [
           request.reelId,
+          format,
+          format === 'stream' ? (request.title as string).trim() : '',
           JSON.stringify(request.input),
           request.initialScript === undefined ? request.input.text ?? '' : '',
           request.initialScript ?? '',
@@ -452,6 +535,8 @@ export class CoreRepository {
 
     return this.idempotent(actor, request.operationId, `PATCH /reels/${reelId}`, request, async (tx) => {
       const before = await this.loadReel(tx, reelId);
+      // STREAM-01: an absorbed idea is written only through the stream topic routes.
+      if (before.absorbedInto !== null) throw absorbedIntoStream();
       if (before.version !== request.expectedVersion) throw editConflict(before.version);
 
       const changes = request.changes as Partial<Record<(typeof PATCHABLE_FIELDS)[number], unknown>>;
@@ -601,6 +686,8 @@ export class CoreRepository {
     const route = `POST /reels/${reelId}/${deleted ? 'delete' : 'restore'}`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
       const before = await this.loadReel(tx, reelId, { includeDeleted: true });
+      // STREAM-01: an absorbed idea is deleted/restored only as part of its stream's lifecycle.
+      if (before.absorbedInto !== null) throw absorbedIntoStream();
       if (before.version !== request.expectedVersion) throw editConflict(before.version);
       const updated = await tx.query<ReelRow>(
         `update app.reels set deleted_at = ${deleted ? 'now()' : 'null'},
@@ -611,6 +698,15 @@ export class CoreRepository {
       );
       const row = updated.rows[0];
       if (!row) throw editConflict(before.version);
+      // STREAM-01: deleting/restoring a stream cascades the same deleted_at to its absorbed
+      // ideas in this same transaction. Topics, order and positions are untouched.
+      if (row.format === 'stream') {
+        await tx.query(
+          `update app.reels set deleted_at = ${deleted ? 'now()' : 'null'}, updated_at = now()
+           where absorbed_into = $1`,
+          [reelId],
+        );
+      }
       return this.assemble(tx, row);
     });
   }
@@ -630,6 +726,8 @@ export class CoreRepository {
     }
     return this.idempotent(actor, request.operationId, `POST /reels/${reelId}/hooks`, request, async (tx) => {
       const before = await this.bumpVersion(tx, reelId, request.expectedVersion);
+      // STREAM-01: an absorbed idea has no hooks UI and is written only through stream routes.
+      if (before.absorbed_into !== null) throw absorbedIntoStream();
       const count = await tx.query<{ count: string }>(
         'select count(*)::text as count from app.reel_hooks where reel_id = $1', [reelId],
       );
@@ -665,7 +763,8 @@ export class CoreRepository {
     }
     const route = `PATCH /reels/${reelId}/hooks/${hookId}`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
-      await this.bumpVersion(tx, reelId, request.expectedVersion);
+      const before = await this.bumpVersion(tx, reelId, request.expectedVersion);
+      if (before.absorbed_into !== null) throw absorbedIntoStream();
       // Only the wording changes. `source` and `created_at` are server-owned
       // provenance and are deliberately untouched.
       const updated = await tx.query(
@@ -683,7 +782,8 @@ export class CoreRepository {
   ): Promise<Reel> {
     const route = `DELETE /reels/${reelId}/hooks/${hookId}`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
-      await this.bumpVersion(tx, reelId, request.expectedVersion);
+      const before = await this.bumpVersion(tx, reelId, request.expectedVersion);
+      if (before.absorbed_into !== null) throw absorbedIntoStream();
       // Deleting the selected hook clears `selected_hook_id` in this same statement through
       // the ON DELETE SET NULL reference; any other selection is left exactly as it was.
       const removed = await tx.query<{ position: number }>(
@@ -717,7 +817,8 @@ export class CoreRepository {
   ): Promise<Reel> {
     const route = `PUT /reels/${reelId}/selected-hook`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
-      await this.bumpVersion(tx, reelId, request.expectedVersion);
+      const before = await this.bumpVersion(tx, reelId, request.expectedVersion);
+      if (before.absorbed_into !== null) throw absorbedIntoStream();
       if (request.hookId !== null) {
         const hook = await tx.query('select 1 from app.reel_hooks where id = $1 and reel_id = $2', [request.hookId, reelId]);
         if (hook.rows.length === 0) throw notFound('Hook not found');
@@ -732,8 +833,12 @@ export class CoreRepository {
     });
   }
 
-  /** Version-check and bump in one guarded statement. */
-  private async bumpVersion(tx: Queryable, reelId: string, expectedVersion: number): Promise<ReelRow> {
+  /**
+   * Version-check and bump in one guarded statement. Public for the same reason as
+   * `idempotent` above: a stream's version lives on this same `app.reels` row, so STREAM-01's
+   * topic mutations lock and bump it exactly like a hook mutation does.
+   */
+  async bumpVersion(tx: Queryable, reelId: string, expectedVersion: number): Promise<ReelRow> {
     const updated = await tx.query<ReelRow>(
       `update app.reels set version = version + 1, updated_at = now()
        where id = $1 and version = $2 and deleted_at is null
@@ -771,6 +876,7 @@ export class CoreRepository {
     const route = `POST /reels/${reelId}/current-export`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
       const before = await this.loadReel(tx, reelId);
+      if (before.absorbedInto !== null) throw absorbedIntoStream();
       if (before.version !== request.expectedVersion) throw editConflict(before.version);
       const nextRevision = (before.currentExport?.revision ?? 0) + 1;
       const next: ExportReference = { ...reference, revision: nextRevision };
@@ -814,6 +920,7 @@ export class CoreRepository {
     const route = `POST /reels/${reelId}/kdrive-folder`;
     return this.idempotent(actor, request.operationId, route, payload, async (tx) => {
       const before = await this.loadReel(tx, reelId);
+      if (before.absorbedInto !== null) throw absorbedIntoStream();
       if (before.version !== request.expectedVersion) throw editConflict(before.version);
       const updated = await tx.query<ReelRow>(
         `update app.reels set kdrive_folder = $1, version = version + 1, updated_at = now()
@@ -844,6 +951,7 @@ export class CoreRepository {
       if (completed.purpose !== request.purpose || completed.kdrive_file_id !== request.fileId
           || completed.final_name !== request.name || Number(completed.byte_size) !== request.byteSize) throw validationError('Upload metadata changed before attachment');
       const before = await this.loadReel(tx, reelId);
+      if (before.absorbedInto !== null) throw absorbedIntoStream();
       if (completed.state === 'attached') return before;
       if (completed.state !== 'finished') throw validationError('Upload is not finished', { reason: 'upload_not_open' });
       if (before.version !== request.expectedVersion) throw editConflict(before.version);
@@ -893,6 +1001,7 @@ export class CoreRepository {
     const route = `POST /reels/${reelId}/verification`;
     return this.idempotent(actor, request.operationId, route, request, async (tx) => {
       const before = await this.loadReel(tx, reelId);
+      if (before.absorbedInto !== null) throw absorbedIntoStream();
       if (before.version !== request.expectedVersion) throw editConflict(before.version);
       if (before.currentExport === null) throw validationError('Reel has no current export to verify');
 

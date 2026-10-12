@@ -228,6 +228,20 @@ export class AiService {
       if (!locked.rows[0]) throw notFound('Reel not found');
       if (locked.rows[0].version !== body.expectedVersion) throw editConflict(locked.rows[0].version);
       const reel = await this.core.loadReel(tx, reelId);
+      // STREAM-01: no AI capability on a stream, and an absorbed idea is written only through
+      // the stream topic routes. Checked before any image gate, evidence search or provider call.
+      if (reel.format === 'stream') {
+        throw new CoreError({
+          status: 422, code: 'VALIDATION_ERROR', message: 'AI is not available for a stream',
+          details: { reason: 'not_available_for_stream' },
+        });
+      }
+      if (reel.absorbedInto !== null) {
+        throw new CoreError({
+          status: 422, code: 'VALIDATION_ERROR', message: 'Reel is absorbed into a stream and cannot be edited directly',
+          details: { reason: 'absorbed_into_stream' },
+        });
+      }
       // Checked before any image gate or provider call: the saved script is the only input.
       const publication = body.action === 'generate_publication';
       if (publication && reel.script.trim().length === 0) {

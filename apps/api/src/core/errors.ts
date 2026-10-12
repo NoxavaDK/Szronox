@@ -94,6 +94,18 @@ export const exportChanged = (currentVersion?: number) =>
 export const uploadIncomplete = (message = 'Attachment upload is not complete') =>
   new CoreError({ status: 422, code: 'UPLOAD_INCOMPLETE', message });
 
+/**
+ * STREAM-01: a Reel absorbed into a stream is hidden and its only write paths are the stream
+ * topic routes and the SOURCE-01 metadata refresh. Every other mutation route refuses it.
+ */
+export const absorbedIntoStream = () =>
+  new CoreError({
+    status: 422,
+    code: 'VALIDATION_ERROR',
+    message: 'Reel is absorbed into a stream and cannot be edited directly',
+    details: { reason: 'absorbed_into_stream' },
+  });
+
 export const unsupportedInput = (message: string, details?: Record<string, unknown>) =>
   new CoreError({ status: 422, code: 'UNSUPPORTED_INPUT', message, details });
 
