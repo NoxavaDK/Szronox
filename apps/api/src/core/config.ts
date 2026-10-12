@@ -46,6 +46,10 @@ export class ConfigError extends Error {
 
 export interface CoreEnv extends AuthEnv, KdriveEnv {
   AI_ENABLED?: string;
+  /** CAPTURE-DRAFT-01: off unless exactly "true". Default off. */
+  AI_AUTO_DRAFT_ENABLED?: string;
+  /** CAPTURE-DRAFT-01: capture-triggered develop runs allowed per Europe/Warsaw day. Default 50, integer 0-1000. */
+  AI_AUTO_DRAFT_DAILY_LIMIT?: string;
   /** Absolute private filesystem root. */
   APP_STORAGE_ROOT?: string;
   /** Same-origin base used to construct absolute upload transport URLs. */
@@ -113,6 +117,28 @@ export function buildStorage(env: CoreEnv): StorageAdapter {
   });
 }
 
+/** CAPTURE-DRAFT-01: enqueue guard config for the capture-triggered `develop` run. */
+export interface AutoDraftConfig {
+  enabled: boolean;
+  dailyLimit: number;
+}
+
+/**
+ * `AI_AUTO_DRAFT_ENABLED` must be exactly `"true"` to turn the feature on; anything else
+ * (absent, `"false"`, garbage) is off. `AI_AUTO_DRAFT_DAILY_LIMIT` defaults to 50 and, when
+ * given, must be an integer from 0 to 1000 — a config error otherwise, not a silent clamp.
+ */
+export function parseAutoDraftConfig(env: CoreEnv): AutoDraftConfig {
+  const enabled = env.AI_AUTO_DRAFT_ENABLED === 'true';
+  const raw = env.AI_AUTO_DRAFT_DAILY_LIMIT;
+  if (!present(raw)) return { enabled, dailyLimit: 50 };
+  const dailyLimit = Number(raw);
+  if (!Number.isInteger(dailyLimit) || dailyLimit < 0 || dailyLimit > 1000) {
+    throw new ConfigError('AI_AUTO_DRAFT_DAILY_LIMIT must be an integer from 0 to 1000');
+  }
+  return { enabled, dailyLimit };
+}
+
 /**
  * Where archived programme sources live.
  *
@@ -145,6 +171,7 @@ export function buildCoreDependencies(
     storage: buildStorage(env),
     allowlist: allowlist.map((entry) => ({ ...entry, avatarUrl: null })),
     aiEnabled: env.AI_ENABLED === 'true',
+    aiAutoDraft: parseAutoDraftConfig(env),
     programmeArchiveRoot: programmeArchiveRoot(env),
     // All-or-nothing; a partial or unreadable configuration fails startup (KDRIVE-01).
     kdrive: parseKdriveConfig(env),
@@ -158,6 +185,7 @@ export function describeConfig(env: CoreEnv = process.env as CoreEnv) {
     authentication: describeAuthConfig(env),
     storage: env.STORAGE_DRIVER === 'memory' ? 'memory' : present(env.APP_STORAGE_ROOT) ? 'filesystem' : 'unconfigured',
     storageRootConfigured: present(env.APP_STORAGE_ROOT),
+    aiAutoDraft: parseAutoDraftConfig(env),
     programmeArchiveConfigured: programmeArchiveRoot(env) !== undefined,
     allowlistConfigured: present(env.APP_ALLOWLIST),
     // Identifiers only; the token file's content is never described.

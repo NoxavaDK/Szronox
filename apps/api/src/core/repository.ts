@@ -46,11 +46,13 @@ import {
 } from './errors.js';
 import {
   type AttachmentRow,
+  type AutoDraftRunRow,
   type HookRow,
   type ReelRow,
   type StreamTopicRow,
   type StreamTopicSourceRow,
   toAttachment,
+  toAutoDraft,
   toHook,
   toReel,
   toStreamTopic,
@@ -187,8 +189,18 @@ export function decodeCursor(raw: string): Cursor {
   }
 }
 
+/**
+ * CAPTURE-DRAFT-01: invoked inside `createReel`'s own transaction, after the new Reel (and its
+ * attachments/hook) are inserted, so a capture-triggered `develop` run can be enqueued in the
+ * same transaction as the capture itself. Injected rather than imported, because `ai/service.ts`
+ * already imports `CoreRepository` from this module — importing back from it here would be a
+ * circular module dependency. Never called for a stream, and never on an idempotent replay
+ * (the whole transaction body, including this call, is skipped by the replay guard).
+ */
+export type CaptureDraftHook = (tx: Queryable, actor: Actor, reel: Reel) => Promise<void>;
+
 export class CoreRepository {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly captureDraftHook?: CaptureDraftHook) {}
 
   // ── Reads ──────────────────────────────────────────────────────────────────
 
@@ -204,7 +216,7 @@ export class CoreRepository {
   }
 
   private async assemble(tx: Queryable, row: ReelRow): Promise<Reel> {
-    const [hooks, attachments, memes, topics, inStreams] = await Promise.all([
+    const [hooks, attachments, memes, topics, inStreams, autoDraftRun] = await Promise.all([
       tx.query<HookRow>(
         'select id, reel_id, text, source, position, created_at from app.reel_hooks where reel_id = $1 order by position asc',
         [row.id],
@@ -220,8 +232,17 @@ export class CoreRepository {
       // STREAM-01: topics are only ever non-empty for a stream; a plain Reel never has any.
       row.format === 'stream' ? this.loadTopics(tx, row.id) : Promise.resolve([]),
       this.loadInStreams(tx, row.id),
+      // CAPTURE-DRAFT-01: at most one row, via the unique partial index on (reel_id) where
+      // trigger='capture'. Cheap and indexed, so this adds no N+1 cost to list loading.
+      tx.query<AutoDraftRunRow>(
+        `select id, state, result, input_snapshot, applied_hook_ids
+           from app.ai_runs where reel_id = $1 and trigger = 'capture'`,
+        [row.id],
+      ),
     ]);
-    return toReel(row, hooks.rows, attachments.rows, memes.rows.map((entry) => entry.meme_id), topics, inStreams);
+    const memeIds = memes.rows.map((entry) => entry.meme_id);
+    const autoDraft = toAutoDraft(autoDraftRun.rows[0] ?? null, row, hooks.rows, memeIds, attachments.rows);
+    return toReel(row, hooks.rows, attachments.rows, memeIds, topics, inStreams, autoDraft);
   }
 
   /** STREAM-01: a stream's ordered topics, each with its source Reel's live view attached. */
@@ -502,6 +523,12 @@ export class CoreRepository {
            values ($1, $2, $3, 'user', 0)`,
           [randomUUID(), request.reelId, request.initialHook],
         );
+      }
+
+      // CAPTURE-DRAFT-01: never for a stream. The hook decides for itself (AI_AUTO_DRAFT_ENABLED,
+      // the daily limit) whether anything is actually enqueued; capture succeeds either way.
+      if (format === 'reel' && this.captureDraftHook) {
+        await this.captureDraftHook(tx, actor, await this.loadReel(tx, request.reelId));
       }
 
       return this.loadReel(tx, request.reelId);

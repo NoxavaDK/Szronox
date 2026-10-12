@@ -7,9 +7,13 @@
  */
 
 import type {
+  AiJobState,
   AttachmentReference,
+  AutoDraftSummary,
   CaptureInput,
+  DevelopResult,
   ExportReference,
+  Priority,
   Reel,
   ReelFormat,
   ReelHook,
@@ -211,6 +215,82 @@ export function toStreamTopic(row: StreamTopicRow, source: StreamTopicSource): S
   };
 }
 
+/**
+ * CAPTURE-DRAFT-01: the narrow columns of the one `trigger='capture'` `app.ai_runs` row a Reel
+ * may have (the unique partial index `ai_runs_one_capture_draft` guarantees at most one).
+ */
+export interface AutoDraftRunRow {
+  id: string;
+  state: AiJobState;
+  result: DevelopResult | null;
+  /** Only the fields a `develop` run's staleness comparison needs (see `relevant()` in ai/service.ts). */
+  input_snapshot: {
+    title: string;
+    originalInput: CaptureInput;
+    sourceLink: string | null;
+    inputNote: string;
+    script: string;
+    hooks: Array<{ id: string; text: string; source: 'user' | 'ai'; position: number }>;
+    priority: Priority;
+    attachedMemeIds: string[];
+    attachments: Array<{ id: string; state: AttachmentReference['state'] }>;
+  };
+  applied_hook_ids: string[];
+}
+
+/**
+ * The exact subset of `develop`'s staleness comparison (`relevant()`'s default branch in
+ * ai/service.ts) needed to tell whether a capture-triggered run's snapshot still matches the
+ * live Reel. Deliberately duplicated in miniature rather than imported: `ai/service.ts` already
+ * imports `CoreRepository` from this module's sibling, so importing back from it here would be
+ * a circular module dependency. Keep in sync with `relevant()`'s default branch if that changes.
+ */
+function developRelevantKey(input: {
+  title: string; originalInput: CaptureInput; sourceLink: string | null; inputNote: string;
+  script: string; hooks: Array<{ id: string; text: string; source: string; position: number }>;
+  priority: Priority; attachedMemeIds: string[]; attachments: Array<{ id: string; state: string }>;
+}): string {
+  return JSON.stringify({
+    title: input.title, originalInput: input.originalInput, sourceLink: input.sourceLink ?? null, inputNote: input.inputNote,
+    script: input.script,
+    hooks: input.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
+    priority: input.priority,
+    attachedMemeIds: input.attachedMemeIds,
+    attachments: input.attachments.map(({ id, state }) => ({ id, state })),
+  });
+}
+
+/**
+ * CAPTURE-DRAFT-01: derive `Reel.autoDraft` from the Reel's one capture-triggered `develop` run,
+ * if any. `titleSuggestion` is read only once the run `succeeded`; `isStale` mirrors the same
+ * comparison a run's own `isStale` field uses (title/originalInput/sourceLink/inputNote/script/
+ * unapplied hooks/priority/attachedMemeIds/input attachments).
+ */
+export function toAutoDraft(
+  run: AutoDraftRunRow | null,
+  row: ReelRow,
+  hooks: HookRow[],
+  memeIds: string[],
+  attachments: AttachmentRow[],
+): AutoDraftSummary | null {
+  if (!run) return null;
+  const appliedHookIds = new Set(run.applied_hook_ids);
+  const current = developRelevantKey({
+    title: row.title, originalInput: row.original_input, sourceLink: row.source_link ?? null, inputNote: row.input_note,
+    script: row.script, priority: row.priority,
+    hooks: hooks.filter((hook) => !appliedHookIds.has(hook.id)).map(({ id, text, source, position }) => ({ id, text, source, position })),
+    attachedMemeIds: memeIds,
+    attachments: attachments.filter((attachment) => attachment.purpose === 'input').map(({ id, state }) => ({ id, state })),
+  });
+  const original = developRelevantKey(run.input_snapshot);
+  return {
+    runId: run.id,
+    state: run.state,
+    titleSuggestion: run.state === 'succeeded' && run.result ? run.result.titleSuggestion ?? null : null,
+    isStale: current !== original,
+  };
+}
+
 export function toReel(
   row: ReelRow,
   hooks: HookRow[],
@@ -218,6 +298,7 @@ export function toReel(
   memeIds: string[],
   topics: StreamTopic[] = [],
   inStreams: StreamRef[] = [],
+  autoDraft: AutoDraftSummary | null = null,
 ): Reel {
   return {
     id: row.id,
@@ -259,8 +340,7 @@ export function toReel(
     absorbedInto: row.absorbed_into ?? null,
     topics,
     inStreams,
-    // Root integration default until CAPTURE-DRAFT-01 derives it from the capture-triggered run.
-    autoDraft: null,
+    autoDraft,
     createdBy: row.created_by,
     createdAt: isoRequired(row.created_at),
     updatedAt: isoRequired(row.updated_at),

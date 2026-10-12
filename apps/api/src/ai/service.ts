@@ -4,7 +4,7 @@ import type { Database, Queryable } from '../db/client.js';
 import { pgErrorCode, PG_UNIQUE_VIOLATION } from '../db/client.js';
 import { CoreRepository, payloadHash, type Actor } from '../core/repository.js';
 import { CoreError, editConflict, idempotencyConflict, notFound, validationError } from '../core/errors.js';
-import { resolveActiveRelease } from './corpus/repository.js';
+import { type ActiveRelease, resolveActiveRelease } from './corpus/repository.js';
 import { findEvidence, MAX_EVIDENCE_CANDIDATES, type ProgrammeEvidence, searchTerms } from './corpus/retrieval.js';
 
 const MODEL = 'gemini-3.8-flash';
@@ -221,6 +221,62 @@ export class AiService {
     }
   }
 
+  /**
+   * Build an action's input snapshot from a live Reel, read in the caller's own transaction.
+   *
+   * `enforceImageReady` is the user-initiated `enqueue()` path's own gate (a person pressing
+   * Opracuj has already waited for uploads to finish); CAPTURE-DRAFT-01's capture-triggered
+   * enqueue passes `false`, because capture never waits for an upload. Either way, a `develop`
+   * snapshot's `imageObjects` always carries every input image regardless of readiness — only
+   * `generate_publication` filters to validated ones — so skipping the gate changes nothing
+   * about what the snapshot records, only whether an incomplete one is refused up front.
+   */
+  private async buildSnapshot(
+    tx: Queryable, reel: Reel, action: AiAction,
+    options: { release: ActiveRelease | null; enforceImageReady: boolean },
+  ): Promise<InternalSnapshot> {
+    const publication = action === 'generate_publication';
+    const images = await tx.query<ImageObject & { state: string; purpose: string; validated_mime_type: string | null; validated_at: string | null }>(
+      `select id, storage_key as "storageKey", coalesce(validated_mime_type, mime_type) as "mimeType",
+              stored_byte_size as "byteSize", validated_at as "validatedAt", state, purpose,
+              validated_mime_type, validated_at
+         from app.attachments where reel_id=$1 and kind='image' and purpose='input'`, [reel.id]);
+    if (!publication && options.enforceImageReady &&
+        images.rows.some((image) => image.state !== 'ready' || !image.storageKey || !image.validated_mime_type || !image.validated_at)) {
+      throw new CoreError({ status: 422, code: 'UPLOAD_INCOMPLETE', message: 'Input images must be completed and validated' });
+    }
+    const memes = await tx.query<{ id: string; name: string; thumbnail_ref: string | null }>(
+      'select id, name, thumbnail_ref from app.memes order by name asc, id asc limit 24');
+    const programmeEvidence: ProgrammeEvidence[] = options.release
+      ? await findEvidence(tx, options.release.releaseId,
+        searchTerms([reel.script, ...reel.hooks.map((hook) => hook.text)]), MAX_EVIDENCE_CANDIDATES)
+      : [];
+    return {
+      reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput, sourceLink: reel.sourceLink,
+      script: reel.script, scriptRevision: reel.scriptRevision,
+      ...(publication ? { publicationContextVersion: 3 as const } : {}),
+      hooks: reel.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
+      // Read in this same locked transaction, so it always names one of the hooks above.
+      selectedHookId: reel.selectedHookId,
+      inputNote: reel.inputNote, publicationDescription: reel.publicationDescription,
+      publicationHashtags: reel.publicationHashtags,
+      attachments: reel.attachments.filter((attachment) => attachment.purpose === 'input'),
+      priority: reel.priority, attachedMemeIds: reel.memeIds,
+      memeCandidateIds: memes.rows.map((meme) => meme.id),
+      memeCandidates: memes.rows.map((meme) => ({ id: meme.id, name: meme.name, thumbnailRef: meme.thumbnail_ref })),
+      // A release with exactly one document version names it here, which is what the
+      // single-version contract field means. A multi-document release leaves it null and
+      // each candidate carries its own version, because there is no single answer.
+      programmeDocumentVersionId: options.release?.documentVersionIds.length === 1 ? options.release.documentVersionIds[0] : null,
+      programmeReleaseId: options.release?.releaseId ?? null,
+      // Publication (v3) reads only completed, validated capture images and never waits for
+      // or fails on an incomplete upload: an image is optional grounding there.
+      programmeEvidence, imageObjects: images.rows
+        .filter((image) => !publication || (image.state === 'ready' && image.storageKey && image.validated_mime_type && image.validated_at))
+        .map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
+    };
+  }
+
   async enqueue(actor: Actor, reelId: string, body: { operationId: string; expectedVersion: number; action: AiAction }): Promise<{ id: string; state: 'queued' }> {
     if (!ACTIONS.includes(body.action)) throw validationError('Unknown AI action');
     const payload = { reelId, ...body };
@@ -249,50 +305,13 @@ export class AiService {
       if (publication && reel.script.trim().length === 0) {
         throw validationError('A saved script is required to generate publication copy', { reason: 'script_required' });
       }
-      const images = await tx.query<ImageObject & { state: string; purpose: string; validated_mime_type: string | null; validated_at: string | null }>(
-        `select id, storage_key as "storageKey", coalesce(validated_mime_type, mime_type) as "mimeType",
-                stored_byte_size as "byteSize", validated_at as "validatedAt", state, purpose,
-                validated_mime_type, validated_at
-           from app.attachments where reel_id=$1 and kind='image' and purpose='input'`, [reelId]);
-      if (!publication && images.rows.some((image) => image.state !== 'ready' || !image.storageKey || !image.validated_mime_type || !image.validated_at)) {
-        throw new CoreError({ status: 422, code: 'UPLOAD_INCOMPLETE', message: 'Input images must be completed and validated' });
-      }
-      const memes = await tx.query<{ id: string; name: string; thumbnail_ref: string | null }>(
-        'select id, name, thumbnail_ref from app.memes order by name asc, id asc limit 24');
       // Resolved once, and only for the action that uses it. Every candidate below, and
       // every citation later reconstructed from them, belongs to this one release.
       const release = body.action === 'find_programme' ? await resolveActiveRelease(tx) : null;
       if (body.action === 'find_programme' && !release) {
         throw new CoreError({ status: 422, code: 'INSUFFICIENT_EVIDENCE', message: 'No active programme corpus release is available' });
       }
-      const programmeEvidence: ProgrammeEvidence[] = release
-        ? await findEvidence(tx, release.releaseId,
-          searchTerms([reel.script, ...reel.hooks.map((hook) => hook.text)]), MAX_EVIDENCE_CANDIDATES)
-        : [];
-      const snapshot: InternalSnapshot = {
-        reelVersion: reel.version, title: reel.title, originalInput: reel.originalInput, sourceLink: reel.sourceLink,
-        script: reel.script, scriptRevision: reel.scriptRevision,
-        ...(publication ? { publicationContextVersion: 3 as const } : {}),
-        hooks: reel.hooks.map(({ id, text, source, position }) => ({ id, text, source, position })),
-        // Read in this same locked transaction, so it always names one of the hooks above.
-        selectedHookId: reel.selectedHookId,
-        inputNote: reel.inputNote, publicationDescription: reel.publicationDescription,
-        publicationHashtags: reel.publicationHashtags,
-        attachments: reel.attachments.filter((attachment) => attachment.purpose === 'input'),
-        priority: reel.priority, attachedMemeIds: reel.memeIds,
-        memeCandidateIds: memes.rows.map((meme) => meme.id),
-        memeCandidates: memes.rows.map((meme) => ({ id: meme.id, name: meme.name, thumbnailRef: meme.thumbnail_ref })),
-        // A release with exactly one document version names it here, which is what the
-        // single-version contract field means. A multi-document release leaves it null and
-        // each candidate carries its own version, because there is no single answer.
-        programmeDocumentVersionId: release?.documentVersionIds.length === 1 ? release.documentVersionIds[0] : null,
-        programmeReleaseId: release?.releaseId ?? null,
-        // Publication (v3) reads only completed, validated capture images and never waits for
-        // or fails on an incomplete upload: an image is optional grounding there.
-        programmeEvidence, imageObjects: images.rows
-          .filter((image) => !publication || (image.state === 'ready' && image.storageKey && image.validated_mime_type && image.validated_at))
-          .map(({ id, storageKey, mimeType, byteSize, validatedAt }) => ({ id, storageKey, mimeType, byteSize, validatedAt })),
-      };
+      const snapshot = await this.buildSnapshot(tx, reel, body.action, { release, enforceImageReady: true });
       const id = randomUUID();
       const promptId = publication ? 'gemini-02-publication-provisional-v3' : PROMPT_ID;
       await tx.query(
@@ -301,6 +320,36 @@ export class AiService {
         [id, reelId, actor.id, body.action, JSON.stringify(snapshot), hash(relevant(snapshot, body.action)), MODEL, promptId]);
       return { id, state: 'queued' as const };
     });
+  }
+
+  /**
+   * CAPTURE-DRAFT-01: enqueue the one capture-triggered `develop` run, called from inside
+   * `createReel`'s own transaction via `CoreRepository`'s injected `CaptureDraftHook`. Never
+   * throws: a disabled flag or an exhausted daily limit is a silent no-op, because capture must
+   * succeed in every case. `reel` is the just-inserted Reel, read in the same transaction, so no
+   * separate version check or lock is needed (nothing else can race a row no other transaction
+   * can see yet).
+   */
+  async enqueueCaptureDraft(
+    tx: Queryable, actor: Actor, reel: Reel, config: { enabled: boolean; dailyLimit: number },
+  ): Promise<void> {
+    if (!config.enabled) return;
+    // Europe/Warsaw midnight-to-now, computed in SQL so the server process's own time zone
+    // never matters. `date_trunc('day', now() at time zone tz)` truncates the Warsaw wall-clock
+    // reading to midnight; reinterpreting that as a Warsaw wall time and converting back is the
+    // standard way to get that instant as a real timestamptz across the DST boundary too.
+    const count = await tx.query<{ count: string }>(
+      `select count(*)::text as count from app.ai_runs
+         where trigger = 'capture'
+           and created_at >= (date_trunc('day', now() at time zone 'Europe/Warsaw') at time zone 'Europe/Warsaw')`,
+    );
+    if (Number(count.rows[0]?.count ?? '0') >= config.dailyLimit) return;
+    const snapshot = await this.buildSnapshot(tx, reel, 'develop', { release: null, enforceImageReady: false });
+    await tx.query(
+      `insert into app.ai_runs (id,reel_id,requested_by,action,trigger,input_snapshot,input_hash,model,prompt_id,prompt_stage)
+       values ($1,$2,$3,'develop','capture',$4,$5,$6,$7,'development_provisional')`,
+      [randomUUID(), reel.id, actor.id, JSON.stringify(snapshot), hash(relevant(snapshot, 'develop')), MODEL, PROMPT_ID],
+    );
   }
 
   async get(actor: Actor, runId: string): Promise<AiRun> {
