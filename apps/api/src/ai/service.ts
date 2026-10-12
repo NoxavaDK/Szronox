@@ -32,6 +32,8 @@ export interface InternalSnapshot extends AiInputSnapshot {
 }
 interface RunRow {
   id: string; reel_id: string; requested_by: string; action: AiAction; state: AiRun['state'];
+  /** CAPTURE-DRAFT-01 (migration 0018). */
+  trigger?: AiRun['trigger'];
   input_snapshot: InternalSnapshot; input_hash: string; model: string; prompt_id: string;
   prompt_stage: AiRun['promptStage']; result: AiRun['result']; provenance: Record<string, unknown>;
   warnings: string[]; error: AiRun['error']; applied_hook_ids: string[];
@@ -170,7 +172,7 @@ function runResponse(row: RunRow, live: Reel): AiRun {
     }) }
     : row.result;
   return {
-    id: row.id, reelId: row.reel_id, requestedBy: row.requested_by, action: row.action,
+    id: row.id, trigger: row.trigger ?? 'user', reelId: row.reel_id, requestedBy: row.requested_by, action: row.action,
     state: row.state, input: publicInput, inputHash: row.input_hash,
     isStale: hash(relevant(snapshot, row.action)) !== hash(relevant(current, row.action)),
     model: row.model, promptId: row.prompt_id, promptStage: row.prompt_stage,

@@ -170,6 +170,12 @@ export function toReel(
     feedCoverAsset: row.feed_cover_asset ?? null,
     plannedPublicationDate: row.planned_publication_date ?? null,
     plannedPublicationSlot: row.planned_publication_slot ?? null,
+    // Root integration defaults until STREAM-01a / CAPTURE-DRAFT-01 populate these from the database.
+    format: 'reel',
+    absorbedInto: null,
+    topics: [],
+    inStreams: [],
+    autoDraft: null,
     createdBy: row.created_by,
     createdAt: isoRequired(row.created_at),
     updatedAt: isoRequired(row.updated_at),
