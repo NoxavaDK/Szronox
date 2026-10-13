@@ -61,7 +61,8 @@ export function httpKdriveUploadClient(options: { driveId: string; token: string
       return { token: String(data.token), uploadUrl: parsed.origin, fileId: String(file.id), fileName: String(file.name) };
     },
     async putChunk(session, index, bytes, sha256) {
-      const url = `${session.uploadUrl}/3/drive/${encodeURIComponent(options.driveId)}/upload/session/${encodeURIComponent(session.token)}/chunk?chunk_number=${index}&chunk_size=${bytes.byteLength}&chunk_hash=${encodeURIComponent(`sha256:${sha256}`)}`;
+      // kDrive numbers chunks from 1 (KDRIVE-02 probe, `n = index + 1`); our index is 0-based.
+      const url = `${session.uploadUrl}/3/drive/${encodeURIComponent(options.driveId)}/upload/session/${encodeURIComponent(session.token)}/chunk?chunk_number=${index + 1}&chunk_size=${bytes.byteLength}&chunk_hash=${encodeURIComponent(`sha256:${sha256}`)}`;
       try {
         const response = await fetchImpl(url, { method: 'POST', headers: { authorization: `Bearer ${options.token}`, 'content-type': 'application/octet-stream' }, body: Buffer.from(bytes), signal: AbortSignal.timeout(120_000) });
         if (!response.ok) await json(response);
