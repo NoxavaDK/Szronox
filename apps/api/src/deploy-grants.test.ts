@@ -52,7 +52,7 @@ const repositoryRoot = path.resolve(here, '../../..');
 const deployDirectory = path.join(repositoryRoot, 'deploy', 'vps', 'postgres');
 
 const RUNTIME_ROLES = ['szronox_api', 'szronox_worker'] as const;
-const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys', 'app.stream_topics'] as const;
+const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys', 'app.stream_topics', 'app.stream_plans'] as const;
 
 /**
  * Pull the SQL out of the initdb script's heredoc.
@@ -488,6 +488,36 @@ test('STREAM-01: the API role has full DML on stream_topics; the worker role has
       `select 1 from app.stream_topics`,
       `insert into app.stream_topics (id, stream_id, position, kind, source_reel_id)
         values (gen_random_uuid(), '44444444-4444-4444-8444-444444444441', 1, 'linked', '44444444-4444-4444-8444-444444444442')`,
+    ]) {
+      assert.equal(await asRole('szronox_worker', sql), 'denied');
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+// ══════════════════════ STREAM-PLAN-01 grants, exercised as the role ══════════════════════
+
+test('STREAM-PLAN-01: the API role may select, insert and update stream_plans but not delete; the worker has none', async () => {
+  const context = await provisionDatabase();
+  try {
+    const user = '11111111-1111-4111-8111-111111111111';
+    await context.raw.exec(`insert into app.users (id, name) values ('${user}', 'NOXAVA') on conflict do nothing`);
+    const asRole = async (role: string, sql: string): Promise<'ok' | 'denied'> => {
+      await context.raw.exec(`set role ${role}`);
+      try { await context.raw.exec(sql); return 'ok'; } catch (error) {
+        if (/permission denied/.test(String((error as Error).message))) return 'denied';
+        throw error;
+      } finally { await context.raw.exec('reset role'); }
+    };
+    const planId = '66666666-6666-4666-8666-666666666666';
+    assert.equal(await asRole('szronox_api', `insert into app.stream_plans (id, title, created_by) values ('${planId}', 'Podsumowanie tygodnia', '${user}')`), 'ok');
+    assert.equal(await asRole('szronox_api', `update app.stream_plans set is_current = true where id = '${planId}'`), 'ok');
+    assert.equal(await asRole('szronox_api', `select 1 from app.stream_plans where id = '${planId}'`), 'ok');
+    assert.equal(await asRole('szronox_api', `delete from app.stream_plans where id = '${planId}'`), 'denied');
+    for (const sql of [
+      `select 1 from app.stream_plans`,
+      `insert into app.stream_plans (id, title, created_by) values (gen_random_uuid(), 'X', '${user}')`,
     ]) {
       assert.equal(await asRole('szronox_worker', sql), 'denied');
     }

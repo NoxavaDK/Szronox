@@ -10,6 +10,8 @@ import type {
   CreateLiveMessageRequest, LiveMessage, LiveMessageListResponse,
   AddStreamTopicRequest, RemoveStreamTopicRequest, StreamTopicOrderRequest,
   StreamTopicPatchRequest, StreamTopicCandidatesResponse,
+  CreateStreamPlanRequest, DeleteStreamPlanRequest, StreamPlan, StreamPlanCandidatesResponse,
+  StreamPlanCurrentRequest, StreamPlanListResponse, UpdateStreamPlanRequest,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
 
@@ -127,6 +129,14 @@ export class CoreApiClient {
   /** STREAM-LIVE-01. Idempotent on operationId, so a retry after a dropped response is safe. */
   sendLiveMessage = (body: CreateLiveMessageRequest) => this.request<LiveMessage>('/live/messages', { method: 'POST', body: JSON.stringify(body) });
   myLiveMessages = () => this.request<LiveMessageListResponse>('/live/messages/mine');
+  /** STREAM-PLAN-01: stream plans, separate from Reels. Writes are version-checked and idempotent. */
+  streamPlans = () => this.request<StreamPlanListResponse>('/stream-plans');
+  streamPlan = (id: string) => this.request<StreamPlan>(`/stream-plans/${encodeURIComponent(id)}`);
+  createStreamPlan = (body: CreateStreamPlanRequest) => this.request<StreamPlan>('/stream-plans', { method: 'POST', body: JSON.stringify(body) });
+  updateStreamPlan = (id: string, body: UpdateStreamPlanRequest) => this.request<StreamPlan>(`/stream-plans/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) });
+  setCurrentStreamPlan = (id: string, body: StreamPlanCurrentRequest) => this.request<StreamPlan>(`/stream-plans/${encodeURIComponent(id)}/current`, { method: 'PUT', body: JSON.stringify(body) });
+  deleteStreamPlan = (id: string, body: DeleteStreamPlanRequest) => this.request<{ id: string }>(`/stream-plans/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify(body) });
+  streamPlanCandidates = (q: string) => this.request<StreamPlanCandidatesResponse>(`/stream-plans/candidates${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
   list(query: ReelListQuery & { limit?: number } = {}) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));

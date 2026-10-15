@@ -2,7 +2,8 @@
  * STREAM-LIVE-01 access keys: the device principal.
  *
  * A key is not a user. It resolves to a `DeviceKey`, never a `VerifiedActor`, so it cannot
- * reach any route that asks for an actor. The two live device routes are the only callers of
+ * reach any route that asks for an actor. The three live device routes (feed, status and, since
+ * STREAM-PLAN-01, the current stream plan) are the only callers of
  * `authenticateDevice`, and T00 pins that list.
  *
  * Shape follows sessions: 32 random bytes handed out once, only their SHA-256 digest stored.

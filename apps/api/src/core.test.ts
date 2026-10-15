@@ -100,13 +100,13 @@ test('the committed migration applies to a bare database and is idempotent', asy
     // edit here. GEMINI-02's `ai_runs` and programme tables were missing from this list;
     // CORPUS-01 adds its own and restores the assertion. CORPUS-02 adds the enrichment
     // revision log (migration 0007). STREAM-LIVE-01 adds access_keys and live_messages (0016).
-    // STREAM-01 adds stream_topics (0017).
+    // STREAM-01 adds stream_topics (0017). STREAM-PLAN-01 adds stream_plans (0019).
     assert.deepEqual(tables.rows.map((r) => r.table_name), [
       'access_keys', 'ai_runs', 'attachments', 'auth_sessions', 'kdrive_uploads', 'live_messages', 'memes', 'operations',
       'programme_chunks', 'programme_documents', 'programme_proposal_enrichment_revisions',
       'programme_proposals', 'programme_release_versions', 'programme_releases',
       'programme_sections', 'programme_versions', 'programme_vocabulary_entries',
-      'reel_hooks', 'reel_memes', 'reels', 'stream_topics', 'user_credentials', 'users',
+      'reel_hooks', 'reel_memes', 'reels', 'stream_plans', 'stream_topics', 'user_credentials', 'users',
     ]);
   } finally {
     await db.close();

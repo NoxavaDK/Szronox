@@ -4,7 +4,8 @@
  * Two kinds of caller, never mixed:
  *   - users, through the ordinary session seam (`authenticate` also enforces Origin + CSRF on
  *     unsafe methods): create a message, list their own;
- *   - the streaming PC, through a `live_feed` access key: read the feed, report statuses.
+ *   - the streaming PC, through a `live_feed` access key: read the feed, report statuses, and
+ *     (STREAM-PLAN-01) read the current stream plan.
  * A key is not accepted on the user routes (they ask the session seam, which ignores it), and a
  * session is not accepted on the device routes (`authenticateDevice` refuses cookies).
  */
@@ -19,6 +20,8 @@ import { CoreError, internalError, validationError } from '../core/errors.js';
 import type { Database } from '../db/client.js';
 import { authenticateDevice } from './keys.js';
 import { FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT, LiveRepository } from './repository.js';
+import { CoreRepository } from '../core/repository.js';
+import { StreamPlansRepository } from '../stream-plans/repository.js';
 
 export interface LiveDependencies {
   db: Database;
@@ -35,6 +38,7 @@ export const DEFAULT_DEVICE_THROTTLE = { limit: 240, windowMs: 60_000 } as const
 
 export function registerLiveRoutes(app: FastifyInstance, dependencies: LiveDependencies): void {
   const repository = new LiveRepository(dependencies.db);
+  const plans = new StreamPlansRepository(dependencies.db, new CoreRepository(dependencies.db));
   const now = dependencies.now ?? (() => Date.now());
   const sendThrottle = dependencies.sendThrottle ?? createThrottle({ ...DEFAULT_SEND_THROTTLE, now });
   const deviceThrottle = dependencies.deviceThrottle ?? createThrottle({ ...DEFAULT_DEVICE_THROTTLE, now });
@@ -104,5 +108,12 @@ export function registerLiveRoutes(app: FastifyInstance, dependencies: LiveDepen
     }
     await repository.setStatus(body.id, body.status, new Date(now()));
     return reply.code(204).send();
+  }));
+
+  // STREAM-PLAN-01: the plan marked current, for StreamControl's explicit import. Read-only, and
+  // only broadcast content (titles, links, points) — no Reel data.
+  app.get('/api/v1/live/stream', handle(async (request) => {
+    await device(request);
+    return { plan: await plans.currentForDevice() };
   }));
 }
