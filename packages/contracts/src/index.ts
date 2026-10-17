@@ -747,3 +747,23 @@ export interface LiveStreamPlan {
   topics: Array<Omit<StreamPlanTopic, 'reelId'>>;
 }
 export interface LiveStreamPlanResponse { plan: LiveStreamPlan | null }
+/**
+ * STREAM-PLAN-02. A cue asks the streaming PC to put a topic on air; `seq` only grows and each
+ * value is applied once. Topic ids are the plan's topic ids.
+ */
+export interface StreamPlanCue { seq: number; topicId: string; at: IsoDateTime }
+/** What the streaming PC last reported for this plan; null before its first report. */
+export interface StreamPlanPcReport {
+  /** The plan topic on air, or null (no topic selected, or one added on the PC by hand). */
+  topicId: string | null;
+  /** Topic ids the PC holds from its last import; a topic missing here needs a fresh import. */
+  topicIds: string[];
+  seenAt: IsoDateTime;
+}
+/** GET /stream-plans/:id/live — polled by the stream screen. */
+export interface StreamPlanLiveResponse { cue: StreamPlanCue | null; pc: StreamPlanPcReport | null }
+/** PUT /stream-plans/:id/cue — put a topic on air. Idempotent on operationId; no version check. */
+export interface CueStreamPlanRequest { operationId: Id; topicId: string }
+/** POST /live/stream/position (live_feed key): StreamControl's report; the answer carries the latest cue. */
+export interface LiveStreamPositionRequest { planId: Id; topicId: string | null; topicIds: string[] }
+export interface LiveStreamPositionResponse { cue: { seq: number; topicId: string | null } | null }

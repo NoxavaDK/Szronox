@@ -116,4 +116,11 @@ export function registerLiveRoutes(app: FastifyInstance, dependencies: LiveDepen
     await device(request);
     return { plan: await plans.currentForDevice() };
   }));
+
+  // STREAM-PLAN-02: StreamControl reports the topic on air for the plan it imported and gets that
+  // plan's latest cue back, so a topic switched on the stream screen reaches the PC on its poll.
+  app.post('/api/v1/live/stream/position', handle(async (request) => {
+    await device(request);
+    return plans.reportPosition(request.body);
+  }));
 }

@@ -89,6 +89,18 @@ export function registerStreamPlanRoutes(app: FastifyInstance, dependencies: Cor
     });
   }));
 
+  // STREAM-PLAN-02: what is on air, polled by the screen, and switching the topic on air.
+  app.get('/api/v1/stream-plans/:id/live', handle(async (request) => {
+    await dependencies.authenticate(request);
+    return repository.live(planId(request));
+  }));
+
+  app.put('/api/v1/stream-plans/:id/cue', handle(async (request) => {
+    const actor = await dependencies.authenticate(request);
+    const body = bodyOf(request);
+    return repository.cue(actor, planId(request), { operationId: uuid(body.operationId, 'operationId'), topicId: body.topicId });
+  }));
+
   app.delete('/api/v1/stream-plans/:id', handle(async (request) => {
     const actor = await dependencies.authenticate(request);
     const body = bodyOf(request);

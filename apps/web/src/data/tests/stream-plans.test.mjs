@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  blankTopic, broadcastTitle, draftProblems, dockUrl, mainLinkOf, moveTopic, requestOf, sessionFrom, topicFromCandidate,
+  blankTopic, broadcastTitle, draftProblems, dockUrl, mainLinkOf, moveTopic, nextTopicId, onAirView, requestOf, sessionFrom, topicFromCandidate,
 } from '../stream-plans.ts';
 
 const candidate = (overrides = {}) => ({
@@ -63,4 +63,27 @@ test('moveTopic swaps neighbours and ignores moves past either end', () => {
   assert.deepEqual(moveTopic(['a', 'b', 'c'], 2, -1), ['a', 'c', 'b']);
   assert.deepEqual(moveTopic(['a', 'b'], 0, -1), ['a', 'b']);
   assert.deepEqual(moveTopic(['a', 'b'], 1, 1), ['a', 'b']);
+});
+
+test('onAirView: on air only while the PC reports; topics missing on a connected PC cannot be switched to', () => {
+  const now = Date.parse('2026-10-18T18:00:20Z');
+  const report = (seenAt) => ({ cue: null, pc: { topicId: 'b', topicIds: ['a', 'b'], seenAt } });
+  const fresh = onAirView(report('2026-10-18T18:00:10Z'), now);
+  assert.equal(fresh.connected, true);
+  assert.equal(fresh.onAir, 'b');
+  assert.equal(fresh.onPc('a'), true);
+  assert.equal(fresh.onPc('c'), false);
+  const stale = onAirView(report('2026-10-18T17:59:00Z'), now);
+  assert.equal(stale.connected, false);
+  assert.equal(stale.onAir, null);
+  assert.equal(stale.onPc('c'), true);
+  assert.equal(onAirView(null, now).connected, false);
+});
+
+test('nextTopicId: first when nothing is on air, the following one, null at the end', () => {
+  assert.equal(nextTopicId(['a', 'b'], null), 'a');
+  assert.equal(nextTopicId(['a', 'b'], 'a'), 'b');
+  assert.equal(nextTopicId(['a', 'b'], 'b'), null);
+  assert.equal(nextTopicId(['a', 'b'], 'gone'), 'a');
+  assert.equal(nextTopicId([], null), null);
 });

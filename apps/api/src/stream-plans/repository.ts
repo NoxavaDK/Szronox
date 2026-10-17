@@ -10,7 +10,7 @@
 import type {
   CreateStreamPlanRequest, LiveStreamPlan, PublicationSlot, ReelStatus, SourceMetadata, CaptureInput,
   StreamPlan, StreamPlanCandidatesResponse, StreamPlanLink, StreamPlanSummary, StreamPlanTopic,
-  StreamPlanTopicReel, UpdateStreamPlanRequest,
+  StreamPlanTopicReel, UpdateStreamPlanRequest, StreamPlanLiveResponse, LiveStreamPositionResponse,
 } from '@szronox/contracts';
 
 import { CoreError, notFound, validationError } from '../core/errors.js';
@@ -22,6 +22,10 @@ export const LIMITS = {
   title: 120, topics: 8, topicTitle: 180, extraLinks: 11, linkLabel: 120, link: 2000, points: 12, point: 200,
 } as const;
 
+/** How long a StreamControl report counts as fresh before the device's write is repeated. */
+const PC_REPORT_REFRESH_SECONDS = 10;
+/** Topic ids StreamControl reports: the plan's own ids (UUIDs), at most one per agenda topic. */
+const TOPIC_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const SESSION = /^[A-Za-z0-9_-]{1,64}$/;
@@ -330,6 +334,80 @@ export class StreamPlansRepository {
         sourceLink: row.source_link ?? null,
       })),
     };
+  }
+
+  // ── STREAM-PLAN-02: switching topics from the screen ─────────────────────────
+
+  /** Live state for the stream screen: the latest cue and what the streaming PC last reported. */
+  async live(id: string): Promise<StreamPlanLiveResponse> {
+    const rows = await this.db.query<{
+      cue_seq: number; cue_topic_id: string | null; cued_at: unknown;
+      on_air_topic_id: string | null; pc_topic_ids: string[] | string; pc_seen_at: unknown;
+    }>(
+      `select cue_seq, cue_topic_id, cued_at, on_air_topic_id, pc_topic_ids, pc_seen_at
+       from app.stream_plans where id = $1 and deleted_at is null`, [id],
+    );
+    const row = rows.rows[0];
+    if (!row) throw notFound('Stream plan not found');
+    const topicIds = typeof row.pc_topic_ids === 'string' ? JSON.parse(row.pc_topic_ids) as string[] : row.pc_topic_ids;
+    return {
+      cue: row.cue_seq > 0 && row.cue_topic_id && row.cued_at ? { seq: row.cue_seq, topicId: row.cue_topic_id, at: iso(row.cued_at) } : null,
+      pc: row.pc_seen_at ? { topicId: row.on_air_topic_id, topicIds, seenAt: iso(row.pc_seen_at) } : null,
+    };
+  }
+
+  /**
+   * Put a topic on air: a cue the streaming PC applies on its next poll. Not version-checked and
+   * no version bump — it never changes the plan's content, so it cannot collide with autosave.
+   */
+  async cue(actor: Actor, id: string, request: { operationId: string; topicId: unknown }): Promise<StreamPlanLiveResponse> {
+    if (typeof request.topicId !== 'string' || !TOPIC_ID.test(request.topicId)) {
+      throw validationError('topicId must be a topic id of this plan', { field: 'topicId' });
+    }
+    const topicId = request.topicId.toLowerCase();
+    await this.core.idempotent(actor, request.operationId, 'PUT /stream-plans/:id/cue', { id, topicId }, async (tx) => {
+      const before = await this.lock(tx, id);
+      if (!topicsOf(before).some((topic) => topic.id === topicId)) {
+        throw validationError('topicId must be a topic id of this plan', { field: 'topicId', reason: 'unknown_topic' });
+      }
+      await tx.query('update app.stream_plans set cue_seq = cue_seq + 1, cue_topic_id = $2, cued_at = now() where id = $1', [id, topicId]);
+      return { id, topicId };
+    });
+    return this.live(id);
+  }
+
+  /**
+   * Device report from StreamControl for the plan it imported, answered with that plan's latest
+   * cue (seq 0 before any; StreamControl takes its first answer as the baseline). Null when the
+   * plan no longer exists. The row is rewritten only when the report changed or has gone stale,
+   * so a 2-second poll does not mean a write every 2 seconds.
+   */
+  async reportPosition(body: unknown): Promise<LiveStreamPositionResponse> {
+    const source = (body ?? {}) as Record<string, unknown>;
+    if (typeof source.planId !== 'string' || !UUID.test(source.planId)) throw validationError('planId must be a UUID', { field: 'planId' });
+    const topicId = source.topicId;
+    if (topicId !== null && (typeof topicId !== 'string' || !TOPIC_ID.test(topicId))) {
+      throw validationError('topicId must be a topic id or null', { field: 'topicId' });
+    }
+    const topicIds = source.topicIds;
+    if (!Array.isArray(topicIds) || topicIds.length > LIMITS.topics || !topicIds.every((value) => typeof value === 'string' && TOPIC_ID.test(value))) {
+      throw validationError(`topicIds must be at most ${LIMITS.topics} topic ids`, { field: 'topicIds' });
+    }
+    const planId = source.planId.toLowerCase();
+    const ids = topicIds.map((value) => (value as string).toLowerCase());
+    const onAir = typeof topicId === 'string' ? topicId.toLowerCase() : null;
+    await this.db.query(
+      `update app.stream_plans set on_air_topic_id = $2, pc_topic_ids = $3::jsonb, pc_seen_at = now()
+       where id = $1 and deleted_at is null
+         and (on_air_topic_id is distinct from $2 or pc_topic_ids <> $3::jsonb or pc_seen_at is null
+              or pc_seen_at < now() - make_interval(secs => $4))`,
+      [planId, onAir, JSON.stringify(ids), PC_REPORT_REFRESH_SECONDS],
+    );
+    const rows = await this.db.query<{ cue_seq: number; cue_topic_id: string | null }>(
+      'select cue_seq, cue_topic_id from app.stream_plans where id = $1 and deleted_at is null', [planId],
+    );
+    const row = rows.rows[0];
+    return { cue: row ? { seq: row.cue_seq, topicId: row.cue_topic_id } : null };
   }
 
   /** Device read for StreamControl: the current plan's broadcast content, nothing about Reels. */

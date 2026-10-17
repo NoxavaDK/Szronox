@@ -37,3 +37,26 @@ console errors. The temporary preview harness was removed.
   `Otwórz w osobnym oknie` is the fallback if SSN ever refuses framing.
 - StreamControl's import against DEV.
 - The full app shell around the screen was not rendered (only the screen itself).
+
+## STREAM-PLAN-02
+
+Operator request 2026-10-17: switch topics from the stream screen, on any computer. Contract:
+T00 STREAM-PLAN-02.
+
+- Migration `0020_stream_plan_live.sql` (additive columns on `app.stream_plans`; no grant change,
+  the API already selects/updates the table).
+- API: `GET /stream-plans/:id/live`, `PUT /stream-plans/:id/cue`, device
+  `POST /live/stream/position`.
+- Web: `Prowadzenie` block on the stream screen (topic list with `Na antenie`, `Następny temat`,
+  PC connection line), polling every 3 s while visible.
+
+| Command | Result |
+| --- | --- |
+| `cd apps/api && npx tsc -p tsconfig.json && node --test dist/stream-plans.test.js` | 8/8 pass |
+| `cd apps/web && npx tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test src/data/tests/stream-plans.test.mjs` | OK, 8/8 |
+
+Visual: `Prowadzenie` rendered with fixture data in headless Chromium at 360, 400 and 1280 px
+(connected, switching, topic missing on the PC, PC offline); no overflow, no console errors.
+Temporary harness removed.
+
+UNVERIFIED: migration 0020 on DEV, deployment, and the round trip with StreamControl against DEV.

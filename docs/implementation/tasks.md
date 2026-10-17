@@ -97,6 +97,10 @@ The operator approved both task scopes and the exact Luna models in `SOURCE-02-M
 
 Operator approved one manual implementation on Claude Opus 5.5 in `.worktrees/stream-live-01` (branch `claude/stream-live-01`). Scope, editable files and acceptance: [STREAM-LIVE-01-proposal.md](STREAM-LIVE-01-proposal.md); contract: T00 section STREAM-LIVE-01. Order: pin contracts/migration (operator review) → visual delta `design/live-delta-spec.md` (operator review) → implementation and handoff. Includes the approved device-key exception to VPS-00 and migration 0016 (STREAM-01/02 renumbered to 0017/0018). No merge, DEV migration or deployment authorized.
 
+## STREAM-PLAN-02 — switch topics from the stream screen, draft 2026-10-17
+
+Operator request (project thread, 2026-10-17): switch the topic on air from the stream screen, from any computer. Contract in T00 section STREAM-PLAN-02, handoff in [STREAM-PLAN-01-result.md](STREAM-PLAN-01-result.md#stream-plan-02). Same branch and draft PR as STREAM-PLAN-01; StreamControl's side is in its own repository.
+
 ## STREAM-PLAN-01 — stream screen per broadcast, draft 2026-10-15
 
 Built on request of the operator (project thread, 2026-10-15) as a draft PR for review; contract in T00 section STREAM-PLAN-01, handoff in [STREAM-PLAN-01-result.md](STREAM-PLAN-01-result.md). Not merged; no DEV migration or deployment. StreamControl's import and the TikTok topic card are in its own repository.

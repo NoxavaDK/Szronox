@@ -288,3 +288,51 @@ test('unsafe routes need a session, the exact Origin and the CSRF token', async 
     await f.close();
   }
 });
+
+test('STREAM-PLAN-02: a cue reaches the PC through its position report; the PC reports what is on air', async () => {
+  const f = await fixture();
+  try {
+    const plan = await createPlan(f);
+    const saved = (await save(f, plan, { topics: [topic({ title: 'A' }), topic({ title: 'B' })] })).json();
+    const [a, b] = saved.topics.map((entry: { id: string }) => entry.id);
+    const report = (body: unknown, headers: Record<string, string> = { authorization: `Bearer ${f.key}` }) =>
+      f.app.inject({ method: 'POST', url: '/api/v1/live/stream/position', headers, payload: body as never });
+
+    assert.deepEqual((await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}/live`)).json(), { cue: null, pc: null });
+
+    // First report: no cue yet (seq 0, the PC's baseline); the screen now sees the PC.
+    const first = await report({ planId: plan.id, topicId: null, topicIds: [a, b] });
+    assert.equal(first.statusCode, 200);
+    assert.deepEqual(first.json(), { cue: { seq: 0, topicId: null } });
+    const seen = (await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}/live`)).json();
+    assert.equal(seen.cue, null);
+    assert.deepEqual({ topicId: seen.pc.topicId, topicIds: seen.pc.topicIds }, { topicId: null, topicIds: [a, b] });
+
+    // Szron switches to B: no version bump, so the editor's autosave is not disturbed.
+    const operationId = randomUUID();
+    const cued = await f.call(f.szron, 'PUT', `/stream-plans/${plan.id}/cue`, { operationId, topicId: b });
+    assert.equal(cued.statusCode, 200);
+    assert.equal(cued.json().cue.seq, 1);
+    assert.equal(cued.json().cue.topicId, b);
+    assert.equal((await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}`)).json().version, saved.version);
+    // A retried click replays without a second cue.
+    assert.equal((await f.call(f.szron, 'PUT', `/stream-plans/${plan.id}/cue`, { operationId, topicId: b })).json().cue.seq, 1);
+
+    assert.deepEqual((await report({ planId: plan.id, topicId: b, topicIds: [a, b] })).json(), { cue: { seq: 1, topicId: b } });
+    assert.equal((await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}/live`)).json().pc.topicId, b);
+
+    // Only the plan's own topics can be cued; reports are shape-checked; the key is required.
+    const unknown = await f.call(f.kuba, 'PUT', `/stream-plans/${plan.id}/cue`, { operationId: randomUUID(), topicId: randomUUID() });
+    assert.equal(unknown.statusCode, 422);
+    assert.equal((await report({ planId: plan.id, topicId: 'x', topicIds: [] })).statusCode, 422);
+    assert.equal((await report({ planId: plan.id, topicId: null, topicIds: Array.from({ length: 9 }, () => randomUUID()) })).statusCode, 422);
+    assert.equal((await report({ planId: plan.id, topicId: null, topicIds: [] }, {})).statusCode, 401);
+    const asKey = await f.app.inject({ method: 'PUT', url: `/api/v1/stream-plans/${plan.id}/cue`, headers: { authorization: `Bearer ${f.key}` }, payload: { operationId: randomUUID(), topicId: a } });
+    assert.equal(asKey.statusCode, 401);
+
+    // A plan that is gone answers with no cue.
+    assert.deepEqual((await report({ planId: randomUUID(), topicId: null, topicIds: [] })).json(), { cue: null });
+  } finally {
+    await f.close();
+  }
+});

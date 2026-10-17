@@ -11,7 +11,7 @@ import type {
   AddStreamTopicRequest, RemoveStreamTopicRequest, StreamTopicOrderRequest,
   StreamTopicPatchRequest, StreamTopicCandidatesResponse,
   CreateStreamPlanRequest, DeleteStreamPlanRequest, StreamPlan, StreamPlanCandidatesResponse,
-  StreamPlanCurrentRequest, StreamPlanListResponse, UpdateStreamPlanRequest,
+  StreamPlanCurrentRequest, StreamPlanListResponse, UpdateStreamPlanRequest, StreamPlanLiveResponse, CueStreamPlanRequest,
 } from '../../../../packages/contracts/src/index.js';
 import { ClientApiError } from './errors.js';
 
@@ -136,6 +136,8 @@ export class CoreApiClient {
   updateStreamPlan = (id: string, body: UpdateStreamPlanRequest) => this.request<StreamPlan>(`/stream-plans/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) });
   setCurrentStreamPlan = (id: string, body: StreamPlanCurrentRequest) => this.request<StreamPlan>(`/stream-plans/${encodeURIComponent(id)}/current`, { method: 'PUT', body: JSON.stringify(body) });
   deleteStreamPlan = (id: string, body: DeleteStreamPlanRequest) => this.request<{ id: string }>(`/stream-plans/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify(body) });
+  streamPlanLive = (id: string) => this.request<StreamPlanLiveResponse>(`/stream-plans/${encodeURIComponent(id)}/live`);
+  cueStreamPlan = (id: string, body: CueStreamPlanRequest) => this.request<StreamPlanLiveResponse>(`/stream-plans/${encodeURIComponent(id)}/cue`, { method: 'PUT', body: JSON.stringify(body) });
   streamPlanCandidates = (q: string) => this.request<StreamPlanCandidatesResponse>(`/stream-plans/candidates${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
   list(query: ReelListQuery & { limit?: number } = {}) {
     const params = new URLSearchParams();

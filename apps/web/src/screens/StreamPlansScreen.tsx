@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
-  StreamPlan, StreamPlanCandidate, StreamPlanSummary, StreamPlanTopicView, User,
+  StreamPlan, StreamPlanCandidate, StreamPlanLiveResponse, StreamPlanSummary, StreamPlanTopicView, User,
 } from '../../../../packages/contracts/src/index.js';
 import type { CoreApiClient } from '../data/api.js';
 import { ClientApiError } from '../data/errors.js';
 import { reelLabel } from '../data/reel-label.js';
 import {
-  blankTopic, dockUrl, draftOf, draftProblems, moveTopic, PLAN_LIMITS, planDateLabel, requestOf, sessionFrom,
+  blankTopic, dockUrl, draftOf, draftProblems, moveTopic, nextTopicId, onAirView, PLAN_LIMITS, planDateLabel, requestOf, sessionFrom,
   topicFromCandidate, type PlanDraft,
 } from '../data/stream-plans.js';
 import { topicLabel } from '../data/streams.js';
@@ -23,9 +23,14 @@ import { LivePanel } from './LiveScreen.js';
  * topics picked from recent Reels (or typed), each with its main link, extra links and points to
  * go through; the Social Stream Ninja dock for highlighting comments; and the `Na żywo` panel so
  * Szron can ping Kuba. One plan at a time is marked for StreamControl on the streaming PC.
+ * STREAM-PLAN-02: `Prowadzenie` switches the topic on air from here; StreamControl follows on its
+ * next poll and reports back what it shows.
  */
 
 const SAVE_DELAY_MS = 800;
+const LIVE_POLL_MS = 3000;
+/** How long a switch shows as in progress before the screen stops waiting for the PC. */
+const CUE_WAIT_MS = 10_000;
 const LOAD_FAILED = 'Nie udało się wczytać. Sprawdź połączenie i spróbuj ponownie.';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'invalid' | 'conflict' | 'error';
@@ -295,6 +300,8 @@ function PlanEditor({ api, user, planId, onClose }: { api: CoreApiClient; user: 
             {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
           </section>
 
+          <OnAirPanel api={api} planId={planId} topics={plan.topics} />
+
           <section className={styles.block} aria-labelledby="plan-topics">
             <h2 id="plan-topics" className={styles.label}>Tematy · {draft.topics.length}/{PLAN_LIMITS.topics}</h2>
             {draft.topics.length === 0 ? <p className={styles.muted}>Dodaj tematy z ostatnich rolek i pomysłów albo wpisz własny.</p> : null}
@@ -369,6 +376,81 @@ function PlanEditor({ api, user, planId, onClose }: { api: CoreApiClient; user: 
         </div>
       </div>
     </div>
+  );
+}
+
+// ── On air (STREAM-PLAN-02) ──────────────────────────────────────────────────
+
+function OnAirPanel({ api, planId, topics }: { api: CoreApiClient; planId: string; topics: StreamPlanTopicView[] }) {
+  const [live, setLive] = useState<StreamPlanLiveResponse | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [pending, setPending] = useState<{ topicId: string; until: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try { setLive(await api.streamPlanLive(planId)); } catch { /* the next poll retries; the view goes stale on its own */ }
+    setNow(Date.now());
+  }, [api, planId]);
+  useEffect(() => {
+    void refresh();
+    const interval = window.setInterval(() => { if (!document.hidden) void refresh(); }, LIVE_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
+
+  const view = onAirView(live, now);
+  const waiting = pending && pending.until > now && view.onAir !== pending.topicId ? pending.topicId : null;
+  const onAirIndex = topics.findIndex((topic) => topic.id === view.onAir);
+  const next = nextTopicId(topics.map((topic) => topic.id), view.onAir);
+
+  const cue = async (topicId: string) => {
+    setError(null);
+    setPending({ topicId, until: Date.now() + CUE_WAIT_MS });
+    try {
+      setLive(await api.cueStreamPlan(planId, { operationId: crypto.randomUUID(), topicId }));
+    } catch {
+      setPending(null);
+      setError('Nie przełączono. Spróbuj ponownie.');
+    }
+  };
+
+  return (
+    <section className={styles.block} aria-labelledby="plan-on-air">
+      <h2 id="plan-on-air" className={styles.label}>Prowadzenie</h2>
+      <p className={styles.meta} role="status">
+        {view.connected
+          ? onAirIndex >= 0 ? <>Na antenie: <strong>temat {onAirIndex + 1}</strong>.</> : 'Komputer streamu jest połączony; żaden temat z tej listy nie jest na antenie.'
+          : 'Komputer streamu się nie zgłasza. Przełączanie zadziała, gdy StreamControl jest włączony i ma pobrany ten stream.'}
+      </p>
+      {topics.length === 0 ? <p className={styles.muted}>Dodaj tematy, aby przełączać je stąd.</p> : (
+        <>
+          <ol className={styles.onAirList}>
+            {topics.map((topic, index) => {
+              const onAir = view.onAir === topic.id;
+              const missing = !view.onPc(topic.id);
+              return (
+                <li key={topic.id}>
+                  <button type="button" className={`${styles.onAirRow} ${onAir ? styles.onAirActive : ''}`} aria-pressed={onAir}
+                    disabled={missing || onAir || waiting !== null} onClick={() => void cue(topic.id)}>
+                    <span className={styles.topicNumber}>{index + 1}</span>
+                    <span className={styles.onAirText}>
+                      <span className={styles.onAirTitle}>{topic.title}</span>
+                      {onAir ? <span className={styles.onAirBadge}>Na antenie</span>
+                        : waiting === topic.id ? <span className={styles.meta}>Przełączanie…</span>
+                          : missing ? <span className={styles.meta}>Nie ma go na PC — pobierz stream ponownie w StreamControl.</span> : null}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          <button type="button" className={styles.secondary} disabled={next === null || waiting !== null || !view.onPc(next)}
+            onClick={() => next && void cue(next)}>
+            {view.onAir === null ? 'Zacznij od tematu 1' : 'Następny temat'}
+          </button>
+        </>
+      )}
+      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+    </section>
   );
 }
 

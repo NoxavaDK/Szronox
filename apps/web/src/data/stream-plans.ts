@@ -7,7 +7,7 @@
  * resolves only `import type` across these modules.
  */
 import type {
-  StreamPlan, StreamPlanCandidate, StreamPlanTopic, StreamPlanTopicView, UpdateStreamPlanRequest,
+  StreamPlan, StreamPlanCandidate, StreamPlanLiveResponse, StreamPlanTopic, StreamPlanTopicView, UpdateStreamPlanRequest,
 } from '../../../../packages/contracts/src/index.js';
 
 /** T00 STREAM-PLAN-01 limits, mirrored from the API. */
@@ -135,4 +135,34 @@ const dateFormat = new Intl.DateTimeFormat('pl-PL', { weekday: 'short', day: 'nu
 export function planDateLabel(date: string | null): string {
   if (!date) return 'Bez daty';
   return dateFormat.format(new Date(`${date}T00:00:00Z`));
+}
+
+/** STREAM-PLAN-02: a report older than this means StreamControl is off or holds another plan. */
+export const PC_STALE_MS = 15_000;
+
+export interface OnAirView {
+  /** StreamControl reported for this plan recently. */
+  connected: boolean;
+  /** The plan topic on air, when the PC is connected. */
+  onAir: string | null;
+  /** Whether a topic can be switched to: false only when the connected PC does not hold it yet. */
+  onPc: (topicId: string) => boolean;
+}
+
+export function onAirView(live: StreamPlanLiveResponse | null, now: number): OnAirView {
+  const pc = live?.pc ?? null;
+  const connected = pc !== null && now - Date.parse(pc.seenAt) < PC_STALE_MS;
+  const held = new Set(connected && pc ? pc.topicIds : []);
+  return {
+    connected,
+    onAir: connected && pc ? pc.topicId : null,
+    onPc: (topicId) => !connected || held.has(topicId),
+  };
+}
+
+/** The topic after the one on air (the first when none is), or null at the end. */
+export function nextTopicId(topicIds: readonly string[], onAir: string | null): string | null {
+  if (topicIds.length === 0) return null;
+  if (onAir === null || !topicIds.includes(onAir)) return topicIds[0];
+  return topicIds[topicIds.indexOf(onAir) + 1] ?? null;
 }

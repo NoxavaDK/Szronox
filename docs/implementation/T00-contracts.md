@@ -498,3 +498,15 @@ Authority: `docs/implementation/VOICE-01-proposal.md` and `docs/product/voice-ho
 **Comments.** The plan stores only the SSN session ID; the screen embeds `https://socialstream.ninja/dock.html?session=<id>`, where a click features a comment on the broadcast (StreamControl's horizontal scene already shows SSN's featured page). Szronox stores and relays no comments.
 
 **Grants.** API: select/insert/update on `app.stream_plans`, no delete; worker: none. Startup privilege refusal rules updated.
+
+## STREAM-PLAN-02 — switch topics from the stream screen (operator request 2026-10-17; draft, pending operator approval)
+
+**Purpose.** Topics on air are switched from the stream screen too, not only in StreamControl on the streaming PC: anyone with the plan open (Szron included) taps a topic in `Prowadzenie` and StreamControl follows on its next poll. The screen shows which topic is on air.
+
+**Data.** Migration `0020_stream_plan_live.sql` adds to `app.stream_plans`: `cue_seq` (≥ 0, only grows), `cue_topic_id`, `cued_at`, and StreamControl's last report `on_air_topic_id`, `pc_topic_ids` (JSON array ≤ 8), `pc_seen_at`. A cue never changes `topics` or `version`, so it cannot collide with autosave. Topic ids are the plan's own topic ids, never Reel ids.
+
+**Routes (session; Origin and CSRF on unsafe methods).** `GET /stream-plans/:id/live` → `StreamPlanLiveResponse {cue, pc}` (polled every 3 s while the screen is visible); `PUT /stream-plans/:id/cue` (`CueStreamPlanRequest {operationId, topicId}`; idempotent on `operationId`, not version-checked; the topic must be in the saved plan, else 422 `unknown_topic`).
+
+**Device report — extends the STREAM-LIVE-01 exception.** `POST /live/stream/position` accepts the `live_feed` key under the same rules: `{planId, topicId|null, topicIds}` for the plan StreamControl imported; the answer is that plan's `{cue: {seq, topicId|null}}` (seq 0 before any cue), or `{cue: null}` when the plan no longer exists. The row is rewritten only when the report changed or is older than 10 s. StreamControl takes its first answer after an import as the baseline (cues made before the import are never applied) and applies each later `seq` once. The key's route list becomes feed, status, stream and stream position.
+
+**Screen.** A report older than 15 s reads as "the streaming PC is not reporting". A topic the connected PC does not hold (added after its import) cannot be switched to and says to download the stream again in StreamControl. Switching on the PC itself is unchanged and is reported back the same way.
