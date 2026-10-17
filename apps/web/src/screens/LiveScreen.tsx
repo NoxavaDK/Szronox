@@ -59,6 +59,22 @@ function signalState(items: readonly LiveMessage[], now: number) {
 }
 
 export function LiveScreen({ api, user, onBack }: { api: CoreApiClient; user: User; onBack: () => void }) {
+  return (
+    <div className={`${listStyles.screen} ${styles.live}`}>
+      <header className={`${listStyles.header} ${listStyles.headerStart}`}>
+        <button type="button" className={listStyles.backButton} onClick={onBack} aria-label="Wstecz"><BackArrowIcon /></button>
+        <h1 className={listStyles.title}>Na żywo</h1>
+      </header>
+      <LivePanel api={api} user={user} />
+    </div>
+  );
+}
+
+/**
+ * The body of `Na żywo`: signals, quote and sent messages. STREAM-PLAN-01 shows the same panel
+ * inside the stream screen, so Szron can ping Kuba without switching screens.
+ */
+export function LivePanel({ api, user, single = false }: { api: CoreApiClient; user: User; single?: boolean }) {
   const [items, setItems] = useState<LiveMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -163,14 +179,10 @@ export function LiveScreen({ api, user, onBack }: { api: CoreApiClient; user: Us
   );
 
   return (
-    <div className={`${listStyles.screen} ${styles.live}`}>
-      <header className={`${listStyles.header} ${listStyles.headerStart}`}>
-        <button type="button" className={listStyles.backButton} onClick={onBack} aria-label="Wstecz"><BackArrowIcon /></button>
-        <h1 className={listStyles.title}>Na żywo</h1>
-      </header>
+    <>
       {offline ? <p className={styles.connection} role="status">Brak połączenia — ponawiam…</p> : null}
 
-      <div className={styles.columns}>
+      <div className={`${styles.columns} ${single ? styles.single : ''}`}>
         <div className={styles.compose}>
           {showSignals ? (
             <section className={styles.section} aria-labelledby="live-signal">
@@ -237,6 +249,6 @@ export function LiveScreen({ api, user, onBack }: { api: CoreApiClient; user: Us
           </ul>
         </section>
       </div>
-    </div>
+    </>
   );
 }

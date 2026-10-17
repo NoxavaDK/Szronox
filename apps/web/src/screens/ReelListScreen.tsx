@@ -40,6 +40,9 @@ export function ReelListScreen(props: ReelListScreenProps) {
           {props.onOpenPlan ? (
             <button type="button" className={styles.planLink} onClick={props.onOpenPlan}>Plan</button>
           ) : null}
+          {props.onOpenStreams ? (
+            <button type="button" className={styles.planLink} onClick={props.onOpenStreams}>Streamy</button>
+          ) : null}
           {props.onOpenLive ? (
             <button type="button" className={styles.planLink} onClick={props.onOpenLive}>Na żywo</button>
           ) : null}

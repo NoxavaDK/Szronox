@@ -83,6 +83,12 @@ revoke insert, update, delete on app.access_keys from szronox_api;
 grant update (last_used_at) on app.access_keys to szronox_api;
 revoke all on app.access_keys from szronox_worker;
 
+-- STREAM-PLAN-01: stream plans are edited by users and read by the streaming PC, both through
+-- the API. Deletion is soft (deleted_at), so the API has no DELETE. The worker sees nothing.
+grant select, insert, update on app.stream_plans to szronox_api;
+revoke delete on app.stream_plans from szronox_api;
+revoke all on app.stream_plans from szronox_worker;
+
 -- ── Roster ──────────────────────────────────────────────────────────────────────
 -- Read-only for both. The roster is an operator decision applied by the provisioning
 -- command under the owner role.

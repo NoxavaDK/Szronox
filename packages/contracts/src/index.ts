@@ -671,3 +671,115 @@ export interface LiveFeedItem extends LiveMessage { authorName: User['name'] }
 export interface LiveFeedResponse { items: LiveFeedItem[]; cursor: string }
 /** POST /live/status. Same status again is a no-op; disallowed transitions are 422. */
 export interface LiveStatusRequest { id: Id; status: Exclude<LiveMessageStatus, 'sent'> }
+
+/**
+ * STREAM-PLAN-01: the stream screen, set up per broadcast and separate from Reels. A plan holds
+ * up to eight topics (picked from recent Reels or typed), each with a main link, extra links and
+ * points to go through; the Social Stream Ninja session whose dock both users use to highlight
+ * comments; and whether it is the plan StreamControl on the streaming PC imports.
+ */
+// Limits (API-enforced; they match StreamControl's agenda): plan title 1–120; at most 8 topics;
+// topic title 1–180; main link plus at most 11 extra links, each a full http(s) link ≤ 2000 with a
+// label ≤ 120; at most 12 points of ≤ 200 characters.
+/**
+ * `highlights` (STREAM-PLAN-02): passages copied from the article, ≤ 5 of ≤ 300 characters; the
+ * presentation window marks them and, without a saved view, scrolls to the first. Blank ones are dropped.
+ */
+export interface StreamPlanLink { url: string; label: string; highlights: string[] }
+export interface StreamPlanTopic {
+  /** Client-generated, stable across edits. */
+  id: Id;
+  /** The Reel this topic was picked from, read live; null for a topic typed by hand. */
+  reelId: Id | null;
+  /** The broadcast title shown on screen; 1–180 characters. */
+  title: string;
+  mainLink: string | null;
+  /** Passages to highlight in the main link's article (STREAM-PLAN-02); same limits as a link's. */
+  mainHighlights: string[];
+  extraLinks: StreamPlanLink[];
+  /** What to go through, in order. */
+  points: string[];
+}
+/** Live state of a topic's Reel; null when the topic has no Reel or it no longer exists. */
+export interface StreamPlanTopicReel { id: Id; status: ReelStatus; deleted: boolean }
+export interface StreamPlanTopicView extends StreamPlanTopic { reel: StreamPlanTopicReel | null }
+export interface StreamPlan {
+  id: Id;
+  title: string;
+  scheduledFor: IsoDate | null;
+  commentsSession: string | null;
+  isCurrent: boolean;
+  topics: StreamPlanTopicView[];
+  version: number;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+export interface StreamPlanSummary {
+  id: Id;
+  title: string;
+  scheduledFor: IsoDate | null;
+  isCurrent: boolean;
+  topicCount: number;
+  updatedAt: IsoDateTime;
+}
+/** GET /stream-plans: active plans, latest date first (undated after dated). */
+export interface StreamPlanListResponse { items: StreamPlanSummary[] }
+/** POST /stream-plans. Idempotent on operationId. */
+export interface CreateStreamPlanRequest { operationId: Id; id: Id; title: string; scheduledFor?: IsoDate | null }
+/** PUT /stream-plans/:id — the whole editable document, version-checked. */
+export interface UpdateStreamPlanRequest {
+  operationId: Id;
+  expectedVersion: number;
+  title: string;
+  scheduledFor: IsoDate | null;
+  commentsSession: string | null;
+  topics: StreamPlanTopic[];
+}
+/** PUT /stream-plans/:id/current — mark (or unmark) the plan StreamControl imports. */
+export interface StreamPlanCurrentRequest { operationId: Id; expectedVersion: number; current: boolean }
+/** DELETE /stream-plans/:id */
+export interface DeleteStreamPlanRequest { operationId: Id; expectedVersion: number }
+/** GET /stream-plans/candidates?q= — recent Reels to pick topics from, newest first. */
+export interface StreamPlanCandidate extends Omit<StreamTopicCandidate, 'inThisStream'> { sourceLink: string | null }
+export interface StreamPlanCandidatesResponse { items: StreamPlanCandidate[] }
+/** GET /live/stream (live_feed key): the current plan for StreamControl to import. */
+export interface LiveStreamPlan {
+  id: Id;
+  title: string;
+  scheduledFor: IsoDate | null;
+  version: number;
+  updatedAt: IsoDateTime;
+  /** Broadcast content only: no Reel IDs or Reel data reach the device. */
+  topics: Array<Omit<StreamPlanTopic, 'reelId'>>;
+}
+export interface LiveStreamPlanResponse { plan: LiveStreamPlan | null }
+/**
+ * STREAM-PLAN-02. A cue asks the streaming PC to put a topic on air; `seq` only grows and each
+ * value is applied once. Topic ids are the plan's topic ids.
+ */
+export interface StreamPlanCue { seq: number; topicId: string; at: IsoDateTime }
+/** What the streaming PC last reported for this plan; null before its first report. */
+export interface StreamPlanPcReport {
+  /** The plan topic on air, or null (no topic selected, or one added on the PC by hand). */
+  topicId: string | null;
+  /** Topic ids the PC holds from its last import; a topic missing here needs a fresh import. */
+  topicIds: string[];
+  seenAt: IsoDateTime;
+}
+/** GET /stream-plans/:id/live — polled by the stream screen. */
+export interface StreamPlanLiveResponse { cue: StreamPlanCue | null; pc: StreamPlanPcReport | null }
+/** PUT /stream-plans/:id/cue — put a topic on air. Idempotent on operationId; no version check. */
+export interface CueStreamPlanRequest { operationId: Id; topicId: string }
+/** POST /live/stream/position (live_feed key): StreamControl's report; the answer carries the latest cue. */
+export interface LiveStreamPositionRequest {
+  planId: Id;
+  topicId: string | null;
+  topicIds: string[];
+  /** The plan version StreamControl holds; when it differs, the answer carries the plan so edits sync. */
+  version?: number | null;
+}
+export interface LiveStreamPositionResponse {
+  cue: { seq: number; topicId: string | null } | null;
+  /** Present when the plan's version differs from the one reported: its broadcast content to merge. */
+  plan?: LiveStreamPlan;
+}

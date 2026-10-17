@@ -136,3 +136,7 @@
 .rowStatus { flex: none; font-size: var(--sz-text-metadata-size); color: var(--sz-color-text-primary); }
 .statusShown { color: var(--sz-color-success); font-weight: 600; }
 .statusMuted { color: var(--sz-color-text-secondary); }
+
+/* STREAM-PLAN-01: inside the stream screen's side column the panel stays one column. */
+.columns.single { grid-template-columns: minmax(0, 1fr); }
+.single .history { border-top: 1px solid var(--sz-color-divider); padding-top: var(--sz-space-4); }
