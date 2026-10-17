@@ -159,6 +159,10 @@ textarea.input { resize: vertical; }
 .picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sz-space-2); padding: var(--sz-space-3); border: 1px solid var(--sz-color-divider); border-radius: var(--sz-radius-md); background: var(--sz-color-surface); }
 .candidates { max-height: 420px; overflow-y: auto; }
 
+/* Passages to highlight in an article (STREAM-PLAN-02): tinted like the highlight they become. */
+.highlights { font-size: 14px; background: #fffbe6; }
+.linkRow > .highlightsField { grid-column: 1 / -1; }
+
 /* On air (STREAM-PLAN-02): one tap puts a topic on air on the streaming PC. */
 .onAirList { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sz-space-1); }
 .onAirRow {

@@ -13,6 +13,7 @@ import type {
 /** T00 STREAM-PLAN-01 limits, mirrored from the API. */
 export const PLAN_LIMITS = {
   title: 120, topics: 8, topicTitle: 180, extraLinks: 11, linkLabel: 120, link: 2000, points: 12, point: 200,
+  highlights: 5, highlight: 300,
 } as const;
 
 export const SSN_DOCK = 'https://socialstream.ninja/dock.html';
@@ -46,13 +47,13 @@ export function broadcastTitle(label: string): string {
 
 export function topicFromCandidate(candidate: StreamPlanCandidate, label: string, id: string): StreamPlanTopicView {
   return {
-    id, reelId: candidate.id, title: broadcastTitle(label) || 'Temat', mainLink: mainLinkOf(candidate), extraLinks: [], points: [],
+    id, reelId: candidate.id, title: broadcastTitle(label) || 'Temat', mainLink: mainLinkOf(candidate), mainHighlights: [], extraLinks: [], points: [],
     reel: { id: candidate.id, status: candidate.status, deleted: false },
   };
 }
 
 export function blankTopic(id: string): StreamPlanTopicView {
-  return { id, reelId: null, title: '', mainLink: null, extraLinks: [], points: [], reel: null };
+  return { id, reelId: null, title: '', mainLink: null, mainHighlights: [], extraLinks: [], points: [], reel: null };
 }
 
 export function isLink(value: string): boolean {
@@ -99,6 +100,11 @@ export function draftProblems(draft: PlanDraft): string[] {
       if (link.url.trim() !== '' && !isLink(link.url)) problems.push(`Temat ${n}: link ${position + 1} musi zaczynać się od https://.`);
     });
     if (topic.points.some((point) => point.trim().length > PLAN_LIMITS.point)) problems.push(`Temat ${n}: punkt może mieć do ${PLAN_LIMITS.point} znaków.`);
+    for (const highlights of [topic.mainHighlights ?? [], ...topic.extraLinks.map((link) => link.highlights ?? [])]) {
+      const filled = highlights.filter((line) => line.trim() !== '');
+      if (filled.length > PLAN_LIMITS.highlights) problems.push(`Temat ${n}: najwyżej ${PLAN_LIMITS.highlights} fragmentów do podświetlenia w jednym linku.`);
+      if (filled.some((line) => line.trim().length > PLAN_LIMITS.highlight)) problems.push(`Temat ${n}: fragment do podświetlenia może mieć do ${PLAN_LIMITS.highlight} znaków.`);
+    }
   });
   return problems;
 }
@@ -108,12 +114,14 @@ export function draftProblems(draft: PlanDraft): string[] {
  * are left out; blank points are sent and dropped by the API, so the editor keeps its empty row.
  */
 export function requestOf(draft: PlanDraft, operationId: string, expectedVersion: number): UpdateStreamPlanRequest {
-  const topics: StreamPlanTopic[] = draft.topics.map(({ id, reelId, title, mainLink, extraLinks, points }) => ({
+  const topics: StreamPlanTopic[] = draft.topics.map(({ id, reelId, title, mainLink, mainHighlights, extraLinks, points }) => ({
     id,
     reelId,
     title: title.trim(),
     mainLink: mainLink && mainLink.trim() !== '' ? mainLink.trim() : null,
-    extraLinks: extraLinks.filter((link) => link.url.trim() !== '').map((link) => ({ url: link.url.trim(), label: link.label.trim() })),
+    // Blank highlight lines are sent and dropped by the API, like points, so the editor keeps them.
+    mainHighlights: mainLink && mainLink.trim() !== '' ? mainHighlights ?? [] : [],
+    extraLinks: extraLinks.filter((link) => link.url.trim() !== '').map((link) => ({ url: link.url.trim(), label: link.label.trim(), highlights: link.highlights ?? [] })),
     points,
   }));
   return {
@@ -166,3 +174,7 @@ export function nextTopicId(topicIds: readonly string[], onAir: string | null): 
   if (onAir === null || !topicIds.includes(onAir)) return topicIds[0];
   return topicIds[topicIds.indexOf(onAir) + 1] ?? null;
 }
+
+/** A highlights textarea holds one passage per line; blank lines stay while typing and are dropped on save. */
+export const highlightsText = (highlights: readonly string[]): string => highlights.join('\n');
+export const highlightsOf = (text: string): string[] => text.split('\n');

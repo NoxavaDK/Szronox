@@ -54,7 +54,7 @@ test('requestOf trims, drops empty link rows and maps an SSN link to its ID', ()
   assert.equal(body.expectedVersion, 3);
   assert.equal(body.scheduledFor, null);
   assert.equal(body.commentsSession, 'Abc');
-  assert.deepEqual(body.topics, [{ id: 't1', reelId: null, title: 'Temat', mainLink: null, extraLinks: [{ url: 'https://gus.gov.pl', label: 'GUS' }], points: ['A', ''] }]);
+  assert.deepEqual(body.topics, [{ id: 't1', reelId: null, title: 'Temat', mainLink: null, mainHighlights: [], extraLinks: [{ url: 'https://gus.gov.pl', label: 'GUS', highlights: [] }], points: ['A', ''] }]);
   assert.equal('reel' in body.topics[0], false);
 });
 
@@ -86,4 +86,18 @@ test('nextTopicId: first when nothing is on air, the following one, null at the 
   assert.equal(nextTopicId(['a', 'b'], 'b'), null);
   assert.equal(nextTopicId(['a', 'b'], 'gone'), 'a');
   assert.equal(nextTopicId([], null), null);
+});
+
+test('highlights: blank lines are kept in the editor, checked against the limits and only sent for a link', () => {
+  const topic = { ...blankTopic('t1'), title: 'Budżet', mainLink: 'https://a.pl', mainHighlights: ['Zdanie', ''],
+    extraLinks: [{ url: 'https://b.pl', label: '', highlights: ['Inne'] }] };
+  assert.deepEqual(draftProblems(draft({ topics: [topic] })), []);
+  const body = requestOf(draft({ topics: [topic] }), 'op', 1);
+  assert.deepEqual(body.topics[0].mainHighlights, ['Zdanie', '']);
+  assert.deepEqual(body.topics[0].extraLinks[0].highlights, ['Inne']);
+  assert.deepEqual(requestOf(draft({ topics: [{ ...topic, mainLink: '' }] }), 'op', 1).topics[0].mainHighlights, []);
+  const many = { ...topic, mainHighlights: ['1', '2', '3', '4', '5', '6'] };
+  assert.equal(draftProblems(draft({ topics: [many] })).length, 1);
+  const long = { ...topic, extraLinks: [{ url: 'https://b.pl', label: '', highlights: ['x'.repeat(301)] }] };
+  assert.equal(draftProblems(draft({ topics: [long] })).length, 1);
 });

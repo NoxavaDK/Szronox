@@ -168,6 +168,8 @@ test('validation: limits, links, duplicates, streams and unknown Reels are refus
       ['too many extra links', { topics: [topic({ extraLinks: Array.from({ length: 12 }, () => ({ url: 'https://a.pl', label: '' })) })] }],
       ['long label', { topics: [topic({ extraLinks: [{ url: 'https://a.pl', label: 'x'.repeat(121) }] })] }],
       ['too many points', { topics: [topic({ points: Array.from({ length: 13 }, (_, i) => `Punkt ${i}`) })] }],
+      ['too many highlights', { topics: [topic({ mainHighlights: Array.from({ length: 6 }, (_, i) => `Fragment ${i}`) })] }],
+      ['highlight too long', { topics: [topic({ extraLinks: [{ url: 'https://a.pl', label: '', highlights: ['x'.repeat(301)] }] })] }],
       ['long point', { topics: [topic({ points: ['x'.repeat(201)] })] }],
       ['duplicate topic id', (() => { const one = topic(); return { topics: [one, { ...one, title: 'Inny' }] }; })()],
       ['duplicate Reel', { topics: [topic({ reelId }), topic({ reelId })] }],
@@ -220,7 +222,10 @@ test('one current plan at a time; the device reads it without Reel data; delete 
     const reelId = await f.reel({ title: 'Budżet' });
     const first = await createPlan(f, 'Pierwszy');
     const second = await createPlan(f, 'Drugi');
-    const filled = (await save(f, first, { title: 'Pierwszy', topics: [topic({ reelId, title: 'Budżet', extraLinks: [{ url: 'https://gus.gov.pl', label: 'GUS' }] })] })).json();
+    const filled = (await save(f, first, { title: 'Pierwszy', topics: [topic({
+      reelId, title: 'Budżet', mainHighlights: ['Deficyt  wyniesie 6,5 proc.', '  '],
+      extraLinks: [{ url: 'https://gus.gov.pl', label: 'GUS', highlights: ['Inflacja'] }],
+    })] })).json();
     const marked = await f.call(f.kuba, 'PUT', `/stream-plans/${first.id}/current`, { operationId: randomUUID(), expectedVersion: filled.version, current: true });
     assert.equal(marked.statusCode, 200);
     assert.equal(marked.json().isCurrent, true);
@@ -228,7 +233,11 @@ test('one current plan at a time; the device reads it without Reel data; delete 
     const read = (await device()).json().plan;
     assert.equal(read.id, first.id);
     assert.equal(read.title, 'Pierwszy');
-    assert.deepEqual(read.topics, [{ id: filled.topics[0].id, title: 'Budżet', mainLink: 'https://example.pl/budzet', extraLinks: [{ url: 'https://gus.gov.pl', label: 'GUS' }], points: ['Liczby', 'Co dalej'] }]);
+    // STREAM-PLAN-02 highlights travel with the links; whitespace is collapsed and blanks dropped.
+    assert.deepEqual(read.topics, [{
+      id: filled.topics[0].id, title: 'Budżet', mainLink: 'https://example.pl/budzet', mainHighlights: ['Deficyt wyniesie 6,5 proc.'],
+      extraLinks: [{ url: 'https://gus.gov.pl', label: 'GUS', highlights: ['Inflacja'] }], points: ['Liczby', 'Co dalej'],
+    }]);
     assert.equal(JSON.stringify(read).includes(reelId), false);
 
     const switched = await f.call(f.szron, 'PUT', `/stream-plans/${second.id}/current`, { operationId: randomUUID(), expectedVersion: second.version, current: true });
@@ -301,7 +310,7 @@ test('STREAM-PLAN-02: a cue reaches the PC through its position report; the PC r
     assert.deepEqual((await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}/live`)).json(), { cue: null, pc: null });
 
     // First report: no cue yet (seq 0, the PC's baseline); the screen now sees the PC.
-    const first = await report({ planId: plan.id, topicId: null, topicIds: [a, b] });
+    const first = await report({ planId: plan.id, topicId: null, topicIds: [a, b], version: saved.version });
     assert.equal(first.statusCode, 200);
     assert.deepEqual(first.json(), { cue: { seq: 0, topicId: null } });
     const seen = (await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}/live`)).json();
@@ -318,7 +327,7 @@ test('STREAM-PLAN-02: a cue reaches the PC through its position report; the PC r
     // A retried click replays without a second cue.
     assert.equal((await f.call(f.szron, 'PUT', `/stream-plans/${plan.id}/cue`, { operationId, topicId: b })).json().cue.seq, 1);
 
-    assert.deepEqual((await report({ planId: plan.id, topicId: b, topicIds: [a, b] })).json(), { cue: { seq: 1, topicId: b } });
+    assert.deepEqual((await report({ planId: plan.id, topicId: b, topicIds: [a, b], version: saved.version })).json(), { cue: { seq: 1, topicId: b } });
     assert.equal((await f.call(f.kuba, 'GET', `/stream-plans/${plan.id}/live`)).json().pc.topicId, b);
 
     // Only the plan's own topics can be cued; reports are shape-checked; the key is required.
@@ -330,7 +339,14 @@ test('STREAM-PLAN-02: a cue reaches the PC through its position report; the PC r
     const asKey = await f.app.inject({ method: 'PUT', url: `/api/v1/stream-plans/${plan.id}/cue`, headers: { authorization: `Bearer ${f.key}` }, payload: { operationId: randomUUID(), topicId: a } });
     assert.equal(asKey.statusCode, 401);
 
-    // A plan that is gone answers with no cue.
+    // Edits sync: a PC reporting an older version gets the plan back; the current version gets none.
+    const behind = (await report({ planId: plan.id, topicId: b, topicIds: [a, b], version: 1 })).json();
+    assert.equal(behind.plan.version, saved.version);
+    assert.deepEqual(behind.plan.topics.map((entry: { title: string }) => entry.title), ['A', 'B']);
+    assert.equal(JSON.stringify(behind.plan).includes('reelId'), false);
+    assert.equal((await report({ planId: plan.id, topicId: b, topicIds: [a, b], version: saved.version })).json().plan, undefined);
+
+        // A plan that is gone answers with no cue.
     assert.deepEqual((await report({ planId: randomUUID(), topicId: null, topicIds: [] })).json(), { cue: null });
   } finally {
     await f.close();

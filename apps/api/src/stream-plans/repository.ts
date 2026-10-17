@@ -20,6 +20,7 @@ import type { Database, Queryable } from '../db/client.js';
 /** T00 STREAM-PLAN-01 limits; they match StreamControl's agenda so an import never truncates. */
 export const LIMITS = {
   title: 120, topics: 8, topicTitle: 180, extraLinks: 11, linkLabel: 120, link: 2000, points: 12, point: 200,
+  highlights: 5, highlight: 300,
 } as const;
 
 /** How long a StreamControl report counts as fresh before the device's write is repeated. */
@@ -48,7 +49,21 @@ interface PlanRow {
 const COLUMNS = `id, title, to_char(scheduled_for, 'YYYY-MM-DD') as scheduled_for, comments_session, topics,
   is_current, version, created_at, updated_at`;
 const iso = (value: unknown) => new Date(value as string).toISOString();
-const topicsOf = (row: PlanRow): StreamPlanTopic[] => typeof row.topics === 'string' ? JSON.parse(row.topics) as StreamPlanTopic[] : row.topics;
+// Topics saved before STREAM-PLAN-02 have no highlights; they read as empty lists.
+const topicsOf = (row: PlanRow): StreamPlanTopic[] => (typeof row.topics === 'string' ? JSON.parse(row.topics) as StreamPlanTopic[] : row.topics)
+  .map((topic) => ({
+    ...topic,
+    mainHighlights: topic.mainHighlights ?? [],
+    extraLinks: topic.extraLinks.map((link) => ({ ...link, highlights: link.highlights ?? [] })),
+  }));
+
+/** A plan as the streaming PC sees it: broadcast content only, no Reel ids or Reel data. */
+function devicePlan(row: PlanRow): LiveStreamPlan {
+  return {
+    id: row.id, title: row.title, scheduledFor: row.scheduled_for, version: row.version, updatedAt: iso(row.updated_at),
+    topics: topicsOf(row).map(({ id, title, mainLink, mainHighlights, extraLinks, points }) => ({ id, title, mainLink, mainHighlights, extraLinks, points })),
+  };
+}
 
 /** Plans have their own version, but a stale write is the same 409 every editor already handles. */
 function planConflict(currentVersion: number) {
@@ -102,6 +117,17 @@ function parseLink(value: unknown, field: string): string {
   return trimmed;
 }
 
+function parseHighlights(value: unknown, field: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw validationError(`${field} must be a list`, { field });
+  // Blank lines are a half-typed entry in the editor, not content: dropped, like points.
+  const highlights = value
+    .map((entry, position) => text(entry, `${field}[${position}]`, LIMITS.highlight, { required: false }).replace(/\s+/g, ' '))
+    .filter((entry) => entry !== '');
+  if (highlights.length > LIMITS.highlights) throw validationError(`At most ${LIMITS.highlights} passages to highlight per link`, { field, max: LIMITS.highlights });
+  return highlights;
+}
+
 function parseTopic(value: unknown, index: number): StreamPlanTopic {
   const at = (field: string) => `topics[${index}].${field}`;
   if (typeof value !== 'object' || value === null) throw validationError('Each topic must be an object', { field: `topics[${index}]` });
@@ -120,6 +146,7 @@ function parseTopic(value: unknown, index: number): StreamPlanTopic {
     return {
       url: parseLink(entry.url, at(`extraLinks[${position}].url`)),
       label: text(entry.label ?? '', at(`extraLinks[${position}].label`), LIMITS.linkLabel, { required: false }),
+      highlights: parseHighlights(entry.highlights, at(`extraLinks[${position}].highlights`)),
     };
   });
   if (!Array.isArray(topic.points)) throw validationError('points must be a list', { field: at('points') });
@@ -135,6 +162,7 @@ function parseTopic(value: unknown, index: number): StreamPlanTopic {
     reelId: typeof topic.reelId === 'string' ? topic.reelId.toLowerCase() : null,
     title: text(topic.title, at('title'), LIMITS.topicTitle, { required: true }),
     mainLink,
+    mainHighlights: mainLink ? parseHighlights(topic.mainHighlights, at('mainHighlights')) : [],
     extraLinks,
     points,
   };
@@ -403,21 +431,21 @@ export class StreamPlansRepository {
               or pc_seen_at < now() - make_interval(secs => $4))`,
       [planId, onAir, JSON.stringify(ids), PC_REPORT_REFRESH_SECONDS],
     );
-    const rows = await this.db.query<{ cue_seq: number; cue_topic_id: string | null }>(
-      'select cue_seq, cue_topic_id from app.stream_plans where id = $1 and deleted_at is null', [planId],
+    const rows = await this.db.query<PlanRow & { cue_seq: number; cue_topic_id: string | null }>(
+      `select ${COLUMNS}, cue_seq, cue_topic_id from app.stream_plans where id = $1 and deleted_at is null`, [planId],
     );
     const row = rows.rows[0];
-    return { cue: row ? { seq: row.cue_seq, topicId: row.cue_topic_id } : null };
+    if (!row) return { cue: null };
+    const answer: LiveStreamPositionResponse = { cue: { seq: row.cue_seq, topicId: row.cue_topic_id } };
+    // Edits made after the import reach the PC with this answer, so nobody presses download again.
+    if (source.version !== row.version) answer.plan = devicePlan(row);
+    return answer;
   }
 
   /** Device read for StreamControl: the current plan's broadcast content, nothing about Reels. */
   async currentForDevice(): Promise<LiveStreamPlan | null> {
     const rows = await this.db.query<PlanRow>(`select ${COLUMNS} from app.stream_plans where is_current and deleted_at is null`);
     const row = rows.rows[0];
-    if (!row) return null;
-    return {
-      id: row.id, title: row.title, scheduledFor: row.scheduled_for, version: row.version, updatedAt: iso(row.updated_at),
-      topics: topicsOf(row).map(({ id, title, mainLink, extraLinks, points }) => ({ id, title, mainLink, extraLinks, points })),
-    };
+    return row ? devicePlan(row) : null;
   }
 }

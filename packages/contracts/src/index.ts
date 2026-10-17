@@ -681,7 +681,11 @@ export interface LiveStatusRequest { id: Id; status: Exclude<LiveMessageStatus, 
 // Limits (API-enforced; they match StreamControl's agenda): plan title 1–120; at most 8 topics;
 // topic title 1–180; main link plus at most 11 extra links, each a full http(s) link ≤ 2000 with a
 // label ≤ 120; at most 12 points of ≤ 200 characters.
-export interface StreamPlanLink { url: string; label: string }
+/**
+ * `highlights` (STREAM-PLAN-02): passages copied from the article, ≤ 5 of ≤ 300 characters; the
+ * presentation window marks them and, without a saved view, scrolls to the first. Blank ones are dropped.
+ */
+export interface StreamPlanLink { url: string; label: string; highlights: string[] }
 export interface StreamPlanTopic {
   /** Client-generated, stable across edits. */
   id: Id;
@@ -690,6 +694,8 @@ export interface StreamPlanTopic {
   /** The broadcast title shown on screen; 1–180 characters. */
   title: string;
   mainLink: string | null;
+  /** Passages to highlight in the main link's article (STREAM-PLAN-02); same limits as a link's. */
+  mainHighlights: string[];
   extraLinks: StreamPlanLink[];
   /** What to go through, in order. */
   points: string[];
@@ -765,5 +771,15 @@ export interface StreamPlanLiveResponse { cue: StreamPlanCue | null; pc: StreamP
 /** PUT /stream-plans/:id/cue — put a topic on air. Idempotent on operationId; no version check. */
 export interface CueStreamPlanRequest { operationId: Id; topicId: string }
 /** POST /live/stream/position (live_feed key): StreamControl's report; the answer carries the latest cue. */
-export interface LiveStreamPositionRequest { planId: Id; topicId: string | null; topicIds: string[] }
-export interface LiveStreamPositionResponse { cue: { seq: number; topicId: string | null } | null }
+export interface LiveStreamPositionRequest {
+  planId: Id;
+  topicId: string | null;
+  topicIds: string[];
+  /** The plan version StreamControl holds; when it differs, the answer carries the plan so edits sync. */
+  version?: number | null;
+}
+export interface LiveStreamPositionResponse {
+  cue: { seq: number; topicId: string | null } | null;
+  /** Present when the plan's version differs from the one reported: its broadcast content to merge. */
+  plan?: LiveStreamPlan;
+}

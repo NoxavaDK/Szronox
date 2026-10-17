@@ -59,4 +59,10 @@ Visual: `Prowadzenie` rendered with fixture data in headless Chromium at 360, 40
 (connected, switching, topic missing on the PC, PC offline); no overflow, no console errors.
 Temporary harness removed.
 
+Follow-up the same day (operator choice: automatic): plan edits reach StreamControl through the
+position answer (`plan` when versions differ), and links carry passages to highlight
+(`mainHighlights`, `highlights`), edited as "Do podświetlenia" under each link. No migration
+(topics are JSON). API stream-plan tests 8/8, web `test:t08` 103/103, typecheck OK; the highlight
+fields rendered at 360 and 1280 px without overflow or console errors.
+
 UNVERIFIED: migration 0020 on DEV, deployment, and the round trip with StreamControl against DEV.

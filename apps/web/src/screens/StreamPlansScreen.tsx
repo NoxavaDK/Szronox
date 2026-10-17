@@ -7,7 +7,7 @@ import type { CoreApiClient } from '../data/api.js';
 import { ClientApiError } from '../data/errors.js';
 import { reelLabel } from '../data/reel-label.js';
 import {
-  blankTopic, dockUrl, draftOf, draftProblems, moveTopic, nextTopicId, onAirView, PLAN_LIMITS, planDateLabel, requestOf, sessionFrom,
+  blankTopic, dockUrl, draftOf, draftProblems, highlightsOf, highlightsText, moveTopic, nextTopicId, onAirView, PLAN_LIMITS, planDateLabel, requestOf, sessionFrom,
   topicFromCandidate, type PlanDraft,
 } from '../data/stream-plans.js';
 import { topicLabel } from '../data/streams.js';
@@ -487,6 +487,10 @@ function TopicCard({ topic, index, count, expanded, onToggle, onChange, onMove, 
             <input className={styles.input} type="url" inputMode="url" placeholder="https://…" value={topic.mainLink ?? ''}
               onChange={(event) => onChange((current) => ({ ...current, mainLink: event.target.value }))} />
           </label>
+          {topic.mainLink?.trim() ? (
+            <HighlightsField label="Do podświetlenia w głównym linku" value={topic.mainHighlights}
+              onChange={(highlights) => onChange((current) => ({ ...current, mainHighlights: highlights }))} />
+          ) : null}
 
           <div className={styles.field}>
             <span className={styles.fieldLabel}>Linki dodatkowe</span>
@@ -498,10 +502,14 @@ function TopicCard({ topic, index, count, expanded, onToggle, onChange, onMove, 
                   onChange={(event) => onChange((current) => ({ ...current, extraLinks: current.extraLinks.map((entry, at) => at === position ? { ...entry, label: event.target.value } : entry) }))} />
                 <button type="button" className={styles.textAction} aria-label={`Usuń link ${position + 1}`}
                   onClick={() => onChange((current) => ({ ...current, extraLinks: current.extraLinks.filter((_, at) => at !== position) }))}>Usuń</button>
+                {link.url.trim() ? (
+                  <HighlightsField label={`Do podświetlenia w linku ${position + 1}`} value={link.highlights}
+                    onChange={(highlights) => onChange((current) => ({ ...current, extraLinks: current.extraLinks.map((entry, at) => at === position ? { ...entry, highlights } : entry) }))} />
+                ) : null}
               </div>
             ))}
             {topic.extraLinks.length < PLAN_LIMITS.extraLinks ? (
-              <button type="button" className={styles.textAction} onClick={() => onChange((current) => ({ ...current, extraLinks: [...current.extraLinks, { url: '', label: '' }] }))}>+ Dodaj link</button>
+              <button type="button" className={styles.textAction} onClick={() => onChange((current) => ({ ...current, extraLinks: [...current.extraLinks, { url: '', label: '', highlights: [] }] }))}>+ Dodaj link</button>
             ) : null}
           </div>
 
@@ -530,6 +538,18 @@ function TopicCard({ topic, index, count, expanded, onToggle, onChange, onMove, 
         </div>
       ) : null}
     </li>
+  );
+}
+
+/** STREAM-PLAN-02: passages pasted from the article, marked in yellow when it is shown on the stream. */
+function HighlightsField({ label, value, onChange }: { label: string; value: string[]; onChange: (highlights: string[]) => void }) {
+  return (
+    <label className={`${styles.field} ${styles.highlightsField}`}>
+      <span className={styles.fieldLabel}>{label}</span>
+      <textarea className={`${styles.input} ${styles.highlights}`} rows={2} value={highlightsText(value)}
+        placeholder="Wklej zdanie z artykułu — na streamie będzie podświetlone. Każdy fragment w osobnej linii (do 5)."
+        onChange={(event) => onChange(highlightsOf(event.target.value))} />
+    </label>
   );
 }
 
