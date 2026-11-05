@@ -671,3 +671,138 @@ export interface LiveFeedItem extends LiveMessage { authorName: User['name'] }
 export interface LiveFeedResponse { items: LiveFeedItem[]; cursor: string }
 /** POST /live/status. Same status again is a no-op; disallowed transitions are 422. */
 export interface LiveStatusRequest { id: Id; status: Exclude<LiveMessageStatus, 'sent'> }
+
+/**
+ * MONITOR-01: daily monitoring of public Facebook and X profiles. Both users manage sources and
+ * read posts and reports; the streaming PC collects through a `monitor_collect` access key; the
+ * worker writes one synthesis per Europe/Warsaw day.
+ */
+export type MonitorPlatform = 'facebook' | 'x';
+export type MonitorSourceStatus = 'ok' | 'login_wall' | 'parse_failure' | 'error';
+export interface MonitorSource {
+  id: Id;
+  /** 1–120 characters. */
+  name: string;
+  /** 1–80 characters, e.g. `Konfederacja`, `KKP/Braun`. Free text, used for grouping. */
+  groupLabel: string;
+  platform: MonitorPlatform;
+  /** Full https profile URL, unique. */
+  profileUrl: string;
+  active: boolean;
+  version: number;
+  createdBy: Id;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+  lastCollectedAt: IsoDateTime | null;
+  lastStatus: MonitorSourceStatus | null;
+  lastStatusAt: IsoDateTime | null;
+}
+export interface MonitorSourceListResponse { items: MonitorSource[] }
+/** POST /monitor/sources. Idempotent on operationId; `sourceId` is chosen by the client. */
+export interface CreateMonitorSourceRequest {
+  operationId: Id;
+  sourceId: Id;
+  name: string;
+  groupLabel: string;
+  platform: MonitorPlatform;
+  profileUrl: string;
+}
+/** PATCH /monitor/sources/:id. `platform` is fixed at creation. No hard delete. */
+export interface MonitorSourcePatchRequest extends MutationContext {
+  changes: Partial<Pick<MonitorSource, 'name' | 'groupLabel' | 'profileUrl' | 'active'>>;
+}
+export interface MonitorPost {
+  id: Id;
+  sourceId: Id;
+  sourceName: string;
+  groupLabel: string;
+  platform: MonitorPlatform;
+  /** Canonical post URL. */
+  url: string;
+  author: string;
+  /** Null when the page showed no readable time. */
+  publishedAt: IsoDateTime | null;
+  text: string;
+  media: string[];
+  /** Visible counts as shown on the page, e.g. `{ likes: '1,2 tys.' }`; never parsed into numbers. */
+  engagement: Record<string, string>;
+  isRepost: boolean;
+  isPinned: boolean;
+  firstSeenAt: IsoDateTime;
+  lastSeenAt: IsoDateTime;
+  /** Set by "Zrób rolkę"; null otherwise. */
+  reelId: Id | null;
+}
+/**
+ * GET /monitor/posts?date=&group=&platform=&sourceId=&before=&limit=. `date` is the Europe/Warsaw
+ * date of `firstSeenAt`. Newest first; `nextBefore` is the cursor for the next page or null.
+ */
+export interface MonitorPostListResponse { items: MonitorPost[]; nextBefore: string | null }
+/** POST /monitor/posts/:id/reel ("Zrób rolkę"). Creates one Reel through the capture path. */
+export interface CreateReelFromMonitorPostRequest { operationId: Id; reelId: Id }
+
+export type MonitorFactLabel = 'fact' | 'opinion' | 'mixed';
+/** Worker output after validation: every URL exists in monitor_posts; every quote is verbatim. */
+export interface MonitorSynthesis {
+  mainTopics: Array<{ topic: string; summary: string; postUrls: string[] }>;
+  repeatedMessaging: Array<{ message: string; groups: string[]; postUrls: string[] }>;
+  groupDifferences: Array<{ group: string; description: string; postUrls: string[] }>;
+  postLabels: Array<{ postUrl: string; label: MonitorFactLabel; rationale: string }>;
+  /** `quote` is copied verbatim (original language) from the post's text. */
+  notableQuotes: Array<{ quote: string; postUrl: string; label: MonitorFactLabel }>;
+  videoIdeas: Array<{ title: string; angle: string; postUrls: string[] }>;
+}
+export interface MonitorReportSourceStatus {
+  sourceId: Id;
+  sourceName: string;
+  platform: MonitorPlatform;
+  status: MonitorSourceStatus | 'not_visited';
+  seen: number;
+  new: number;
+}
+export interface MonitorReport {
+  /** Europe/Warsaw date. */
+  date: IsoDate;
+  state: AiJobState;
+  /** Last successful synthesis; kept while a regeneration is queued, running or failed. */
+  synthesis: MonitorSynthesis | null;
+  postCount: number;
+  model: string;
+  /** Collector outcome per active source for that day, derived from the day's runs. */
+  sources: MonitorReportSourceStatus[];
+  /** Short Polish-facing error code when `state = 'failed'`. */
+  errorCode: string | null;
+  completedAt: IsoDateTime | null;
+}
+/** POST /monitor/reports/:date/regenerate. Re-queues the day unless it is already queued or running. */
+export interface RegenerateMonitorReportRequest { operationId: Id }
+
+/** Device routes (`monitor_collect` key only). */
+export interface MonitorCollectSource {
+  id: Id;
+  platform: MonitorPlatform;
+  profileUrl: string;
+  /** Up to 20 most recently first-seen canonical URLs, so the collector knows where to stop. */
+  knownUrls: string[];
+}
+/** GET /monitor/collect/sources?limit= (default 4, max 20): active sources, least recently collected first. */
+export interface MonitorCollectSourcesResponse { items: MonitorCollectSource[] }
+/** POST /monitor/collect/runs. Idempotent on `runId`. */
+export interface MonitorRunStartRequest { runId: Id }
+export interface MonitorCollectedPost {
+  url: string;
+  author: string;
+  publishedAt: IsoDateTime | null;
+  text: string;
+  media: string[];
+  engagement: Record<string, string>;
+  isRepost: boolean;
+  isPinned: boolean;
+}
+/** POST /monitor/collect/posts. At most 100 posts; idempotent upsert on canonical URL. */
+export interface MonitorPostBatchRequest { runId: Id; sourceId: Id; posts: MonitorCollectedPost[] }
+export interface MonitorPostBatchResponse { inserted: number; updated: number; unchanged: number; rejected: Array<{ index: number; reason: string }> }
+/** POST /monitor/collect/runs/:runId/finish. Queues that day's report. Repeating it is a no-op. */
+export interface MonitorRunFinishRequest {
+  results: Array<{ sourceId: Id; status: MonitorSourceStatus; seen: number; new: number }>;
+}

@@ -158,3 +158,9 @@ screen; the collector already exists and its fixes are known.
 2. Report language: Polish (proposed) or English?
 3. Keep the standalone `filmiki-monitor` running until MONITOR-01 is deployed? (Proposed: yes,
    after the review fixes, so collection can start now.)
+
+## Operator approval — 2026-11-05
+
+Approved by the operator as proposed: both users add and edit sources; reports in Polish; Luna
+implements after the root pins contracts and the visual delta. Steps 1 and 2 still stop for the
+operator's review. No merge, DEV migration or deployment is authorized.

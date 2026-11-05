@@ -484,3 +484,43 @@ Authority: `docs/implementation/VOICE-01-proposal.md` and `docs/product/voice-ho
 - On enqueue of those three actions, the API selects at most 8 examples: Reels that are not deleted and not absorbed, `format='reel'`, status in `to_record|editing|ready|published`, with a non-empty script, excluding the run's own Reel, newest `updated_at` first. `hook` = the selected hook's text, else the text of the only `source='user'` hook when there is exactly one, else null. `scriptExcerpt` and `description` are cut at 600 characters.
 - `styleExamples` is stored in the snapshot but **excluded from the canonical input used for `inputHash` and from staleness comparison**. Legacy snapshots without it run unchanged. The prompt labels the examples as style references whose facts and wording must never be reused.
 - No change to result schemas, apply rules or hook-selection rules.
+
+## MONITOR-01 — social monitoring of Facebook and X (operator-authorized 2026-11-05)
+
+Authority: `docs/implementation/MONITOR-01-proposal.md` (approved as proposed: both users edit sources; reports in Polish). Migration `0019_monitor.sql`; wire types in `packages/contracts` under `MONITOR-01`. Nothing here changes Reels, streams, live messages, auth/session behavior or any existing route; the five statuses are unchanged. This is an explicitly approved addition to "no application features beyond scope": a monitoring list and report, not analytics, alerts or autopublishing.
+
+**Split.** A collector on the streaming PC (real installed Chrome, visible, logged in on spare accounts) visits profiles and sends what it sees. It holds no database and no domain data beyond its own outbox of unsent posts. SzroNox owns sources, posts, runs and reports. The worker writes the synthesis. The platforms are Facebook and X only.
+
+**Device scope `monitor_collect`.** A second access-key scope under the STREAM-LIVE-01 device-principal rules unchanged (operator command mints/revokes, SHA-256 digest, constant-time check, Bearer only, refused with a session cookie or an `Origin` header, per-key rate limit, generic 401). A `monitor_collect` key is accepted only on the four `/monitor/collect/*` routes below, and a `live_feed` key is refused there; neither resolves to a `VerifiedActor` or can read Reels.
+
+**Canonical post URL** (collector applies it; the API re-applies it and rejects what does not fit, per item, without failing the batch): `https`; fragment removed. Facebook (`facebook.com`, `www.`, `m.`, `web.` → `www.facebook.com`): only `story_fbid` and `id` query parameters kept, in that order, and only on `/permalink.php` and `/story.php`; every other query parameter removed; a URL carrying `comment_id` or `reply_comment_id` is rejected as `comment`. X (`x.com`, `twitter.com`, `mobile.` variants → `x.com`): path reduced to `/<handle>/status/<digits>`, query removed; anything else is rejected as `not_a_post`. Trailing slash removed.
+
+**Upsert.** Insert on a new canonical URL (`first_seen_at = last_seen_at = now()`). On a known URL: always set `last_seen_at`; when `content_hash` (SHA-256 of canonical JSON `{text, media sorted}`) differs, also replace author, text, media, engagement, `published_at`, flags and set `content_changed_at`; `source_id` and `first_seen_at` never change. Engagement alone never counts as a change. Field limits as in SQL (author ≤ 300, text ≤ 20000, media ≤ 20 URLs of ≤ 2048, engagement ≤ 8 keys with values ≤ 40); a violating item is rejected with a reason.
+
+**Report day.** A post belongs to the Europe/Warsaw date of its `first_seen_at`. Finishing a run inserts or re-queues that date's report (`state = 'queued'`, `next_attempt_at = now()`) unless it is already queued or running. `POST …/regenerate` does the same for a user (`requested_by`). The previous successful `result` stays visible until a new one succeeds. Worker leasing, retries (max 5 attempts) and lease expiry follow `app.ai_runs`.
+
+**Synthesis (worker).** Input: the day's posts that are not reposts, in batches of at most 35, then one merge call when more than one batch; strict JSON through the existing Gemini provider and `GEMINI_MODEL`. Prompt ID `monitor-provisional-v1`, stage `development_provisional`, not an editorial prompt. Output language Polish; quotes stay in the post's original wording. After the model: every URL not in that day's input is removed; a quote is kept only when it occurs in its post's text after collapsing whitespace on both sides; empty sections are allowed. The stored result is `MonitorSynthesis`; posts' text is labelled in the prompt as third-party material, not instructions.
+
+**Zrób rolkę.** `POST /monitor/posts/:id/reel` creates one `format='reel'` Reel through the existing `POST /reels` capture rules with `input = { url: <post url>, text: <post text, ≤ capture limit>, images: [] }`, sets `monitor_posts.reel_id` in the same transaction, and returns the `Reel`. Idempotent on `operationId`. A post that already has a Reel is `422 VALIDATION_ERROR` `reason: already_has_reel`. CAPTURE-DRAFT-01 auto-draft rules apply unchanged.
+
+**Routes (all under `/api/v1`).**
+
+| Route | Contract |
+| --- | --- |
+| GET /monitor/sources | Session. All sources, active first, then `groupLabel`, `name`. `MonitorSourceListResponse`. |
+| POST /monitor/sources | Session + Origin + CSRF. `CreateMonitorSourceRequest`, idempotent. Duplicate `profileUrl` → 422 `reason: duplicate_profile`. 201 `MonitorSource`. |
+| PATCH /monitor/sources/:id | Session + Origin + CSRF. `MonitorSourcePatchRequest`, version-checked and idempotent. |
+| GET /monitor/posts | Session. Query `date` (IsoDate, default today in Europe/Warsaw), optional `group`, `platform`, `sourceId`, `before` (cursor), `limit` ≤ 100 (default 50). `MonitorPostListResponse`. |
+| POST /monitor/posts/:id/reel | Session + Origin + CSRF. `CreateReelFromMonitorPostRequest`. 201 `Reel`. |
+| GET /monitor/reports/:date | Session. `MonitorReport`, 404 `NOT_FOUND` when no report exists for that date. |
+| POST /monitor/reports/:date/regenerate | Session + Origin + CSRF. `RegenerateMonitorReportRequest`. 202 `MonitorReport`. |
+| GET /monitor/collect/sources?limit= | `monitor_collect` key. `MonitorCollectSourcesResponse`. |
+| POST /monitor/collect/runs | `monitor_collect` key. `MonitorRunStartRequest`, idempotent on `runId`. 201. |
+| POST /monitor/collect/posts | `monitor_collect` key. `MonitorPostBatchRequest` (≤ 100 posts; the run must be open and the source active). `MonitorPostBatchResponse`. |
+| POST /monitor/collect/runs/:runId/finish | `monitor_collect` key. `MonitorRunFinishRequest`. Updates each listed source's `last_status`, `last_status_at` and `last_collected_at`, then queues the day's report. Repeating it is a 204 no-op. |
+
+**Grants.** API: select/insert/update on `monitor_sources`, `monitor_posts`, `monitor_runs`, `monitor_reports`; no delete anywhere. Worker: select on `monitor_sources` and `monitor_posts`; select and update of `state, lease_token, lease_expires_at, attempt_count, next_attempt_at, result, error, completed_at, model, prompt_id, post_count` on `monitor_reports`; nothing on `monitor_runs`. `runtime/privileges.ts` and `deploy-grants.test.ts` extended accordingly.
+
+**Monitoring screen.** Reachable from main navigation for both users. Exact layout and Polish copy are pinned in `design/monitor-delta-spec.md` once the operator approves it; no UI beyond that spec.
+
+**Acceptance.** URL canonicalisation table tests (Facebook tracking parameters, `m.` host, comment links, X photo/analytics suffixes); upsert behavior including engagement-only change; key scope isolation both ways and cookie/Origin refusal; run idempotency and finish no-op; report queueing and Warsaw day boundary; worker URL and verbatim-quote filtering with fixtures, retry and lease expiry; `Zrób rolkę` once only; grants and privilege refusal rules; contracts/API/worker build and web typecheck; collector parser tests. **Open real-world gates (separate approval):** DEV migration and deployment, a live Gemini report, the first collector run against DEV with the spare accounts.

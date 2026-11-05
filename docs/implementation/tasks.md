@@ -96,3 +96,7 @@ The operator approved both task scopes and the exact Luna models in `SOURCE-02-M
 ## STREAM-LIVE-01 — live messages and access keys, operator-approved 2026-10-11
 
 Operator approved one manual implementation on Claude Opus 5.5 in `.worktrees/stream-live-01` (branch `claude/stream-live-01`). Scope, editable files and acceptance: [STREAM-LIVE-01-proposal.md](STREAM-LIVE-01-proposal.md); contract: T00 section STREAM-LIVE-01. Order: pin contracts/migration (operator review) → visual delta `design/live-delta-spec.md` (operator review) → implementation and handoff. Includes the approved device-key exception to VPS-00 and migration 0016 (STREAM-01/02 renumbered to 0017/0018). No merge, DEV migration or deployment authorized.
+
+## MONITOR-01 — Facebook/X monitoring in SzroNox, operator-approved 2026-11-05
+
+Operator approved MONITOR-01 as proposed in [MONITOR-01-proposal.md](MONITOR-01-proposal.md): root pins contracts, T00 section MONITOR-01 and migration `0019_monitor.sql`; Luna (`gpt-6-luna/high`) implements in `.worktrees/monitor-01` (branch `luna/monitor-01`). Step 1 (contracts/migration) pinned, awaiting operator review. Next: visual delta `design/monitor-delta-spec.md` (operator review), then implementation and handoff. No merge, DEV migration or deployment authorized.
