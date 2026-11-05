@@ -487,7 +487,7 @@ Authority: `docs/implementation/VOICE-01-proposal.md` and `docs/product/voice-ho
 
 ## MONITOR-01 — social monitoring of Facebook and X (operator-authorized 2026-11-05)
 
-Authority: `docs/implementation/MONITOR-01-proposal.md` (approved as proposed: both users edit sources; reports in Polish). Migration `0019_monitor.sql`; wire types in `packages/contracts` under `MONITOR-01`. Nothing here changes Reels, streams, live messages, auth/session behavior or any existing route; the five statuses are unchanged. This is an explicitly approved addition to "no application features beyond scope": a monitoring list and report, not analytics, alerts or autopublishing.
+Authority: `docs/implementation/MONITOR-01-proposal.md` (approved as proposed: both users edit sources; reports in Polish). Migration `0021_monitor.sql`; wire types in `packages/contracts` under `MONITOR-01`. Nothing here changes Reels, streams, live messages, auth/session behavior or any existing route; the five statuses are unchanged. This is an explicitly approved addition to "no application features beyond scope": a monitoring list and report, not analytics, alerts or autopublishing.
 
 **Split.** A collector on the streaming PC (real installed Chrome, visible, logged in on spare accounts) visits profiles and sends what it sees. It holds no database and no domain data beyond its own outbox of unsent posts. SzroNox owns sources, posts, runs and reports. The worker writes the synthesis. The platforms are Facebook and X only.
 

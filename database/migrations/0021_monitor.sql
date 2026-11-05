@@ -1,5 +1,7 @@
 -- MONITOR-01: daily monitoring of public Facebook and X profiles, stored in SzroNox.
 --
+-- Filename note: 0019 and 0020 are taken by the open Streamy branch (stream_plans), so this is 0021.
+--
 -- A collector on the streaming PC (a logged-in, visible Chrome) visits the profiles listed here
 -- and sends what it sees through a `monitor_collect` access key. The worker writes one Gemini
 -- synthesis per Europe/Warsaw day. Both users manage sources, read posts and reports, and may

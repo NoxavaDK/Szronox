@@ -99,4 +99,4 @@ Operator approved one manual implementation on Claude Opus 5.5 in `.worktrees/st
 
 ## MONITOR-01 — Facebook/X monitoring in SzroNox, operator-approved 2026-11-05
 
-Operator approved MONITOR-01 as proposed in [MONITOR-01-proposal.md](MONITOR-01-proposal.md): root pins contracts, T00 section MONITOR-01 and migration `0019_monitor.sql`; Luna (`gpt-6-luna/high`) implements in `.worktrees/monitor-01` (branch `luna/monitor-01`). Step 1 (contracts/migration) pinned, awaiting operator review. Next: visual delta `design/monitor-delta-spec.md` (operator review), then implementation and handoff. No merge, DEV migration or deployment authorized.
+Operator approved MONITOR-01 as proposed in [MONITOR-01-proposal.md](MONITOR-01-proposal.md): root pins contracts, T00 section MONITOR-01 and migration `0021_monitor.sql`; Luna (`gpt-6-luna/high`) implements in `.worktrees/monitor-01` (branch `luna/monitor-01`). Step 1 (contracts/migration) pinned, awaiting operator review. Next: visual delta `design/monitor-delta-spec.md` (operator review), then implementation and handoff. No merge, DEV migration or deployment authorized.

@@ -32,7 +32,7 @@ the spare accounts checkpointed. So the split mirrors STREAM-LIVE-01:
 
 The PC makes only outbound HTTPS calls with a narrowly scoped device key, as StreamControl does.
 
-## Proposed data model (migration `0019_monitor.sql`, additive)
+## Proposed data model (migration `0021_monitor.sql`, additive)
 
 - `app.monitor_sources` — `id uuid`, `name`, `group_label` (e.g. Konfederacja, KKP/Braun),
   `platform` check in (`facebook`, `x`), `profile_url` unique, `active bool`, `created_by` fk users,
@@ -105,7 +105,7 @@ charts; automatic Reel creation; any change to existing Reel, stream or live-mes
 
 **Task ID:** MONITOR-01.
 
-**Exact task:** social monitoring in SzroNox: migration 0019, `monitor_collect` device key scope,
+**Exact task:** social monitoring in SzroNox: migration 0021, `monitor_collect` device key scope,
 device and browser routes above, worker synthesis job, a "Monitoring" screen for both users, and
 the PC collector moved into `tools/monitor-collector/` and pointed at the SzroNox API.
 
@@ -131,7 +131,7 @@ screen; the collector already exists and its fixes are known.
   `MONITOR-01-proposal.md`, `MONITOR-01-result.md`
 - `design/monitor-delta-spec.md` (new)
 - `packages/contracts/src/index.ts` (additive types only)
-- `database/migrations/0019_monitor.sql`
+- `database/migrations/0021_monitor.sql`
 - `deploy/vps/postgres/grants.sql`, `apps/api/src/deploy-grants.test.ts`
 - `apps/api/src/live/keys.ts` (scope type only)
 - `apps/api/src/monitor/` (new), `apps/api/src/monitor.test.ts`, `apps/api/src/app.ts` (one line)
