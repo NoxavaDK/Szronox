@@ -164,3 +164,5 @@ screen; the collector already exists and its fixes are known.
 Approved by the operator as proposed: both users add and edit sources; reports in Polish; Luna
 implements after the root pins contracts and the visual delta. Steps 1 and 2 still stop for the
 operator's review. No merge, DEV migration or deployment is authorized.
+
+Step 1 (T00 section, wire types, migration `0021_monitor.sql`) approved by the operator 2026-11-05.
