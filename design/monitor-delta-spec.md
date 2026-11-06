@@ -1,6 +1,6 @@
 # MONITOR VISUAL DELTA — Monitoring (MONITOR-01)
 
-Status: **proposal for operator review, 5 November 2026.** Governs only the Monitoring screen, its
+Status: **approved by the operator 2026-11-06.** Governs only the Monitoring screen, its
 Źródła view and its entry point. Everything else follows `design/frozen-visual-spec.md`. All
 visible UI is Polish. Contract: T00 section MONITOR-01.
 

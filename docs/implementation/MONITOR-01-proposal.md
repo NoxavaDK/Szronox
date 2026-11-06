@@ -166,3 +166,4 @@ implements after the root pins contracts and the visual delta. Steps 1 and 2 sti
 operator's review. No merge, DEV migration or deployment is authorized.
 
 Step 1 (T00 section, wire types, migration `0021_monitor.sql`) approved by the operator 2026-11-05.
+Step 2 (visual delta `design/monitor-delta-spec.md`) approved by the operator 2026-11-06; dispatched to Luna per `MONITOR-01-luna-handoff.md`.
