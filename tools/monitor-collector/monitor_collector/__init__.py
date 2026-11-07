@@ -1,0 +1,1 @@
+"""SzroNox public-post collector."""

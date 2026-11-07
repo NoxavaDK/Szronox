@@ -52,7 +52,7 @@ const repositoryRoot = path.resolve(here, '../../..');
 const deployDirectory = path.join(repositoryRoot, 'deploy', 'vps', 'postgres');
 
 const RUNTIME_ROLES = ['szronox_api', 'szronox_worker'] as const;
-const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys', 'app.stream_topics'] as const;
+const WATCHED_TABLES = ['app.users', 'app.user_credentials', 'app.auth_sessions', 'app.reels', 'app.live_messages', 'app.access_keys', 'app.stream_topics', 'app.monitor_sources', 'app.monitor_posts', 'app.monitor_runs', 'app.monitor_reports'] as const;
 
 /**
  * Pull the SQL out of the initdb script's heredoc.
@@ -228,6 +228,10 @@ test('grants.sql produces exactly the privileges the API startup check demands',
       'the API issues, resolves, revokes and prunes sessions');
     assert.deepEqual(facts.privileges['app.reels'], { select: true, insert: true, update: true, delete: true },
       'the API owns domain writes');
+    for (const table of ['app.monitor_sources', 'app.monitor_posts', 'app.monitor_runs', 'app.monitor_reports'] as const) {
+      assert.deepEqual(facts.privileges[table], { select: true, insert: true, update: true, delete: false },
+        `the API has DML except DELETE on ${table}`);
+    }
 
     assert.equal(facts.isSuperuser, false);
     assert.equal(facts.canCreateDb, false);
@@ -257,6 +261,11 @@ test('grants.sql produces exactly the privileges the worker startup check demand
     // granting it on faith.
     assert.deepEqual(facts.privileges['app.reels'], { select: true, insert: false, update: false, delete: false });
     assert.deepEqual(facts.privileges['app.users'], { select: true, insert: false, update: false, delete: false });
+    assert.deepEqual(facts.privileges['app.monitor_sources'], { select: true, insert: false, update: false, delete: false });
+    assert.deepEqual(facts.privileges['app.monitor_posts'], { select: true, insert: false, update: false, delete: false });
+    assert.deepEqual(facts.privileges['app.monitor_runs'], { select: false, insert: false, update: false, delete: false });
+    assert.deepEqual(facts.privileges['app.monitor_reports'], { select: true, insert: false, update: false, delete: false },
+      'the worker report UPDATE is column-limited and not a table-level grant');
 
     assert.equal(facts.isSuperuser, false);
     assert.equal(facts.canCreateInAppSchema, false);
@@ -494,4 +503,39 @@ test('STREAM-01: the API role has full DML on stream_topics; the worker role has
   } finally {
     await context.close();
   }
+});
+
+test('MONITOR-01: the API writes without DELETE; the worker reads inputs and updates only report columns', async () => {
+  const context = await provisionDatabase();
+  try {
+    const user = '11111111-1111-4111-8111-111111111111';
+    const apiRole = async (sql: string): Promise<'ok' | 'denied'> => {
+      await context.raw.exec('set role szronox_api');
+      try { await context.raw.exec(sql); return 'ok'; } catch (error) {
+        if (/permission denied/.test(String((error as Error).message))) return 'denied';
+        throw error;
+      } finally { await context.raw.exec('reset role'); }
+    };
+    const workerRole = async (sql: string): Promise<'ok' | 'denied'> => {
+      await context.raw.exec('set role szronox_worker');
+      try { await context.raw.exec(sql); return 'ok'; } catch (error) {
+        if (/permission denied/.test(String((error as Error).message))) return 'denied';
+        throw error;
+      } finally { await context.raw.exec('reset role'); }
+    };
+    await context.raw.exec(`insert into app.users (id, name) values ('${user}', 'NOXAVA') on conflict do nothing`);
+    await context.raw.exec(`insert into app.monitor_sources (id,name,group_label,platform,profile_url,created_by)
+      values ('88888888-8888-4888-8888-888888888881','Source','Group','x','https://x.com/source','${user}')`);
+    await context.raw.exec(`insert into app.monitor_reports (id,report_date,model,prompt_id)
+      values ('88888888-8888-4888-8888-888888888882',current_date,'model','prompt')`);
+    assert.equal(await apiRole(`update app.monitor_sources set active=false where id='88888888-8888-4888-8888-888888888881'`), 'ok');
+    assert.equal(await apiRole(`delete from app.monitor_sources where id='88888888-8888-4888-8888-888888888881'`), 'denied');
+    assert.equal(await workerRole('select 1 from app.monitor_sources'), 'ok');
+    assert.equal(await workerRole('select 1 from app.monitor_posts'), 'ok');
+    assert.equal(await workerRole('select 1 from app.monitor_runs'), 'denied');
+    assert.equal(await workerRole(`update app.monitor_reports set state='running', lease_token=gen_random_uuid(), lease_expires_at=now()+interval '5 minutes'`), 'ok');
+    assert.equal(await workerRole(`update app.monitor_reports set requested_by='${user}'`), 'denied');
+    assert.equal(await workerRole('insert into app.monitor_reports (id,report_date,model,prompt_id) values (gen_random_uuid(),current_date+1,\'model\',\'prompt\')'), 'denied');
+    assert.equal(await workerRole('delete from app.monitor_reports'), 'denied');
+  } finally { await context.close(); }
 });

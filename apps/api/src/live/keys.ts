@@ -21,7 +21,7 @@ import type { FastifyRequest } from 'fastify';
 import { unauthenticated } from '../core/errors.js';
 import type { Queryable } from '../db/client.js';
 
-export type AccessKeyScope = 'live_feed';
+export type AccessKeyScope = 'live_feed' | 'monitor_collect';
 
 export interface DeviceKey {
   id: string;

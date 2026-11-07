@@ -13,6 +13,7 @@
  */
 
 import { composeWorkerRuntime, databaseConfigured, type WorkerEnv, type WorkerRuntime } from './runtime.js';
+import { assertMonitorWorkerPrivileges, tickMonitor } from './ai/jobs.js';
 
 const env = process.env as WorkerEnv & { NODE_ENV?: string; SHUTDOWN_TIMEOUT_MS?: string };
 const shutdownTimeoutMs = Number(env.SHUTDOWN_TIMEOUT_MS ?? 10_000);
@@ -27,6 +28,7 @@ let runtime: WorkerRuntime | null = null;
 if (databaseConfigured(env)) {
   try {
     runtime = await composeWorkerRuntime(env);
+    await assertMonitorWorkerPrivileges(runtime.pool);
   } catch (error) {
     fail(`worker runtime composition failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -54,7 +56,7 @@ const timer = setInterval(() => {
   // Overlap-safe: a slow probe must not stack ticks on a two-connection pool.
   if (ticking || runtime === null || shuttingDown) return;
   ticking = true;
-  void runtime.tick()
+  void runtime.tick().then(() => ['true', '1', 'yes'].includes(env.AI_ENABLED?.trim().toLowerCase() ?? '') ? tickMonitor(runtime!.pool, env) : undefined)
     .catch((error: unknown) => {
       // A failed tick is reported and retried on the next interval. A claimed
       // run recovers through its bounded lease after a process/database failure.

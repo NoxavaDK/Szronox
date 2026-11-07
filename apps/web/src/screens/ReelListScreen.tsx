@@ -13,7 +13,7 @@ import styles from './ReelListScreen.module.css';
 import quickStyles from './ReelQuickActions.module.css';
 
 /** "Rolki" — frozen-visual-spec.md sec. 2. Controlled: all state and intents come from props. */
-export function ReelListScreen(props: ReelListScreenProps) {
+export function ReelListScreen(props: ReelListScreenProps & { onOpenMonitoring?: () => void }) {
   const { currentUser, statusTabs, selectedStatus, onSelectStatus, searchQuery, onChangeSearchQuery, attentionCount, onOpenAttention, loadState, items, selectedReelId, onOpenReel, onAddNew, onRetry, quickActions } = props;
   const [localQuery, setLocalQuery] = useState('');
   const query = searchQuery ?? localQuery;
@@ -42,6 +42,9 @@ export function ReelListScreen(props: ReelListScreenProps) {
           ) : null}
           {props.onOpenLive ? (
             <button type="button" className={styles.planLink} onClick={props.onOpenLive}>Na żywo</button>
+          ) : null}
+          {props.onOpenMonitoring ? (
+            <button type="button" className={styles.planLink} onClick={props.onOpenMonitoring}>Monitoring</button>
           ) : null}
         </span>
         {/* Quiet secondary entry, per the frozen batch: never a sixth status tab. */}

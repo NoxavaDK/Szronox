@@ -83,6 +83,17 @@ revoke insert, update, delete on app.access_keys from szronox_api;
 grant update (last_used_at) on app.access_keys to szronox_api;
 revoke all on app.access_keys from szronox_worker;
 
+-- MONITOR-01: the API owns source/post/run/report mutations. The worker only reads sources,
+-- posts and queued reports; it can update only the fenced report lifecycle/result columns.
+revoke all on app.monitor_sources, app.monitor_posts, app.monitor_runs, app.monitor_reports
+  from szronox_api, szronox_worker;
+grant select, insert, update on
+  app.monitor_sources, app.monitor_posts, app.monitor_runs, app.monitor_reports to szronox_api;
+grant select on app.monitor_sources, app.monitor_posts, app.monitor_reports to szronox_worker;
+grant update (state, lease_token, lease_expires_at, attempt_count, next_attempt_at,
+  result, error, completed_at, model, prompt_id, post_count)
+  on app.monitor_reports to szronox_worker;
+
 -- ── Roster ──────────────────────────────────────────────────────────────────────
 -- Read-only for both. The roster is an operator decision applied by the provisioning
 -- command under the owner role.
