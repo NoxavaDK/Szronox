@@ -44,6 +44,11 @@ const WATCHED_TABLES = [
   'app.access_keys',
   // STREAM-01
   'app.stream_topics',
+  // MONITOR-01
+  'app.monitor_sources',
+  'app.monitor_posts',
+  'app.monitor_runs',
+  'app.monitor_reports',
 ] as const;
 
 interface FactsRow {
@@ -132,6 +137,14 @@ export function apiPrivilegeViolations(facts: RoleFacts): string[] {
   const keys = facts.privileges['app.access_keys'];
   if (!keys.select) violations.push('it cannot SELECT app.access_keys, so no device can authenticate');
   if (keys.insert || keys.update || keys.delete) violations.push('it may mint, alter or delete app.access_keys');
+  for (const table of ['app.monitor_sources', 'app.monitor_posts', 'app.monitor_runs', 'app.monitor_reports'] as const) {
+    const grant = facts.privileges[table];
+    // readRoleFacts always fills every watched table. Older synthetic RoleFacts fixtures may
+    // omit tables added by later tasks; those fixtures do not describe a live role.
+    if (!grant) continue;
+    if (!grant.select || !grant.insert || !grant.update) violations.push(`it cannot use ${table}`);
+    if (grant.delete) violations.push(`it may DELETE from ${table}`);
+  }
   return violations;
 }
 
@@ -148,6 +161,21 @@ export function workerPrivilegeViolations(facts: RoleFacts): string[] {
     if (grant.select || grant.insert || grant.update || grant.delete) {
       violations.push(`it may access ${table}`);
     }
+  }
+  for (const table of ['app.monitor_sources', 'app.monitor_posts'] as const) {
+    const grant = facts.privileges[table];
+    if (!grant) continue;
+    if (!grant.select) violations.push(`it cannot SELECT ${table}`);
+    if (grant.insert || grant.update || grant.delete) violations.push(`it may write ${table}`);
+  }
+  const monitorRuns = facts.privileges['app.monitor_runs'];
+  if (monitorRuns && (monitorRuns.select || monitorRuns.insert || monitorRuns.update || monitorRuns.delete)) {
+    violations.push('it may access app.monitor_runs');
+  }
+  const monitorReports = facts.privileges['app.monitor_reports'];
+  if (monitorReports && !monitorReports.select) violations.push('it cannot SELECT app.monitor_reports');
+  if (monitorReports && (monitorReports.insert || monitorReports.delete || monitorReports.update)) {
+    violations.push('it may insert, delete or broadly update app.monitor_reports');
   }
   const users = facts.privileges['app.users'];
   if (users.insert || users.update || users.delete) violations.push('it may write app.users');

@@ -11,6 +11,7 @@ import type { SyncQueue } from '../drafts/queue.js';
 import type { AttachmentRecovery } from '../data/attachment-recovery.js';
 import { reelLabel } from '../data/reel-label.js';
 import { streamDeleteConfirmBody } from '../data/streams.js';
+import { MonitorApiClient, warsawToday } from '../data/monitor.js';
 import { detailPrimaryAction, isReadOnlyReel } from '../data/detail-actions.js';
 import { SCRIPT_REQUIRED, UNSAVED_BEFORE_PUBLICATION, polishError } from '../data/errors.js';
 import { useAppController } from '../controllers/useAppController.js';
@@ -18,6 +19,7 @@ import { QuickAddScreen } from '../screens/QuickAddScreen.js';
 import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
 import { ReelListScreen } from '../screens/ReelListScreen.js';
 import { LiveScreen } from '../screens/LiveScreen.js';
+import { MonitorScreen } from '../screens/MonitorScreen.js';
 import { DeletedReelsScreen } from '../screens/DeletedReelsScreen.js';
 import { AiWorkspace } from '../screens/AiWorkspace.js';
 import { MemePicker } from '../screens/MemePicker.js';
@@ -56,6 +58,11 @@ function streamSourceLinesOf(reel: Reel): string[] {
 
 export function App({ auth, api, store, queue, attachments }: { auth: BrowserSession; api: CoreApiClient; store: DraftStore; queue: SyncQueue; attachments: AttachmentRecovery }) {
   const c = useAppController(auth, api, store, queue, attachments);
+  const monitorApi = useMemo(() => new MonitorApiClient(auth), [auth]);
+  const [monitorOpen, setMonitorOpen] = useState(false);
+  const [monitorDate, setMonitorDate] = useState(warsawToday());
+  const [monitorTab, setMonitorTab] = useState<'report' | 'posts'>('report');
+  const monitorReturn = useRef(false);
   type DetailSection = 'sources' | 'materials' | 'notes' | 'publication';
   const [sectionOverrides, setSectionOverrides] = useState<Record<string, Partial<Record<DetailSection, boolean>>>>({});
   const [articleLinkFocus, setArticleLinkFocus] = useState(0);
@@ -622,7 +629,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
 
     return <ReelDetailScreen
       key={reel.id}
-      onBack={c.leaveDetail}
+      onBack={() => {
+        c.leaveDetail();
+        if (monitorReturn.current) { monitorReturn.current = false; setMonitorOpen(true); }
+      }}
       title={reel.title}
       onChangeTitle={(title) => c.changeReel({ title })}
       titlePlaceholder={label.derived ? label.text : undefined}
@@ -858,6 +868,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     onRetry={() => void c.loadList()}
     onOpenDeleted={() => c.setRoute({ name: 'deleted' })}
     onOpenLive={c.openLive}
+    onOpenMonitoring={() => setMonitorOpen(true)}
     quickActions={{
       openReelId: quickOpenReelId,
       open: quickOpen,
@@ -925,6 +936,16 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     onConfirm={(date, slot) => void applySchedule(scheduleReel.id, date, slot)}
     onClear={() => void applySchedule(scheduleReel.id, null, null)}
   /> : null;
+
+  if (monitorOpen) return <MonitorScreen
+    api={monitorApi}
+    date={monitorDate}
+    onDateChange={setMonitorDate}
+    tab={monitorTab}
+    onTabChange={setMonitorTab}
+    onBack={() => { monitorReturn.current = false; setMonitorOpen(false); }}
+    onOpenReel={(id) => { monitorReturn.current = true; setMonitorOpen(false); void c.openDetail(id); }}
+  />;
 
   if (c.layout === 'single') {
     if (c.route.name === 'detail' && c.current) return <>{notice}{renderDetail()}{scheduleSheet}</>;
