@@ -23,6 +23,7 @@ No merge, deployment, DEV migration, social-account login or live Gemini request
 - `node --test --test-name-pattern="API and worker privilege rules refuse an over-privileged role" apps/api/dist/runtime.test.js` — 1/1 passed.
 - `node --test apps/worker/dist/ai/monitor.test.js` — 4/4 passed.
 - From `tools/monitor-collector/`, `C:\Users\sille\Desktop\StreamOverlay\filmiki-monitor\.venv\Scripts\python.exe -m pytest` — 6/6 passed (Python 3.13.16 on this host; Python 3.11 was not available for a separate run).
+- Temporary Vite preview at `http://127.0.0.1:5173/monitor-preview.html` with mock API data — report synthesis and Sources/source form rendered in the local browser. The temporary page was removed after inspection.
 - `node "$env:LOCALAPPDATA\Temp\monitor-01-e2e.mjs" "C:\Users\sille\Desktop\StreamOverlay\Szronox\.worktrees\monitor-01"` — passed with a local PGlite database, test collect key and stub provider: source created, fixture post collected, run finish queued a report, and worker wrote a succeeded synthesis. The one-off harness was kept in the host temp directory, not the repository; no live Gemini request was made.
 - `git diff --check` — passed.
 
