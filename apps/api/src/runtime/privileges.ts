@@ -49,6 +49,8 @@ const WATCHED_TABLES = [
   'app.monitor_posts',
   'app.monitor_runs',
   'app.monitor_reports',
+  // STREAM-PLAN-01
+  'app.stream_plans',
 ] as const;
 
 interface FactsRow {
@@ -145,6 +147,8 @@ export function apiPrivilegeViolations(facts: RoleFacts): string[] {
     if (!grant.select || !grant.insert || !grant.update) violations.push(`it cannot use ${table}`);
     if (grant.delete) violations.push(`it may DELETE from ${table}`);
   }
+  const plans = facts.privileges['app.stream_plans'];
+  if (!plans.select || !plans.insert || !plans.update) violations.push('it cannot use app.stream_plans');
   return violations;
 }
 
@@ -156,7 +160,7 @@ export function apiPrivilegeViolations(facts: RoleFacts): string[] {
 export function workerPrivilegeViolations(facts: RoleFacts): string[] {
   const violations = baseViolations(facts);
   // STREAM-01: STREAM-02 is what will give the worker any access to stream_topics.
-  for (const table of ['app.user_credentials', 'app.auth_sessions', 'app.live_messages', 'app.access_keys', 'app.stream_topics'] as const) {
+  for (const table of ['app.user_credentials', 'app.auth_sessions', 'app.live_messages', 'app.access_keys', 'app.stream_topics', 'app.stream_plans'] as const) {
     const grant = facts.privileges[table];
     if (grant.select || grant.insert || grant.update || grant.delete) {
       violations.push(`it may access ${table}`);

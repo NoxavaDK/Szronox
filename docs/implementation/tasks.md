@@ -104,3 +104,11 @@ Operator approved MONITOR-01 as proposed in [MONITOR-01-proposal.md](MONITOR-01-
 The review follow-up merged T00 amendment `1e4fcfa` at `23296a2` and fixed the listed findings at `d039769`; current verification and remaining real-world gates: [MONITOR-01-result.md](MONITOR-01-result.md). The branch is pushed for review; no merge into the project base or deployment.
 
 Operator approved on 2026-11-07: merge into `master` (Luna's PR #3 into #2, then #2), and a DEV deployment with migration `0021_monitor.sql`, its grants and one `monitor_collect` key, for a test run. The spare-account logins and the first collector run are done by the operator.
+
+## STREAM-PLAN-02 — switch topics from the stream screen, draft 2026-10-17
+
+Operator request (project thread, 2026-10-17): switch the topic on air from the stream screen, from any computer. Contract in T00 section STREAM-PLAN-02, handoff in [STREAM-PLAN-01-result.md](STREAM-PLAN-01-result.md#stream-plan-02). Same branch and draft PR as STREAM-PLAN-01; StreamControl's side is in its own repository.
+
+## STREAM-PLAN-01 — stream screen per broadcast, draft 2026-10-15
+
+Built on request of the operator (project thread, 2026-10-15) as a draft PR for review; contract in T00 section STREAM-PLAN-01, handoff in [STREAM-PLAN-01-result.md](STREAM-PLAN-01-result.md). Not merged; no DEV migration or deployment. StreamControl's import and the TikTok topic card are in its own repository.

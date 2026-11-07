@@ -20,6 +20,7 @@ import { ReelDetailScreen } from '../screens/ReelDetailScreen.js';
 import { ReelListScreen } from '../screens/ReelListScreen.js';
 import { LiveScreen } from '../screens/LiveScreen.js';
 import { MonitorScreen } from '../screens/MonitorScreen.js';
+import { StreamPlansScreen } from '../screens/StreamPlansScreen.js';
 import { DeletedReelsScreen } from '../screens/DeletedReelsScreen.js';
 import { AiWorkspace } from '../screens/AiWorkspace.js';
 import { MemePicker } from '../screens/MemePicker.js';
@@ -454,11 +455,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
       }); }}
       saveState={c.saveState}
       autoDraftPending={c.autoDraftPending}
-      // D2: the compact ROLKA | STREAM selector. Android Share Target always opens with no
-      // `format` on the draft, which defaults to 'reel' here — the selector itself stays
-      // available regardless.
+      // STREAM-PLAN-01 (operator, 2026-10-15): a broadcast is set up in `Streamy`, not created
+      // as a new item here, so the ROLKA | STREAM selector is no longer offered. A draft that
+      // already carries `format: 'stream'` still saves as before.
       format={form.draft.format ?? 'reel'}
-      onChangeFormat={(format) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, format } }))}
       streamTitle={form.draft.streamTitle ?? ''}
       onChangeStreamTitle={(streamTitle) => c.updateCapture((x) => ({ ...x, draft: { ...x.draft, streamTitle } }))}
     /></>;
@@ -466,6 +466,10 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
 
   if (c.route.name === 'live' && c.user) {
     return <>{notice}<LiveScreen api={api} user={c.user} onBack={c.leaveLive} /></>;
+  }
+
+  if (c.route.name === 'streams' && c.user) {
+    return <>{notice}<StreamPlansScreen api={api} user={c.user} planId={c.route.planId} onOpenPlan={c.openStreams} onBack={c.leaveLive} /></>;
   }
 
   if (c.route.name === 'deleted') {
@@ -869,6 +873,7 @@ export function App({ auth, api, store, queue, attachments }: { auth: BrowserSes
     onOpenDeleted={() => c.setRoute({ name: 'deleted' })}
     onOpenLive={c.openLive}
     onOpenMonitoring={() => setMonitorOpen(true)}
+    onOpenStreams={() => c.openStreams(null)}
     quickActions={{
       openReelId: quickOpenReelId,
       open: quickOpen,

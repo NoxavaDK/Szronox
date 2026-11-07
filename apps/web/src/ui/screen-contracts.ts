@@ -525,6 +525,8 @@ export interface ReelListScreenProps {
   onOpenPlan?: () => void;
   /** STREAM-LIVE-01: the quiet `Na żywo` header link, directly after `Plan`. */
   onOpenLive?: () => void;
+  /** STREAM-PLAN-01: `Streamy`, the per-broadcast stream screens. */
+  onOpenStreams?: () => void;
   /** Quiet account action; shown only when the list occupies the full screen. */
   onSignOut?: () => void;
   /** Rendered as a side pane: the fixed Nowy pomysł button stays within the pane's own column. */
