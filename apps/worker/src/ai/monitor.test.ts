@@ -20,6 +20,7 @@ function response(value = emptyMonitorSynthesis()): GeminiResponse {
 class StubPool {
   calls: Array<{ sql: string; values?: unknown[] }> = [];
   claimed = false;
+  emptyPosts = false;
   finalized = false;
   failed: unknown[] | null = null;
 
@@ -31,6 +32,7 @@ class StubPool {
       return { rows: [], rowCount: 0, command: 'UPDATE', oid: 0, fields: [] } as QueryResult<Row>;
     }
     if (sql.includes('from app.monitor_posts')) {
+      if (this.emptyPosts) return { rows: [], rowCount: 0, command: 'SELECT', oid: 0, fields: [] } as unknown as QueryResult<Row>;
       return { rows: [{ url: sourcePost.url, source_name: 'Konto', group_label: 'Konfederacja', platform: 'x', author: 'Konto', published_at: null, text: sourcePost.text }], rowCount: 1, command: 'SELECT', oid: 0, fields: [] } as unknown as QueryResult<Row>;
     }
     if (sql.includes('set state=$3')) { this.failed = values ?? []; return { rows: [], rowCount: 1, command: 'UPDATE', oid: 0, fields: [] } as QueryResult<Row>; }
@@ -110,6 +112,17 @@ test('worker stub writes a synthesis under the claimed lease token', async () =>
   assert.equal(stub.finalized, true);
   const final = stub.calls.find((call) => call.sql.includes("set state='succeeded'"));
   assert.equal(final?.values?.[2], 'fence-1');
+});
+
+test('a zero-post day succeeds with an empty synthesis without a Gemini key', async () => {
+  const stub = new StubPool();
+  stub.emptyPosts = true;
+  const wrote = await tickMonitor(stub as unknown as Pool, {});
+  assert.equal(wrote, true);
+  assert.equal(stub.finalized, true);
+  assert.equal(stub.failed, null);
+  const final = stub.calls.find((call) => call.sql.includes("set state='succeeded'"));
+  assert.deepEqual(JSON.parse(String(final?.values?.[1])), emptyMonitorSynthesis());
 });
 
 test('retry is queued and expired final attempts are terminal', async () => {

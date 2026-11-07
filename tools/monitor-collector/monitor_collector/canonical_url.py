@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 FB_HOSTS = {"facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com"}
 X_HOSTS = {"x.com", "www.x.com", "mobile.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"}
@@ -31,8 +31,17 @@ def canonical_post_url(value: object, platform: str) -> tuple[str | None, str | 
             kept = [(key, query[key][0]) for key in ("story_fbid", "id") if query.get(key)]
             if not kept:
                 return None, "not_a_post"
-            from urllib.parse import urlencode
             suffix = "?" + urlencode(kept)
+        elif re.fullmatch(r"/photo(?:\.php)?", path, re.I):
+            fbid = query.get("fbid", [""])[0]
+            if not fbid:
+                return None, "not_a_post"
+            suffix = "?" + urlencode([("fbid", fbid)])
+        elif re.fullmatch(r"/watch", path, re.I):
+            video = query.get("v", [""])[0]
+            if not video:
+                return None, "not_a_post"
+            suffix = "?" + urlencode([("v", video)])
         elif not FB_POST_PATH.search(path + "/"):
             return None, "not_a_post"
         return "https://www.facebook.com" + path + suffix, None

@@ -383,7 +383,7 @@ export class MonitorRepository {
     if (query.group !== undefined) { params.push(query.group); where.push(`s.group_label=$${params.length}`); }
     if (query.platform !== undefined) {
       if (query.platform !== 'facebook' && query.platform !== 'x') throw validationError('platform must be facebook or x', { field: 'platform' });
-      params.push(query.platform); where.push(`p.platform=$${params.length}`);
+      params.push(query.platform); where.push(`s.platform=$${params.length}`);
     }
     if (query.sourceId !== undefined) { params.push(validUuid(query.sourceId, 'sourceId')); where.push(`p.source_id=$${params.length}`); }
     if (query.before !== undefined) {

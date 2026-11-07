@@ -7,13 +7,30 @@ from bs4 import BeautifulSoup, Tag
 
 from ..canonical_url import canonical_post_url
 from ..models import Post
-from .common import absolute, is_in_nested_article, is_nested_article, parse_timestamp, visible_label_text
+from .common import absolute, is_in_nested_article, is_nested_article, parse_timestamp
 
 # Keep Facebook-specific selectors here; profile markup changes frequently.
 POST_SELECTORS = ('div[role="article"]', "article")
 TEXT_SELECTORS = ('div[data-ad-preview="message"]', 'div[dir="auto"]')
 AUTHOR_SELECTORS = ("h2 a", "h3 a", "strong a")
-POST_HREF_MARKERS = ("/posts/", "story_fbid=", "permalink.php", "/videos/", "/reel/")
+POST_HREF_MARKERS = ("/posts/", "story_fbid=", "permalink.php", "/videos/", "/reel/", "/photo", "photo.php", "/watch")
+HEADER_SELECTORS = ("header", '[data-testid="story-subtitle"]', '[data-testid="post-header"]', '[data-ad-rendering-role="story_header"]')
+REPOST_HEADER = re.compile(
+    r"\b(?:shared\s+(?:a|this)\s+(?:post|link)|udostępnił(?:a|\(a\))?\s+(?:ten\s+)?post)\b", re.I
+)
+PINNED_HEADER = re.compile(r"\b(?:pinned\s+post|przypięt[yae]\s+post)\b", re.I)
+
+
+def _post_header(article: Tag) -> str:
+    for selector in HEADER_SELECTORS:
+        for header in article.select(selector):
+            if is_in_nested_article(header, article):
+                continue
+            label = header.get("aria-label", "")
+            text = header.get_text(" ", strip=True)
+            if label or text:
+                return f"{label} {text}".casefold()
+    return ""
 
 
 def _post_url(article: Tag, base_url: str) -> str:
@@ -136,16 +153,12 @@ def parse_posts(html: str, base_url: str) -> list[Post]:
         if not url or url in seen:
             continue
         seen.add(url)
-        context = visible_label_text(article)
-        # Prefer explicit accessible labels; the text fallback catches older markup.
-        lead = article.get_text(" ", strip=True)[:240].casefold()
+        header = _post_header(article)
         posts.append(Post(
             url=url, author=_author(article), published_at=_published_at(article), text=_text(article),
             media=_media(article, base_url), engagement=_engagement(article),
-            is_pinned=any(token in context for token in ("pinned", "przypięt", "przypiety")),
-            is_repost=any(token in (context + " " + lead) for token in (
-                "shared a post", "shared a link", "udostępnił", "udostępniła", "udostępnił(a)", "udostępnił post", "udostępni",
-            )),
+            is_pinned=bool(PINNED_HEADER.search(header)),
+            is_repost=bool(REPOST_HEADER.search(header)),
         ))
     return posts
 

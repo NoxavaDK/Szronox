@@ -332,12 +332,16 @@ export async function tickMonitor(
   const run = await claimNextMonitor(pool);
   if (!run) return false;
   try {
+    const posts = await loadPosts(pool, run.report_date);
+    if (posts.length === 0) {
+      await finishMonitorReport(pool, run, emptyMonitorSynthesis());
+      return true;
+    }
     let call = callOverride;
     if (!call) {
       if (!env.GEMINI_API_KEY_FILE) throw new ProviderError('PROVIDER_UNAVAILABLE', false);
       call = await geminiClient(env.GEMINI_API_KEY_FILE);
     }
-    const posts = await loadPosts(pool, run.report_date);
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const synthesis = await Promise.race([
       synthesizeMonitor(posts, run.model, call),

@@ -37,6 +37,18 @@ export function canonicalPostUrl(value: unknown, platform: 'facebook' | 'x'): Ca
       if (story) kept.set('story_fbid', story);
       if (id) kept.set('id', id);
       query = kept.toString();
+    } else if (/^\/photo(?:\.php)?$/i.test(path)) {
+      const fbid = parsed.searchParams.get('fbid');
+      if (!fbid) return { ok: false, reason: 'not_a_post' };
+      const kept = new URLSearchParams();
+      kept.set('fbid', fbid);
+      query = kept.toString();
+    } else if (/^\/watch$/i.test(path)) {
+      const video = parsed.searchParams.get('v');
+      if (!video) return { ok: false, reason: 'not_a_post' };
+      const kept = new URLSearchParams();
+      kept.set('v', video);
+      query = kept.toString();
     } else if (!FACEBOOK_POST_PATH.test(`${path}/`)) {
       return { ok: false, reason: 'not_a_post' };
     }

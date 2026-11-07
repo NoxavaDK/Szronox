@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup, Tag
 
 from ..canonical_url import canonical_post_url
 from ..models import Post
-from .common import absolute, is_in_nested_article, is_nested_article, parse_timestamp, visible_label_text
+from .common import absolute, is_in_nested_article, is_nested_article, parse_timestamp
 
 # Keep X-specific selectors here; markup changes frequently.
 POST_SELECTORS = ('article[data-testid="tweet"]',)
@@ -19,6 +19,9 @@ ENGAGEMENT_SELECTORS = {
     "likes": ('[data-testid="like"]', '[data-testid="unlike"]'),
     "views": ('[data-testid="viewCount"]',),
 }
+SOCIAL_CONTEXT_SELECTOR = '[data-testid="socialContext"]'
+REPOST_CONTEXT = re.compile(r"\b(?:reposted|retweeted|podał(?:a|\(a\))?\s+dalej)\b", re.I)
+PINNED_CONTEXT = re.compile(r"\b(?:pinned|przypięt(?:a|y|e)?|przypięto)\b", re.I)
 
 
 def _post_url(article: Tag, base_url: str) -> str:
@@ -73,17 +76,16 @@ def parse_posts(html: str, base_url: str) -> list[Post]:
         for anchor in article.select('a[href*="/photo/"]'):
             if not is_in_nested_article(anchor, article):
                 media.add(absolute(anchor.get("href", ""), base_url))
-        context = visible_label_text(article)
+        context_node = article.select_one(SOCIAL_CONTEXT_SELECTOR)
+        context = context_node.get_text(" ", strip=True).casefold() if context_node else ""
         posts.append(Post(
             url=url,
             author=author_node.get_text(" ", strip=True) if author_node else "",
             published_at=parse_timestamp(time_node.get("datetime") if time_node else None),
             text=text_node.get_text(" ", strip=True) if text_node else "",
             media=sorted(media)[:20], engagement=_engagement(article),
-            is_pinned=any(token in context for token in ("pinned", "przypięt", "przypiety")),
-            is_repost=any(token in context for token in (
-                "retweeted", "reposted", "podał dalej", "podała dalej", "udostępnił", "udostępniła",
-            )),
+            is_pinned=bool(PINNED_CONTEXT.search(context)),
+            is_repost=bool(REPOST_CONTEXT.search(context)),
         ))
     return posts
 

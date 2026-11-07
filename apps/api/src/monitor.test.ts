@@ -71,6 +71,11 @@ test('canonical URLs follow T00 for Facebook and X', () => {
   const cases: Array<[string, 'facebook' | 'x', string | null]> = [
     ['http://m.facebook.com/jan/posts/123/?__cft__=a&__tn__=b#comments', 'facebook', 'https://www.facebook.com/jan/posts/123'],
     ['https://web.facebook.com/permalink.php?__cft__=a&id=42&story_fbid=99&ref=feed', 'facebook', 'https://www.facebook.com/permalink.php?story_fbid=99&id=42'],
+    ['https://m.facebook.com/photo/?fbid=12345&set=a.456&__cft__=x#photo', 'facebook', 'https://www.facebook.com/photo?fbid=12345'],
+    ['https://www.facebook.com/photo.php?fbid=54321&id=100&set=album', 'facebook', 'https://www.facebook.com/photo.php?fbid=54321'],
+    ['https://web.facebook.com/watch/?v=98765&ref=sharing', 'facebook', 'https://www.facebook.com/watch?v=98765'],
+    ['https://www.facebook.com/photo/?set=a.123', 'facebook', null],
+    ['https://www.facebook.com/watch/?ref=sharing', 'facebook', null],
     ['https://www.facebook.com/story.php?id=42&story_fbid=99&comment_id=2', 'facebook', null],
     ['https://mobile.twitter.com/KONFEDERACJA/status/123/photo/1?ref=timeline#x', 'x', 'https://x.com/KONFEDERACJA/status/123'],
     ['https://twitter.com/user/status/456/analytics', 'x', 'https://x.com/user/status/456'],
@@ -80,6 +85,42 @@ test('canonical URLs follow T00 for Facebook and X', () => {
     const result = canonicalPostUrl(input, platform);
     assert.equal(result.ok ? result.url : null, expected, input);
   }
+});
+
+test('monitor posts list filters by the platform of their source', async () => {
+  const f = await fixture();
+  try {
+    const xSource = await f.app.inject({ method: 'POST', url: '/api/v1/monitor/sources',
+      headers: f.harness.headers(f.session, 'POST'), payload: sourceRequest('https://x.com/source') });
+    const facebookSource = await f.app.inject({ method: 'POST', url: '/api/v1/monitor/sources',
+      headers: f.harness.headers(f.session, 'POST'), payload: { ...sourceRequest('https://facebook.com/source'), platform: 'facebook' } });
+    assert.equal(xSource.statusCode, 201, xSource.body);
+    assert.equal(facebookSource.statusCode, 201, facebookSource.body);
+    const runId = randomUUID();
+    const started = await f.app.inject({ method: 'POST', url: '/api/v1/monitor/collect/runs', headers: f.bearer, payload: { runId } });
+    const addPost = (sourceId: string, post: Record<string, unknown>) => f.app.inject({
+      method: 'POST', url: '/api/v1/monitor/collect/posts', headers: f.bearer,
+      payload: { runId, sourceId, posts: [post] },
+    });
+    assert.equal((await addPost(xSource.json().id, collectedPost({ url: 'https://x.com/source/status/701' }))).statusCode, 200);
+    assert.equal((await addPost(facebookSource.json().id, collectedPost({
+      url: 'https://www.facebook.com/photo/?fbid=702', text: 'Zdjęcie z wydarzenia.',
+    }))).statusCode, 200);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date(started.json().startedAt));
+
+    const xList = await f.app.inject({ method: 'GET', url: `/api/v1/monitor/posts?date=${day}&platform=x`, headers: f.harness.headers(f.session, 'GET') });
+    assert.equal(xList.statusCode, 200, xList.body);
+    assert.equal(xList.json().items.length, 1);
+    assert.equal(xList.json().items[0].platform, 'x');
+    assert.equal(xList.json().items[0].url, 'https://x.com/source/status/701');
+
+    const facebookList = await f.app.inject({ method: 'GET', url: `/api/v1/monitor/posts?date=${day}&platform=facebook`, headers: f.harness.headers(f.session, 'GET') });
+    assert.equal(facebookList.statusCode, 200, facebookList.body);
+    assert.equal(facebookList.json().items.length, 1);
+    assert.equal(facebookList.json().items[0].platform, 'facebook');
+    assert.equal(facebookList.json().items[0].url, 'https://www.facebook.com/photo?fbid=702');
+  } finally { await f.close(); }
 });
 
 test('monitor keys are isolated to collect routes; cookies and Origin are refused', async () => {

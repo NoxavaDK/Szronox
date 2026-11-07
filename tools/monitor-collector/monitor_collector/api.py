@@ -13,6 +13,13 @@ from .config import PROJECT_ROOT
 LOG = logging.getLogger(__name__)
 
 
+class MonitorApiError(RuntimeError):
+    def __init__(self, message: str, *, status_code: int | None = None, retryable: bool) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+
+
 class MonitorApi:
     def __init__(self) -> None:
         base = os.getenv("SZRONOX_URL", "").strip().rstrip("/")
@@ -40,9 +47,12 @@ class MonitorApi:
                 return json.loads(payload.decode("utf-8")) if payload else None
         except urllib.error.HTTPError as exc:
             detail = exc.read(500).decode("utf-8", errors="replace")
-            raise RuntimeError(f"SzroNox API returned HTTP {exc.code}: {detail}") from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise RuntimeError(f"SzroNox API request failed: {exc}") from exc
+            retryable = exc.code == 429 or 500 <= exc.code <= 599
+            raise MonitorApiError(
+                f"SzroNox API returned HTTP {exc.code}: {detail}", status_code=exc.code, retryable=retryable
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            raise MonitorApiError(f"SzroNox API request failed: {exc}", retryable=True) from exc
 
     def get(self, path: str) -> Any:
         return self.request("GET", path)
@@ -86,6 +96,11 @@ class MonitorApi:
                 raise RuntimeError(f"Outbox contains an invalid request at position {index}")
             try:
                 self.post(path, body)
+            except MonitorApiError as exc:
+                if exc.retryable:
+                    self._write_outbox(remaining)
+                    raise
+                LOG.error("Dropping rejected queued API request (%s): %s", path, exc)
             except Exception:
                 self._write_outbox(remaining)
                 raise
@@ -100,6 +115,9 @@ class MonitorApi:
             return None
         try:
             return self.post(path, body)
-        except Exception:
-            self.enqueue(path, body)
+        except MonitorApiError as exc:
+            if exc.retryable:
+                self.enqueue(path, body)
+            else:
+                LOG.error("Dropping rejected API request (%s): %s", path, exc)
             return None
