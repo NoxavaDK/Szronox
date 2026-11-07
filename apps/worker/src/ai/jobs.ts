@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { executeAction, type WorkRun } from './actions.js';
 import { geminiClient, ProviderError } from './provider.js';
 import { SourceError } from './source.js';
+export { assertMonitorWorkerPrivileges, tickMonitor } from './monitor.js';
 
 interface ClaimedRun extends WorkRun { lease_token: string; attempt_count: number; reel_id: string }
 const MAX_ATTEMPTS = 3;

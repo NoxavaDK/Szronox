@@ -96,3 +96,11 @@ The operator approved both task scopes and the exact Luna models in `SOURCE-02-M
 ## STREAM-LIVE-01 — live messages and access keys, operator-approved 2026-10-11
 
 Operator approved one manual implementation on Claude Opus 5.5 in `.worktrees/stream-live-01` (branch `claude/stream-live-01`). Scope, editable files and acceptance: [STREAM-LIVE-01-proposal.md](STREAM-LIVE-01-proposal.md); contract: T00 section STREAM-LIVE-01. Order: pin contracts/migration (operator review) → visual delta `design/live-delta-spec.md` (operator review) → implementation and handoff. Includes the approved device-key exception to VPS-00 and migration 0016 (STREAM-01/02 renumbered to 0017/0018). No merge, DEV migration or deployment authorized.
+
+## MONITOR-01 — Facebook/X monitoring in SzroNox, operator-approved 2026-11-05
+
+Operator approved MONITOR-01 as proposed in [MONITOR-01-proposal.md](MONITOR-01-proposal.md): root pins contracts, T00 section MONITOR-01 and migration `0021_monitor.sql`; Luna (`gpt-6-luna/high`) implements in `.worktrees/monitor-01` (branch `luna/monitor-01`). Step 1 (contracts/migration) approved by the operator 2026-11-05. Step 2 (visual delta `design/monitor-delta-spec.md`) approved by the operator 2026-11-06. Dispatched to Luna per [MONITOR-01-luna-handoff.md](MONITOR-01-luna-handoff.md). No merge, DEV migration or deployment authorized.
+
+The review follow-up merged T00 amendment `1e4fcfa` at `23296a2` and fixed the listed findings at `d039769`; current verification and remaining real-world gates: [MONITOR-01-result.md](MONITOR-01-result.md). The branch is pushed for review; no merge into the project base or deployment.
+
+Operator approved on 2026-11-07: merge into `master` (Luna's PR #3 into #2, then #2), and a DEV deployment with migration `0021_monitor.sql`, its grants and one `monitor_collect` key, for a test run. The spare-account logins and the first collector run are done by the operator.

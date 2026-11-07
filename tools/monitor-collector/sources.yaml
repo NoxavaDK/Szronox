@@ -1,0 +1,22 @@
+# Examples only. Verify each profile URL before relying on it.
+sources:
+  - name: Konfederacja
+    group: Konfederacja
+    platform: facebook
+    profile_url: https://www.facebook.com/Konfederacja
+    status: TODO-verify
+  - name: Konfederacja
+    group: Konfederacja
+    platform: x
+    profile_url: https://x.com/Konfederacja_
+    status: TODO-verify
+  - name: Konfederacja Korony Polskiej
+    group: KKP/Braun
+    platform: facebook
+    profile_url: https://www.facebook.com/KonfederacjaKoronyPolskiej
+    status: TODO-verify
+  - name: Grzegorz Braun
+    group: KKP/Braun
+    platform: x
+    profile_url: https://x.com/GrzegorzBraun_
+    status: TODO-verify

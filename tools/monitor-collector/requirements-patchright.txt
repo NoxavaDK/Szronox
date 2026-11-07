@@ -1,0 +1,2 @@
+# Install after requirements.txt only when BROWSER_ENGINE=patchright is selected.
+patchright>=1.50,<2
