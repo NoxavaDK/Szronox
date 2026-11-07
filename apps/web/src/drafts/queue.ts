@@ -7,12 +7,21 @@ export class SyncQueue {
   private running = false;
   constructor(private readonly store: DraftStore, private readonly api: CoreApiClient, private readonly account: () => string | null) {}
   async flush() {
-    if (this.running || !navigator.onLine) return;
+    // `navigator.onLine` is not consulted. Android can report false while requests
+    // still succeed (roaming, data saver), which held every save on the device while
+    // the rest of the app loaded normally. A real outage surfaces as a network error
+    // below and keeps the item pending, which is the same outcome.
+    if (this.running) return;
     const accountId = this.account(); if (!accountId) return;
     this.running = true;
     try {
+      // Operations on one Reel stay in order, so a stuck operation holds back only the
+      // later operations on the same Reel. It used to stop the whole queue, which left
+      // every new capture pending behind one old conflict.
+      const held = new Set<string>();
       for (const item of await this.store.queue(accountId)) {
-        if (this.account() !== accountId || item.state === 'conflict') break;
+        if (this.account() !== accountId) break;
+        if (held.has(item.reelId) || item.state === 'conflict') { held.add(item.reelId); continue; }
         const running = { ...item, state: 'running' as const }; await this.store.updateQueue(running);
         try {
           await this.execute(running);
@@ -26,9 +35,11 @@ export class SyncQueue {
           if (item.kind === 'patch') await this.store.deleteReel(accountId, item.reelId);
         } catch (error) {
           if (error instanceof ClientApiError && error.status === 401) { await this.store.updateQueue({ ...item, state: 'pending', error: error.api.code }); break; }
-          if (error instanceof ClientApiError && error.status === 409) { await this.store.updateQueue({ ...item, state: 'conflict', error: error.api.code }); break; }
-          await this.store.updateQueue({ ...item, state: 'failed', error: error instanceof Error ? error.message : 'NETWORK_ERROR' });
-          break;
+          if (error instanceof ClientApiError && error.status === 409) { await this.store.updateQueue({ ...item, state: 'conflict', error: error.api.code }); held.add(item.reelId); continue; }
+          // No response at all: the server is unreachable for every item, so stop and retry later.
+          if (!(error instanceof ClientApiError)) { await this.store.updateQueue({ ...item, state: 'pending', error: 'NETWORK_ERROR' }); break; }
+          await this.store.updateQueue({ ...item, state: 'failed', error: error.message });
+          held.add(item.reelId);
         }
       }
     } finally { this.running = false; }
