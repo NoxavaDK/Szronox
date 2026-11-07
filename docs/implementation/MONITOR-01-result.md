@@ -5,7 +5,7 @@ Branch: `luna/monitor-01`
 Base: `origin/claude/project-thread-5g65na` at `44e650bac7aeedc15d0e2940833578ba871c0202`
 
 Implementation commit: `ac92745`
-No merge, deployment, DEV migration, social-account login or live Gemini request was performed.
+No merge of this feature branch into the project base, deployment, DEV migration, social-account login or live Gemini request was performed.
 
 ## Delivered
 
@@ -38,3 +38,25 @@ The all-at-once API suite command, `node --test --test-force-exit --test-reporte
 - Generate and inspect a live Gemini report.
 
 Those steps were intentionally not performed under this handoff. Branch remains unmerged and undeployed.
+
+## Review follow-up — 2026-11-07
+
+Merged the requested `origin/claude/project-thread-5g65na` update carrying T00 amendment `1e4fcfa` into `luna/monitor-01` at merge commit `23296a2`. Follow-up code commit: `d039769`.
+
+- Both API and collector canonicalizers retain `fbid` on `/photo/` and `/photo.php`, and `v` on `/watch/`; values are required so photo/video URLs remain distinct. Table-driven cases cover the new paths and missing identifiers.
+- `listPosts` filters by the joined source's `s.platform`; the API test exercises both `platform=x` and `platform=facebook`.
+- Facebook repost/pin flags now read only the designated post-header selectors. X flags read only `[data-testid="socialContext"]`. New saved fixtures cover an ordinary Facebook post with the `Udostępnij` action, a Facebook share, a pinned Facebook post, and English/Polish X repost and pin labels.
+- Collector API failures are queued only for network failures, 5xx and 429. Other 4xx responses are logged and dropped; outbox replay drops a rejected entry and continues, while retaining entries on retryable failures.
+- A zero-post day completes as `succeeded` with `emptyMonitorSynthesis()` before provider/key initialization.
+
+Follow-up verification:
+
+- `npm run typecheck` — passed.
+- `npm run build` — passed.
+- `node --test apps/api/dist/monitor.test.js` — 6/6 passed.
+- `node --test apps/worker/dist/ai/monitor.test.js` — 5/5 passed, including empty day with no Gemini key.
+- From `tools/monitor-collector/`, `C:\Users\sille\Desktop\StreamOverlay\filmiki-monitor\.venv\Scripts\python.exe -m pytest` — 14/14 passed.
+- `node "C:\Users\sille\AppData\Local\Temp\monitor-01-e2e.mjs" "C:\Users\sille\Desktop\StreamOverlay\Szronox\.worktrees\monitor-01"` — passed; local PGlite report succeeded and the stub synthesis contained `Ceny energii`.
+- `git diff --check` — passed.
+
+The broad API suite was not rerun for this targeted follow-up. The earlier 283/318 result and its documented baseline/Windows-host failures remain recorded above.
