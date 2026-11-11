@@ -6,7 +6,11 @@ import type { MonitorFactLabel, MonitorSynthesis } from '@szronox/contracts';
 import { candidateText, geminiClient, ProviderError, type GeminiResponse } from './provider.js';
 
 const MAX_ATTEMPTS = 5;
-const BATCH_SIZE = 35;
+const BATCH_SIZE = 15;
+/** One structured monitor call can take well over the 45 s used for short Reel tasks. */
+const CALL_TIMEOUT_MS = 150_000;
+/** Whole report (batches + merge); stays inside the 15-minute lease below. */
+const REPORT_DEADLINE_MS = 13 * 60_000;
 const PROMPT_ID = 'monitor-provisional-v1';
 
 export interface MonitorPostInput {
@@ -95,7 +99,7 @@ export async function claimNextMonitor(pool: Pool): Promise<ClaimedReport | null
         for update skip locked limit 1
      )
      update app.monitor_reports r set state='running',lease_token=$2,
-       lease_expires_at=now()+interval '5 minutes',attempt_count=attempt_count+1
+       lease_expires_at=now()+interval '15 minutes',attempt_count=attempt_count+1
        from chosen where r.id=chosen.id
      returning r.id,to_char(r.report_date,'YYYY-MM-DD') as report_date,r.model,r.prompt_id,r.lease_token,r.attempt_count`,
     [MAX_ATTEMPTS, token],
@@ -297,13 +301,17 @@ async function failReport(pool: Pool, run: ClaimedReport, error: unknown): Promi
   const retryable = known ? error.retryable : true;
   const retry = retryable && run.attempt_count < MAX_ATTEMPTS;
   const backoff = Math.min(60, 5 * (2 ** (run.attempt_count - 1)));
+  const detail = known && error.detail ? error.detail : undefined;
+  // One line per failure: report date, attempt, code and cause category only (no post text, no key).
+  console.warn(JSON.stringify({ event: 'monitor_report_failed', reportDate: run.report_date, attempt: run.attempt_count,
+    code, detail: detail ?? null, retry }));
   await pool.query(
     `update app.monitor_reports set state=$3,lease_token=null,lease_expires_at=null,
        next_attempt_at=now()+($4::int * interval '1 second'),
        error=$5::jsonb,completed_at=case when $3='failed' then now() else null end
       where id=$1 and state='running' and lease_token=$2 and lease_expires_at>clock_timestamp()`,
     [run.id, run.lease_token, retry ? 'queued' : 'failed', backoff,
-      JSON.stringify({ code, message: code, retryable: retry })],
+      JSON.stringify({ code, message: detail ? `${code} (${detail})` : code, retryable: retry })],
   );
 }
 
@@ -340,13 +348,13 @@ export async function tickMonitor(
     let call = callOverride;
     if (!call) {
       if (!env.GEMINI_API_KEY_FILE) throw new ProviderError('PROVIDER_UNAVAILABLE', false);
-      call = await geminiClient(env.GEMINI_API_KEY_FILE);
+      call = await geminiClient(env.GEMINI_API_KEY_FILE, fetch, CALL_TIMEOUT_MS);
     }
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const synthesis = await Promise.race([
       synthesizeMonitor(posts, run.model, call),
       new Promise<never>((_resolve, reject) => {
-        deadline = setTimeout(() => reject(new ProviderError('PROVIDER_UNAVAILABLE', true)), 240_000);
+        deadline = setTimeout(() => reject(new ProviderError('PROVIDER_UNAVAILABLE', true, 'report_deadline')), REPORT_DEADLINE_MS);
       }),
     ]).finally(() => { if (deadline) clearTimeout(deadline); });
     await finishMonitorReport(pool, run, synthesis);

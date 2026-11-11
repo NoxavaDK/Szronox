@@ -88,11 +88,11 @@ test('synthesis drops unknown URLs and keeps only exact whitespace-normalized qu
   assert.deepEqual(result.notableQuotes, [{ quote: 'To  jest\ncytat z posta.', postUrl: sourcePost.url, label: 'opinion' }]);
 });
 
-test('provider stub receives batches of at most 35 and one lowercase-schema merge', async () => {
+test('provider stub receives batches of at most 15 and one lowercase-schema merge', async () => {
   const posts = Array.from({ length: 70 }, (_, index) => ({ ...sourcePost, url: `https://x.com/konto/status/${index + 1}` }));
   const seen: Record<string, unknown>[] = [];
   const result = await synthesizeMonitor(posts, 'stub-model', async (_model, request) => { seen.push(request); return response(); });
-  assert.equal(seen.length, 3);
+  assert.equal(seen.length, 6); // 70 posts → five batches of ≤ 15, then one merge
   for (const call of seen) {
     const schema = call.generationConfig as { responseJsonSchema: { type: string; properties: Record<string, { type: string }> } };
     assert.equal(schema.responseJsonSchema.type, 'object');
@@ -139,4 +139,21 @@ test('retry is queued and expired final attempts are terminal', async () => {
   const expiry = expired.calls.find((call) => call.sql.includes("set state='failed'"));
   assert.match(expiry?.sql ?? '', /lease_expires_at<now\(\) and attempt_count >= \$2/);
   assert.equal(expiry?.values?.[1], 5);
+});
+
+test('provider errors carry a cause category: per-call timeout and HTTP status', async () => {
+  const { geminiClient, ProviderError } = await import('./provider.js');
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'monitor-key-'));
+  const keyFile = join(dir, 'key');
+  await writeFile(keyFile, 'test-key');
+  const hanging = (async (_url: unknown, init?: { signal?: AbortSignal }) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+  })) as unknown as typeof fetch;
+  const slow = await geminiClient(keyFile, hanging, 20);
+  await assert.rejects(slow('m', {}), (error: unknown) => error instanceof ProviderError && error.retryable && error.detail === 'timeout');
+  const limited = await geminiClient(keyFile, (async () => new Response('{}', { status: 429 })) as unknown as typeof fetch);
+  await assert.rejects(limited('m', {}), (error: unknown) => error instanceof ProviderError && error.code === 'PROVIDER_UNAVAILABLE' && error.detail === 'http_429');
 });
