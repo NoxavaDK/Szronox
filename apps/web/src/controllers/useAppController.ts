@@ -652,7 +652,9 @@ export function useAppController(auth: BrowserSession, api: CoreApiClient, store
       await queue.flush(); const remaining = await store.queue(user.id); const item = remaining.find((x) => x.id === capture.draft.operationId);
       if (item) {
         setSaveState(item.state === 'conflict' ? 'conflict' : item.state === 'failed' ? 'error' : 'offline');
-        setMessage(item.state === 'pending' || item.state === 'running'
+        setMessage(item.state === 'pending' && item.error === 'UNAUTHENTICATED'
+          ? 'Sesja wygasła. Zaloguj się ponownie, a rolka zostanie wysłana. Dane pozostają na tym urządzeniu.'
+          : item.state === 'pending' || item.state === 'running'
           ? 'Zapis rolki oczekuje na połączenie z serwerem. Rolka nie została jeszcze utworzona.'
           : item.state === 'conflict' ? 'Nie udało się utworzyć rolki z powodu konfliktu. Dane pozostają na tym urządzeniu.'
             : 'Nie udało się utworzyć rolki. Dane pozostają na tym urządzeniu.');
